@@ -1,4 +1,5 @@
 -- backend\init.sql
+
 CREATE TABLE IF NOT EXISTS invitees (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,

@@ -1,10 +1,14 @@
 # backend/app.py
-from flask import Flask, render_template, request, redirect, url_for, abort, Response
+
+from flask import Flask, render_template, request, redirect, url_for, abort, Response, flash
 import pymysql
 import os
+import uuid
 from functools import wraps
 
 app = Flask(__name__)
+# Necessário para usar flash()
+app.secret_key = os.getenv('SECRET_KEY', 'insira_uma_chave_secreta_aqui')
 
 def get_connection():
     return pymysql.connect(
@@ -69,12 +73,47 @@ def respostas():
     conn = get_connection()
     with conn.cursor() as cursor:
         cursor.execute("""
-            SELECT name, email, phone, response, response_date, token
+            SELECT id, name, email, phone, response, response_date, token
             FROM invitees
             ORDER BY response_date IS NULL, response_date DESC
         """)
         convidados = cursor.fetchall()
     return render_template('admin_responses.html', convidados=convidados)
+
+@app.route("/admin/convidados/add", methods=['POST'])
+@requires_auth
+def add_convidado():
+    name  = request.form.get('name')
+    email = request.form.get('email')
+    phone = request.form.get('phone')
+    msg   = request.form.get('custom_message') or None
+
+    if not name or not email:
+        flash("Nome e e-mail são obrigatórios.", "danger")
+        return redirect(url_for('respostas'))
+
+    token = uuid.uuid4().hex
+    conn = get_connection()
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO invitees (name, email, phone, token, custom_message) VALUES (%s, %s, %s, %s, %s)",
+            (name, email, phone, token, msg)
+        )
+        conn.commit()
+
+    flash(f"Convidado “{name}” adicionado com sucesso!", "success")
+    return redirect(url_for('respostas'))
+
+@app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
+@requires_auth
+def delete_convidado(id):
+    conn = get_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("DELETE FROM invitees WHERE id = %s", (id,))
+        conn.commit()
+
+    flash("Convidado excluído com sucesso.", "warning")
+    return redirect(url_for('respostas'))
 
 if __name__ == "__main__":
     # Para rodar localmente: python app.py
