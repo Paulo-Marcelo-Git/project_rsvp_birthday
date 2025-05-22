@@ -1,0 +1,24 @@
+# mybookstore\.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Env
+.env
+
+# IDEs
+.vscode/
+.idea/
+start.sh
+
+# Logs
+*.log
+.venv
+htmlcov/
+
+# Volumes
+db_data/

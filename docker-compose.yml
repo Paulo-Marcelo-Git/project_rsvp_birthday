@@ -1,0 +1,38 @@
+#docker-compose.yml
+services:
+  db:
+    image: mysql:8
+    container_name: rsvp_mysql
+    restart: always
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: rsvp_backend
+    restart: always
+    env_file: .env
+    ports:
+      - "5000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    working_dir: /app
+    command: flask run --host=0.0.0.0 --port=8000
+
+volumes:
+  db_data:

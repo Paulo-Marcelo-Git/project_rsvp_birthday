@@ -1,0 +1,32 @@
+<!--backend\templates\invite.html-->
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Convite - Aniversário do Antony</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #e3f2fd; padding: 20px; }
+    .invite-container { background: #fff; padding: 20px; border-radius: 10px; display: inline-block; box-shadow: 0 0 10px #ccc; }
+    .antonio-photo { width: 100%; max-width: 300px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); margin-bottom: 20px; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
+    .btn-confirm { background: #2196f3; color: white; }
+    .btn-decline { background: #e53935; color: white; }
+  </style>
+</head>
+<body>
+  <div class="invite-container">
+    <img src="{{ url_for('static', filename='antonio.jpg') }}" alt="Aniversariante sorrindo" class="antonio-photo" />
+    <h2>Você confirma a sua presença no aniversário do Antony?</h2>
+
+    {% if invitee.response %}
+      <p><strong>Resposta registrada:</strong> {{ 'Sim' if invitee.response == 'yes' else 'Não' }}</p>
+    {% else %}
+      <form method="post">
+        <button type="submit" name="response" value="yes" class="btn-confirm">Sim</button>
+        <button type="submit" name="response" value="no" class="btn-decline">Não</button>
+      </form>
+    {% endif %}
+  </div>
+</body>
+</html>
