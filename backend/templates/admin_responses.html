@@ -1,4 +1,4 @@
-<!-- backend\templates\admin_responses.html -->
+<!-- backend/templates/admin_responses.html -->
  
 {% extends "base.html" %}
 
@@ -32,7 +32,7 @@
       {% for row in convidados %}
       <tr>
         <td>{{ row.name }}</td>
-        <td>{{ row.email }}</td>
+        <td>{{ row.email or '-' }}</td>
         <td>{{ row.phone }}</td>
         <td>
           {% if row.response=='yes' %}
@@ -81,8 +81,8 @@
           <input name="name" class="form-control" required>
         </div>
         <div class="mb-3">
-          <label class="form-label">Email *</label>
-          <input name="email" type="email" class="form-control" required>
+          <label class="form-label">Email</label>
+          <input name="email" type="email" class="form-control">
         </div>
         <div class="mb-3">
           <label class="form-label">Telefone</label>

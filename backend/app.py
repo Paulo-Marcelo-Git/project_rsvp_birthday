@@ -5,6 +5,7 @@ import pymysql
 import os
 import uuid
 from functools import wraps
+from datetime import timedelta  # adicionada esta importação
 
 app = Flask(__name__)
 # Necessário para usar flash()
@@ -78,18 +79,24 @@ def respostas():
             ORDER BY response_date IS NULL, response_date DESC
         """)
         convidados = cursor.fetchall()
+
+    # Ajuste de fuso: subtrai 3 horas de cada response_date
+    for row in convidados:
+        if row['response_date']:
+            row['response_date'] = row['response_date'] - timedelta(hours=3)
+
     return render_template('admin_responses.html', convidados=convidados)
 
 @app.route("/admin/convidados/add", methods=['POST'])
 @requires_auth
 def add_convidado():
     name  = request.form.get('name')
-    email = request.form.get('email')
+    email = request.form.get('email') or None
     phone = request.form.get('phone')
     msg   = request.form.get('custom_message') or None
 
-    if not name or not email:
-        flash("Nome e e-mail são obrigatórios.", "danger")
+    if not name:
+        flash("Nome é obrigatório.", "danger")
         return redirect(url_for('respostas'))
 
     token = uuid.uuid4().hex
