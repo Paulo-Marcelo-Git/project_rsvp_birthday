@@ -1,10 +1,10 @@
-<!--backend\templates\invite.html-->
+<!-- backend/templates/invite.html -->
 
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Convite - Aniversário do Antony</title>
+  <title>Convite</title>
   <style>
     body { font-family: sans-serif; text-align: center; background: #e3f2fd; padding: 20px; }
     .invite-container { background: #fff; padding: 20px; border-radius: 10px; display: inline-block; box-shadow: 0 0 10px #ccc; }
@@ -17,14 +17,18 @@
 <body>
   <div class="invite-container">
     <img src="{{ url_for('static', filename='antonio.jpg') }}" alt="Aniversariante sorrindo" class="antonio-photo" />
-    <h2>Você confirma a sua presença no aniversário do Antony?</h2>
+
+    <h2>{{ question_text }}</h2>
 
     {% if invitee.response %}
-      <p><strong>Resposta registrada:</strong> {{ 'Sim' if invitee.response == 'yes' else 'Não' }}</p>
+      <p>
+        {{ post_yes_text if invitee.response=='yes'
+           else post_no_text }}
+      </p>
     {% else %}
       <form method="post">
-        <button type="submit" name="response" value="yes" class="btn-confirm">Sim</button>
-        <button type="submit" name="response" value="no" class="btn-decline">Não</button>
+        <button type="submit" name="response" value="yes" class="btn-confirm">{{ yes_text }}</button>
+        <button type="submit" name="response" value="no" class="btn-decline">{{ no_text }}</button>
       </form>
     {% endif %}
   </div>
