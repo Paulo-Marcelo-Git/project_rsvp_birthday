@@ -1,3 +1,5 @@
+/* backend\static\admin.css */
+
 body { background: #f8f9fa; }
 .table thead { background: #343a40; color: #fff; }
 .table tbody tr:nth-child(odd) { background: #ffffff; }
