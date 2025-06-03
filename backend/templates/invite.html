@@ -1,17 +1,58 @@
-<!-- backend/templates/invite.html -->
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
   <title>Convite</title>
   <style>
-    body { font-family: sans-serif; text-align: center; background: #e3f2fd; padding: 20px; }
-    .invite-container { background: #fff; padding: 20px; border-radius: 10px; display: inline-block; box-shadow: 0 0 10px #ccc; }
-    .antonio-photo { width: 100%; max-width: 300px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); margin-bottom: 20px; }
-    button { padding: 10px 20px; font-size: 16px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
-    .btn-confirm { background: #2196f3; color: white; }
-    .btn-decline { background: #e53935; color: white; }
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: #e3f2fd;
+      padding: 20px;
+    }
+    .invite-container {
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      display: inline-block;
+      box-shadow: 0 0 10px #ccc;
+      position: relative;
+    }
+    .antonio-photo {
+      width: 100%;
+      max-width: 300px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-confirm {
+      background: #2196f3;
+      color: white;
+    }
+    .btn-decline {
+      background: #e53935;
+      color: white;
+    }
+    .admin-link {
+      position: absolute;
+      bottom: 10px;
+      right: 15px;
+      font-size: 0.75em;
+      color: #aaa;
+      text-decoration: none;
+    }
+    .admin-link:hover {
+      color: #555;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
@@ -31,6 +72,9 @@
         <button type="submit" name="response" value="no" class="btn-decline">{{ no_text }}</button>
       </form>
     {% endif %}
+
+    <!-- Link discreto para admin -->
+    <a href="{{ url_for('login') }}" class="admin-link">Área Administrativa</a>
   </div>
 </body>
 </html>

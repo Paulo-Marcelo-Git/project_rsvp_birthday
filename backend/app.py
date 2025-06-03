@@ -1,15 +1,55 @@
 # backend\app.py
 
 from flask import Flask, render_template, request, redirect, url_for, abort, Response, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 import pymysql
 import os
 import uuid
-from functools import wraps
 from datetime import timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'insira_uma_chave_secreta_aqui')
 
+# ---- LOGIN SETUP ----
+login_manager = LoginManager()
+login_manager.login_view = 'login'
+login_manager.init_app(app)
+
+class AdminUser(UserMixin):
+    id = "admin"
+    def check_password(self, password):
+        return password == os.getenv("ADMIN_PASS")
+
+@login_manager.user_loader
+def load_user(user_id):
+    if user_id == "admin":
+        return AdminUser()
+    return None
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        if username == os.getenv("ADMIN_USER") and password == os.getenv("ADMIN_PASS"):
+            user = AdminUser()
+            login_user(user)
+            flash("Login realizado com sucesso.", "success")
+            return redirect(url_for("respostas"))
+        flash("Usuário ou senha inválidos.", "danger")
+    return render_template("login.html")
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("Sessão encerrada.", "info")
+    return redirect(url_for("login"))
+
+# ---- CONEXÃO DB ----
 def get_connection():
     return pymysql.connect(
         host=os.getenv('DB_HOST','localhost'),
@@ -21,6 +61,7 @@ def get_connection():
         init_command='SET NAMES utf8mb4'
     )
 
+# ---- ROTA DO CONVITE ----
 @app.route('/invite/<token>', methods=['GET','POST'])
 def invite(token):
     conn = get_connection()
@@ -58,26 +99,9 @@ def invite(token):
         post_no_text  = texts.get('post_no_text')
     )
 
-# -----------------------------
-# 🔐 Rotas protegidas de admin
-# -----------------------------
-def check_auth(username,password):
-    return username==os.getenv("ADMIN_USER") and password==os.getenv("ADMIN_PASS")
-
-def authenticate():
-    return Response("Acesso restrito.\n",401,{"WWW-Authenticate": 'Basic realm="Login Required"'})
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args,**kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username,auth.password):
-            return authenticate()
-        return f(*args,**kwargs)
-    return decorated
-
+# ---- ROTAS DE ADMIN ----
 @app.route("/admin/respostas")
-@requires_auth
+@login_required
 def respostas():
     conn = get_connection()
     with conn.cursor() as cursor:
@@ -88,7 +112,6 @@ def respostas():
         """)
         convidados = cursor.fetchall()
 
-        # ajuste de fuso
         for row in convidados:
             if row['response_date']:
                 row['response_date'] -= timedelta(hours=3)
@@ -106,7 +129,7 @@ def respostas():
     )
 
 @app.route("/admin/convidados/add", methods=['POST'])
-@requires_auth
+@login_required
 def add_convidado():
     name  = request.form.get('name')
     email = request.form.get('email') or None
@@ -130,7 +153,7 @@ def add_convidado():
     return redirect(url_for('respostas'))
 
 @app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
-@requires_auth
+@login_required
 def delete_convidado(id):
     conn = get_connection()
     with conn.cursor() as cursor:
@@ -140,7 +163,7 @@ def delete_convidado(id):
     return redirect(url_for('respostas'))
 
 @app.route("/admin/textos", methods=['POST'])
-@requires_auth
+@login_required
 def update_textos():
     q  = request.form.get('question_text') or ""
     y  = request.form.get('yes_text') or ""
@@ -150,10 +173,10 @@ def update_textos():
     conn = get_connection()
     with conn.cursor() as cursor:
         cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('question_text',%s)", (q,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('yes_text',%s)"     , (y,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('no_text',%s)"      , (n,))
+        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('yes_text',%s)", (y,))
+        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('no_text',%s)", (n,))
         cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('post_yes_text',%s)", (py,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('post_no_text',%s)" , (pn,))
+        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('post_no_text',%s)", (pn,))
     conn.commit()
     flash("Textos atualizados com sucesso!", "success")
     return redirect(url_for('respostas'))
