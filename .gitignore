@@ -22,3 +22,6 @@ htmlcov/
 
 # Volumes
 db_data/
+
+# Testes
+populate.py
