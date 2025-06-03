@@ -2,18 +2,19 @@
 
 {% extends "base.html" %}
 
-{% block title %}Status das Respostas{% endblock %}
+{% block title %}Comemore+ - Admin{% endblock %}
 
 {% block content %}
-<!-- Saudação e logout -->
-<div class="container py-3 d-flex justify-content-between align-items-center">
-  <div>
-    <strong>Olá, {{ current_user.id }}</strong>
+<!-- Cabeçalho com nome da plataforma -->
+<div class="container py-3 d-flex justify-content-between align-items-center border-bottom mb-4">
+  <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+</h3>
+  <div class="d-flex align-items-center gap-3">
+    <span class="text-muted small">Olá, {{ current_user.id }}</span>
+    <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>
   </div>
-  <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>
 </div>
 
-<div class="container py-5">
+<div class="container py-3">
   <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>Status das Respostas</h2>
     <div>
