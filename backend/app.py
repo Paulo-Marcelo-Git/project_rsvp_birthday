@@ -50,7 +50,6 @@ def logout():
     flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
 
-# ---- CONEXÃO DB ----
 def get_connection():
     return pymysql.connect(
         host=os.getenv('DB_HOST','localhost'),
@@ -62,7 +61,6 @@ def get_connection():
         init_command='SET NAMES utf8mb4'
     )
 
-# ---- ROTA DO CONVITE ----
 @app.route('/invite/<token>', methods=['GET','POST'])
 def invite(token):
     conn = get_connection()
@@ -100,7 +98,6 @@ def invite(token):
         post_no_text  = texts.get('post_no_text')
     )
 
-# ---- ROTAS DE ADMIN ----
 @app.route("/admin/respostas")
 @login_required
 def respostas():
@@ -123,7 +120,6 @@ def respostas():
         )
         texts = {r['key']: r['value'] for r in cursor.fetchall()}
 
-    # Adiciona o link do WhatsApp a cada convidado
     for row in convidados:
         if row['phone']:
             phone_clean = (
@@ -138,10 +134,17 @@ def respostas():
         else:
             row['whatsapp_url'] = None
 
+    total_sim = sum(1 for c in convidados if c['response'] == 'yes')
+    total_nao = sum(1 for c in convidados if c['response'] == 'no')
+    total_aguardando = sum(1 for c in convidados if c['response'] is None)
+
     return render_template(
         'admin_responses.html',
         convidados=convidados,
-        texts=texts
+        texts=texts,
+        total_sim=total_sim,
+        total_nao=total_nao,
+        total_aguardando=total_aguardando
     )
 
 @app.route("/admin/convidados/add", methods=['POST'])
