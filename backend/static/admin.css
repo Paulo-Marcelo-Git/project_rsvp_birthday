@@ -4,7 +4,7 @@
 
 body {
   font-family: 'Inter', sans-serif;
-  background-color: #f4f6f9;
+  background: linear-gradient(to right, #fce4ec, #e3f2fd); /* gradiente rosa e azul claro */
 }
 
 h2 {

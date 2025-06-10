@@ -7,6 +7,7 @@ import os
 import uuid
 from datetime import timedelta
 from dotenv import load_dotenv
+from urllib.parse import quote_plus
 
 load_dotenv()
 
@@ -121,6 +122,21 @@ def respostas():
             "('question_text','yes_text','no_text','post_yes_text','post_no_text')"
         )
         texts = {r['key']: r['value'] for r in cursor.fetchall()}
+
+    # Adiciona o link do WhatsApp a cada convidado
+    for row in convidados:
+        if row['phone']:
+            phone_clean = (
+                row['phone'].replace("(", "")
+                            .replace(")", "")
+                            .replace("-", "")
+                            .replace(" ", "")
+            )
+            invite_url = url_for('invite', token=row['token'], _external=True)
+            message = f"{texts.get('question_text', '')} {invite_url}"
+            row['whatsapp_url'] = f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
+        else:
+            row['whatsapp_url'] = None
 
     return render_template(
         'admin_responses.html',

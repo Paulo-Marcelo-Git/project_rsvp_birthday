@@ -1,11 +1,10 @@
-<!-- backend/templates/admin_responses.html -->
+<!-- backend\templates\admin_responses.html -->
 
 {% extends "base.html" %}
 
 {% block title %}Comemore+ - Admin{% endblock %}
 
 {% block content %}
-<!-- Cabeçalho com nome da plataforma -->
 <div class="container py-3 d-flex justify-content-between align-items-center border-bottom mb-4">
   <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+</h3>
   <div class="d-flex align-items-center gap-3">
@@ -37,6 +36,7 @@
         <th>Data/Hora</th>
         <th>Ver Convite</th>
         <th>URL do Convite</th>
+        <th>WhatsApp</th>
         <th>Excluir</th>
       </tr>
     </thead>
@@ -47,9 +47,9 @@
         <td>{{ row.email or '-' }}</td>
         <td>{{ row.phone }}</td>
         <td>
-          {% if row.response=='yes' %}
+          {% if row.response == 'yes' %}
             <span class="badge bg-success">Sim</span>
-          {% elif row.response=='no' %}
+          {% elif row.response == 'no' %}
             <span class="badge bg-danger">Não</span>
           {% else %}
             <span class="text-muted">Aguardando</span>
@@ -66,6 +66,15 @@
           <a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">
             {{ url_for('invite', token=row.token, _external=True) }}
           </a>
+        </td>
+        <td>
+          {% if row.whatsapp_url %}
+            <a href="{{ row.whatsapp_url }}" target="_blank" class="btn btn-sm btn-success">
+              Enviar WhatsApp
+            </a>
+          {% else %}
+            <span class="text-muted">Sem número</span>
+          {% endif %}
         </td>
         <td>
           <form action="{{ url_for('delete_convidado', id=row.id) }}" method="post"
