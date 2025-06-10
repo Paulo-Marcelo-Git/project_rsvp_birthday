@@ -14,16 +14,18 @@
 </div>
 
 <div class="container py-3">
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Status das Respostas</h2>
-    <div>
-      <button class="btn btn-secondary me-2" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
+
+  <!-- Título + Botões responsivo -->
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+    <h2 class="mb-0">Status das Respostas</h2>
+    <div class="d-flex gap-2">
+      <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
       <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd">+ Convidado</button>
     </div>
   </div>
 
   <!-- Contadores -->
-  <div class="mb-4 d-flex gap-3">
+  <div class="mb-4 d-flex flex-wrap gap-2">
     <div class="badge bg-success">✅ Confirmados: {{ total_sim }}</div>
     <div class="badge bg-danger">❌ Recusaram: {{ total_nao }}</div>
     <div class="badge bg-secondary">⏳ Aguardando: {{ total_aguardando }}</div>
