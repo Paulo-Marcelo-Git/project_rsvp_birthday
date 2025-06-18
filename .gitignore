@@ -19,6 +19,7 @@ start.sh
 *.log
 .venv
 htmlcov/
+logs
 
 # Volumes
 db_data/
