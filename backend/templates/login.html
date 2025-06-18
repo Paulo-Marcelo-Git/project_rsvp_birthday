@@ -1,4 +1,4 @@
-<!-- backend\templates\login.html -->
+<!-- backend/templates/login.html -->
 
 {% extends "base.html" %}
 {% block title %}Comemore+ - Login{% endblock %}
@@ -6,7 +6,7 @@
 {% block content %}
 <style>
   body {
-    background: linear-gradient(to right, #fce4ec, #e3f2fd); /* rosa claro e azul claro */
+    background: linear-gradient(to right, #fce4ec, #e3f2fd);
   }
   .login-header {
     font-weight: 700;
@@ -33,10 +33,14 @@
   .btn-login:hover {
     background: #1565c0;
   }
+  .footer-version {
+    margin-top: 20px;
+    font-size: 0.9rem;
+    color: #666;
+  }
 </style>
 
 <div class="container d-flex flex-column align-items-center justify-content-center" style="min-height: 90vh;">
-  <!-- Nome do sistema -->
   <h1 class="login-header">Comemore+</h1>
 
   <div class="login-box">
@@ -55,6 +59,10 @@
         <button type="submit" class="btn btn-login">Entrar</button>
       </div>
     </form>
+  </div>
+
+  <div class="footer-version text-center">
+    {{ app_version }}
   </div>
 </div>
 {% endblock %}

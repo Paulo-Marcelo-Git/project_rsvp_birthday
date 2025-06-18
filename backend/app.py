@@ -13,6 +13,9 @@ from sqlalchemy.pool import QueuePool
 # Carregar variáveis de ambiente
 load_dotenv()
 
+# Definir versão
+APP_VERSION = "Comemore+ v2.1.0"
+
 # Setup de logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -30,6 +33,13 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 
+# Injetar versão nos templates
+app.config['APP_VERSION'] = APP_VERSION
+
+@app.context_processor
+def inject_version():
+    return dict(app_version=app.config['APP_VERSION'])
+
 # SQLAlchemy Pooling com mapeamento automático para dict
 db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(
@@ -38,7 +48,7 @@ engine = create_engine(
     pool_size=5, 
     max_overflow=10, 
     pool_recycle=3600, 
-    future=True  # importante para habilitar o .mappings()
+    future=True
 )
 
 # Flask-Login
