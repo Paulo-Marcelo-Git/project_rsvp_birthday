@@ -1,18 +1,21 @@
-#backend\Dockerfile
+# backend/Dockerfile
 
 FROM python:3.12-slim
 
 # Diretório de trabalho
 WORKDIR /app
 
-# Copia tudo
+# Instala dependências do sistema
+RUN apt-get update && apt-get install -y \
+    gcc \
+    default-libmysqlclient-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia os arquivos do projeto
 COPY . .
 
-# Instala as dependências
+# Instala dependências Python
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expõe a porta usada pelo Flask
-EXPOSE 8000
-
-# Comando default (pode ser sobrescrito pelo compose)
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8000"]
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8000", "app:app"]

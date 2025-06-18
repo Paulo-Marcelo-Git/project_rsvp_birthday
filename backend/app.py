@@ -1,20 +1,47 @@
-# backend\app.py
+# backend/app.py
 
-from flask import Flask, render_template, request, redirect, url_for, abort, Response, flash
-from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
-import pymysql
 import os
-import uuid
-from datetime import timedelta
+import logging
 from dotenv import load_dotenv
+from datetime import timedelta
 from urllib.parse import quote_plus
+from flask import Flask, render_template, request, redirect, url_for, abort, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
 
+# Carregar variáveis de ambiente
 load_dotenv()
 
-app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'insira_uma_chave_secreta_aqui')
+# Setup de logging
+log_path = os.getenv("LOG_FILE", "logs/app.log")
+os.makedirs(os.path.dirname(log_path), exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_path),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# ---- LOGIN SETUP ----
+# Flask App
+app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY")
+
+# SQLAlchemy Pooling com mapeamento automático para dict
+db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+engine = create_engine(
+    db_url, 
+    poolclass=QueuePool, 
+    pool_size=5, 
+    max_overflow=10, 
+    pool_recycle=3600, 
+    future=True  # importante para habilitar o .mappings()
+)
+
+# Flask-Login
 login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
@@ -38,101 +65,96 @@ def login():
         if username == os.getenv("ADMIN_USER") and password == os.getenv("ADMIN_PASS"):
             user = AdminUser()
             login_user(user)
+            logger.info(f"Login bem-sucedido para: {username}")
             flash("Login realizado com sucesso.", "success")
             return redirect(url_for("respostas"))
+        logger.warning(f"Tentativa de login inválida: {username}")
         flash("Usuário ou senha inválidos.", "danger")
     return render_template("login.html")
 
 @app.route("/logout")
 @login_required
 def logout():
+    logger.info(f"Logout realizado por: {current_user.id}")
     logout_user()
     flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
 
-def get_connection():
-    return pymysql.connect(
-        host=os.getenv('DB_HOST','localhost'),
-        user=os.getenv('DB_USER','root'),
-        password=os.getenv('DB_PASSWORD'),
-        database=os.getenv('DB_NAME'),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor,
-        init_command='SET NAMES utf8mb4'
-    )
-
 @app.route('/invite/<token>', methods=['GET','POST'])
 def invite(token):
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT * FROM invitees WHERE token=%s", (token,))
-        invitee = cursor.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT * FROM invitees WHERE token=:token"), 
+            {"token": token}
+        ).mappings().fetchone()
 
-        cursor.execute(
-            "SELECT `key`,`value` FROM settings WHERE `key` IN "
-            "('question_text','yes_text','no_text','post_yes_text','post_no_text')"
-        )
-        texts = {r['key']: r['value'] for r in cursor.fetchall()}
+        if not result:
+            logger.warning(f"Token inválido acessado: {token}")
+            abort(404)
 
-    if not invitee:
-        abort(404)
-
-    if request.method == 'POST':
-        response = request.form.get('response')
-        if invitee['response'] is None and response in ['yes','no']:
-            with conn.cursor() as cursor2:
-                cursor2.execute(
-                    "UPDATE invitees SET response=%s, response_date=NOW() WHERE token=%s",
-                    (response, token)
+        if request.method == 'POST':
+            response = request.form.get('response')
+            if result['response'] is None and response in ['yes', 'no']:
+                conn.execute(
+                    text("UPDATE invitees SET response=:response, response_date=NOW() WHERE token=:token"),
+                    {"response": response, "token": token}
                 )
-            conn.commit()
-        return redirect(url_for('invite', token=token))
+                conn.commit()
+                logger.info(f"Resposta registrada: {result['name']} -> {response}")
+            return redirect(url_for('invite', token=token))
 
-    return render_template(
-        'invite.html',
-        invitee=invitee,
-        question_text = texts.get('question_text'),
-        yes_text      = texts.get('yes_text'),
-        no_text       = texts.get('no_text'),
-        post_yes_text = texts.get('post_yes_text'),
-        post_no_text  = texts.get('post_no_text')
-    )
+        settings = conn.execute(
+            text("""SELECT `key`, `value` FROM settings 
+                    WHERE `key` IN 
+                    ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
+        ).mappings().all()
+
+        texts = {row['key']: row['value'] for row in settings}
+
+        return render_template(
+            'invite.html',
+            invitee=result,
+            question_text=texts.get('question_text'),
+            yes_text=texts.get('yes_text'),
+            no_text=texts.get('no_text'),
+            post_yes_text=texts.get('post_yes_text'),
+            post_no_text=texts.get('post_no_text')
+        )
 
 @app.route("/admin/respostas")
 @login_required
 def respostas():
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("""
-            SELECT id,name,email,phone,response,response_date,token
-            FROM invitees
-            ORDER BY response_date IS NULL, response_date DESC
-        """)
-        convidados = cursor.fetchall()
+    logger.info(f"Acesso ao painel de respostas por {current_user.id}")
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""SELECT id,name,email,phone,response,response_date,token 
+                    FROM invitees 
+                    ORDER BY response_date IS NULL, response_date DESC""")
+        ).mappings().all()
 
-        for row in convidados:
+        convidados = []
+        for row in result:
+            row = dict(row)
             if row['response_date']:
                 row['response_date'] -= timedelta(hours=3)
+            convidados.append(row)
 
-        cursor.execute(
-            "SELECT `key`,`value` FROM settings WHERE `key` IN "
-            "('question_text','yes_text','no_text','post_yes_text','post_no_text')"
-        )
-        texts = {r['key']: r['value'] for r in cursor.fetchall()}
+        settings = conn.execute(
+            text("""SELECT `key`,`value` FROM settings 
+                    WHERE `key` IN 
+                    ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
+        ).mappings().all()
 
-    for row in convidados:
-        if row['phone']:
-            phone_clean = (
-                row['phone'].replace("(", "")
-                            .replace(")", "")
-                            .replace("-", "")
-                            .replace(" ", "")
-            )
-            invite_url = url_for('invite', token=row['token'], _external=True)
-            message = f"{texts.get('question_text', '')} {invite_url}"
-            row['whatsapp_url'] = f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
-        else:
-            row['whatsapp_url'] = None
+        texts = {row['key']: row['value'] for row in settings}
+
+        for row in convidados:
+            if row['phone']:
+                phone_clean = row['phone'].replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
+                invite_url = url_for('invite', token=row['token'], _external=True)
+                message = f"{texts.get('question_text', '')} {invite_url}"
+                row['whatsapp_url'] = f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
+            else:
+                row['whatsapp_url'] = None
 
     total_sim = sum(1 for c in convidados if c['response'] == 'yes')
     total_nao = sum(1 for c in convidados if c['response'] == 'no')
@@ -150,53 +172,63 @@ def respostas():
 @app.route("/admin/convidados/add", methods=['POST'])
 @login_required
 def add_convidado():
-    name  = request.form.get('name')
+    name = request.form.get('name')
     email = request.form.get('email') or None
     phone = request.form.get('phone')
-    msg   = request.form.get('custom_message') or None
+    msg = request.form.get('custom_message') or None
 
     if not name:
         flash("Nome é obrigatório.", "danger")
         return redirect(url_for('respostas'))
 
-    token = uuid.uuid4().hex
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO invitees (name,email,phone,token,custom_message) "
-            "VALUES (%s,%s,%s,%s,%s)",
-            (name,email,phone,token,msg)
+    token = os.urandom(16).hex()
+    with engine.connect() as conn:
+        conn.execute(
+            text("""INSERT INTO invitees (name, email, phone, token, custom_message)
+                    VALUES (:name, :email, :phone, :token, :msg)"""),
+            {"name": name, "email": email, "phone": phone, "token": token, "msg": msg}
         )
-    conn.commit()
+        conn.commit()
+
+    logger.info(f"Novo convidado adicionado: {name}")
     flash(f"Convidado “{name}” adicionado com sucesso!", "success")
     return redirect(url_for('respostas'))
 
 @app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
 @login_required
 def delete_convidado(id):
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("DELETE FROM invitees WHERE id=%s", (id,))
-    conn.commit()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT name FROM invitees WHERE id=:id"), {"id": id}
+        ).mappings().fetchone()
+
+        conn.execute(text("DELETE FROM invitees WHERE id=:id"), {"id": id})
+        conn.commit()
+
+    logger.warning(f"Convidado excluído: {result['name'] if result else 'ID ' + str(id)}")
     flash("Convidado excluído com sucesso.", "warning")
     return redirect(url_for('respostas'))
 
 @app.route("/admin/textos", methods=['POST'])
 @login_required
 def update_textos():
-    q  = request.form.get('question_text') or ""
-    y  = request.form.get('yes_text') or ""
-    n  = request.form.get('no_text') or ""
-    py = request.form.get('post_yes_text') or ""
-    pn = request.form.get('post_no_text') or ""
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('question_text',%s)", (q,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('yes_text',%s)", (y,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('no_text',%s)", (n,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('post_yes_text',%s)", (py,))
-        cursor.execute("REPLACE INTO settings (`key`,`value`) VALUES ('post_no_text',%s)", (pn,))
-    conn.commit()
+    textos = {
+        "question_text": request.form.get('question_text') or "",
+        "yes_text": request.form.get('yes_text') or "",
+        "no_text": request.form.get('no_text') or "",
+        "post_yes_text": request.form.get('post_yes_text') or "",
+        "post_no_text": request.form.get('post_no_text') or ""
+    }
+
+    with engine.connect() as conn:
+        for key, value in textos.items():
+            conn.execute(
+                text("REPLACE INTO settings (`key`,`value`) VALUES (:key, :value)"),
+                {"key": key, "value": value}
+            )
+        conn.commit()
+
+    logger.info("Textos do convite atualizados com sucesso.")
     flash("Textos atualizados com sucesso!", "success")
     return redirect(url_for('respostas'))
 
