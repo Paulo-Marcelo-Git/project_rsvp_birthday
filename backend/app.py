@@ -14,7 +14,7 @@ from sqlalchemy.pool import QueuePool
 load_dotenv()
 
 # Definir versão
-APP_VERSION = "Comemore+ v1.1.0"
+APP_VERSION = "Comemore+ v1.1.1"
 
 # Setup de logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
