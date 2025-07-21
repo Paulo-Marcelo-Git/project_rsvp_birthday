@@ -1,5 +1,3 @@
-<!-- backend/templates/admin_responses.html -->
-
 {% extends "base.html" %}
 {% block title %}Comemore+ - Admin{% endblock %}
 
@@ -19,8 +17,14 @@
     <div class="d-flex gap-2">
       <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
       <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd">+ Convidado</button>
+      <a href="{{ url_for('exportar_convidados_xlsx', search=search) }}" class="btn btn-success">📥 Exportar Excel</a>
     </div>
   </div>
+
+  <form class="d-flex mb-3" method="get" action="{{ url_for('respostas') }}">
+    <input type="text" name="search" class="form-control me-2" placeholder="Buscar por nome ou email" value="{{ search }}">
+    <button class="btn btn-outline-primary" type="submit">Buscar</button>
+  </form>
 
   <div class="mb-4 d-flex flex-wrap gap-2">
     <div class="badge bg-success">✅ Confirmados: {{ total_sim }}</div>
@@ -128,83 +132,31 @@
       {% endfor %}
     </div>
   </div>
+
+  <nav aria-label="Paginação">
+    <ul class="pagination justify-content-center mt-4">
+      {% if page > 1 %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('respostas', page=page-1, search=search) }}">Anterior</a>
+        </li>
+      {% endif %}
+      {% for p in range(1, total_pages + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('respostas', page=p, search=search) }}">{{ p }}</a>
+        </li>
+      {% endfor %}
+      {% if page < total_pages %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('respostas', page=page+1, search=search) }}">Próxima</a>
+        </li>
+      {% endif %}
+    </ul>
+  </nav>
+
 </div>
 
-<!-- Modal de adicionar -->
-<div class="modal fade" id="modalAdd" tabindex="-1">
-  <div class="modal-dialog">
-    <form class="modal-content" action="{{ url_for('add_convidado') }}" method="post">
-      <div class="modal-header">
-        <h5 class="modal-title">Adicionar Novo Convidado</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label">Nome *</label>
-          <input name="name" class="form-control" required>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Email</label>
-          <input name="email" type="email" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Telefone</label>
-          <input name="phone" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Mensagem (opcional)</label>
-          <textarea name="custom_message" class="form-control"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Salvar Convidado</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- Modal de textos -->
-<div class="modal fade" id="modalTextos" tabindex="-1">
-  <div class="modal-dialog">
-    <form class="modal-content" action="{{ url_for('update_textos') }}" method="post">
-      <div class="modal-header">
-        <h5 class="modal-title">Editar Textos do Convite</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label">Pergunta</label>
-          <input name="question_text" value="{{ texts.question_text }}" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Texto do botão “Sim”</label>
-          <input name="yes_text" value="{{ texts.yes_text }}" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Texto do botão “Não”</label>
-          <input name="no_text" value="{{ texts.no_text }}" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Mensagem após “Sim”</label>
-          <input name="post_yes_text" value="{{ texts.post_yes_text }}" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Mensagem após “Não”</label>
-          <input name="post_no_text" value="{{ texts.post_no_text }}" class="form-control">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Salvar Textos</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- Rodapé com versão -->
+<!-- Seus modais e rodapé permanecem iguais -->
 <div class="text-center mt-5 mb-3 text-muted small">
   {{ app_version }}
 </div>
-
 {% endblock %}

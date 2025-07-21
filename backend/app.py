@@ -5,10 +5,12 @@ import logging
 from dotenv import load_dotenv
 from datetime import timedelta
 from urllib.parse import quote_plus
-from flask import Flask, render_template, request, redirect, url_for, abort, flash
+from flask import Flask, render_template, request, redirect, url_for, abort, flash, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
+from io import BytesIO
+from openpyxl import Workbook
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -40,14 +42,14 @@ app.config['APP_VERSION'] = APP_VERSION
 def inject_version():
     return dict(app_version=app.config['APP_VERSION'])
 
-# SQLAlchemy Pooling com mapeamento automático para dict
+# SQLAlchemy
 db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(
-    db_url, 
-    poolclass=QueuePool, 
-    pool_size=5, 
-    max_overflow=10, 
-    pool_recycle=3600, 
+    db_url,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=3600,
     future=True
 )
 
@@ -94,7 +96,7 @@ def logout():
 def invite(token):
     with engine.connect() as conn:
         result = conn.execute(
-            text("SELECT * FROM invitees WHERE token=:token"), 
+            text("SELECT * FROM invitees WHERE token=:token"),
             {"token": token}
         ).mappings().fetchone()
 
@@ -131,16 +133,30 @@ def invite(token):
             post_no_text=texts.get('post_no_text')
         )
 
+# ✅ ROTA COM PAGINAÇÃO E FILTRO
 @app.route("/admin/respostas")
 @login_required
 def respostas():
     logger.info(f"Acesso ao painel de respostas por {current_user.id}")
+
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    search = request.args.get('search', '').strip()
+    offset = (page - 1) * per_page
+
+    where_clause = ""
+    params = {}
+    if search:
+        where_clause = " WHERE name LIKE :search OR email LIKE :search"
+        params['search'] = f"%{search}%"
+
+    order_clause = " ORDER BY response_date IS NULL, response_date DESC"
+    limit_clause = " LIMIT :limit OFFSET :offset"
+    params.update({"limit": per_page, "offset": offset})
+
     with engine.connect() as conn:
-        result = conn.execute(
-            text("""SELECT id,name,email,phone,response,response_date,token 
-                    FROM invitees 
-                    ORDER BY response_date IS NULL, response_date DESC""")
-        ).mappings().all()
+        sql = f"SELECT id,name,email,phone,response,response_date,token FROM invitees {where_clause} {order_clause} {limit_clause}"
+        result = conn.execute(text(sql), params).mappings().all()
 
         convidados = []
         for row in result:
@@ -149,12 +165,15 @@ def respostas():
                 row['response_date'] -= timedelta(hours=3)
             convidados.append(row)
 
+        total_sql = f"SELECT COUNT(*) AS total FROM invitees {where_clause}"
+        total_res = conn.execute(text(total_sql), {"search": params.get("search")}).mappings().fetchone()
+        total_convidados = total_res['total']
+
         settings = conn.execute(
             text("""SELECT `key`,`value` FROM settings 
                     WHERE `key` IN 
                     ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
         ).mappings().all()
-
         texts = {row['key']: row['value'] for row in settings}
 
         for row in convidados:
@@ -169,6 +188,7 @@ def respostas():
     total_sim = sum(1 for c in convidados if c['response'] == 'yes')
     total_nao = sum(1 for c in convidados if c['response'] == 'no')
     total_aguardando = sum(1 for c in convidados if c['response'] is None)
+    total_pages = (total_convidados + per_page - 1) // per_page
 
     return render_template(
         'admin_responses.html',
@@ -176,7 +196,63 @@ def respostas():
         texts=texts,
         total_sim=total_sim,
         total_nao=total_nao,
-        total_aguardando=total_aguardando
+        total_aguardando=total_aguardando,
+        page=page,
+        total_pages=total_pages,
+        search=search
+    )
+
+# ✅ NOVA ROTA PARA EXPORTAR EXCEL
+@app.route("/admin/exportar_xlsx")
+@login_required
+def exportar_convidados_xlsx():
+    logger.info(f"Exportação XLSX solicitada por {current_user.id}")
+    search = request.args.get('search', '').strip()
+
+    where_clause = ""
+    params = {}
+    if search:
+        where_clause = " WHERE name LIKE :search OR email LIKE :search"
+        params['search'] = f"%{search}%"
+
+    with engine.connect() as conn:
+        sql = f"""SELECT name, email, phone, response, response_date 
+                  FROM invitees {where_clause}
+                  ORDER BY response_date IS NULL, response_date DESC"""
+        result = conn.execute(text(sql), params).mappings().all()
+
+    # Criar planilha
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Convidados"
+    ws.append(["Nome", "Email", "Telefone", "Resposta", "Data/Hora"])
+
+    for row in result:
+        ws.append([
+            row['name'],
+            row['email'] or "",
+            row['phone'] or "",
+            row['response'] or "",
+            row['response_date'].strftime("%d/%m/%Y %H:%M") if row['response_date'] else ""
+        ])
+
+    # Ajuste simples de largura
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = max_length + 2
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return Response(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment;filename=convidados.xlsx"}
     )
 
 @app.route("/admin/convidados/add", methods=['POST'])
@@ -244,3 +320,5 @@ def update_textos():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
+    logger.info("Iniciando Comemore+")
+    logger.info(f"Versão: {APP_VERSION}")
