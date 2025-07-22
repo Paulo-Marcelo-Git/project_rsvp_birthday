@@ -1,3 +1,5 @@
+<!-- backend/templates/admin_responses.html -->
+
 {% extends "base.html" %}
 {% block title %}Comemore+ - Admin{% endblock %}
 
@@ -32,6 +34,7 @@
     <div class="badge bg-secondary">⏳ Aguardando: {{ total_aguardando }}</div>
   </div>
 
+  <!-- TABELA DESKTOP -->
   <div class="d-none d-md-block">
     <table class="table table-striped table-bordered shadow-sm">
       <thead>
@@ -41,6 +44,7 @@
           <th>Telefone</th>
           <th>Resposta</th>
           <th>Data/Hora</th>
+          <th>Observação</th>
           <th>Ver Convite</th>
           <th>URL do Convite</th>
           <th>WhatsApp</th>
@@ -52,7 +56,7 @@
         <tr>
           <td>{{ row.name }}</td>
           <td>{{ row.email or '-' }}</td>
-          <td>{{ row.phone }}</td>
+          <td>{{ row.phone or '-' }}</td>
           <td>
             {% if row.response == 'yes' %}
               <span class="badge bg-success">Sim</span>
@@ -63,6 +67,38 @@
             {% endif %}
           </td>
           <td>{{ row.response_date.strftime("%d/%m/%Y %H:%M") if row.response_date else '-' }}</td>
+          <td>
+            {% if row.custom_message %}
+              <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#obsModal{{ row.id }}">
+                Ver Obs
+              </button>
+            {% else %}
+              <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#obsModal{{ row.id }}">
+                Sem Obs
+              </button>
+            {% endif %}
+            <!-- Modal da observação -->
+            <div class="modal fade" id="obsModal{{ row.id }}" tabindex="-1">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">Observação de {{ row.name }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                  </div>
+                  <div class="modal-body">
+                    {% if row.custom_message %}
+                      <p>{{ row.custom_message }}</p>
+                    {% else %}
+                      <p class="text-muted">Nenhuma observação adicionada.</p>
+                    {% endif %}
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </td>
           <td>
             <a href="{{ url_for('invite', token=row.token) }}" class="btn btn-sm btn-outline-primary" target="_blank">Ver Convite</a>
           </td>
@@ -90,6 +126,7 @@
     </table>
   </div>
 
+  <!-- CARDS MOBILE -->
   <div class="d-block d-md-none">
     <div class="d-flex flex-column gap-3">
       {% for row in convidados %}
@@ -108,9 +145,42 @@
               <span class="text-muted">Aguardando</span>
             {% endif %}
           </p>
-          <p class="mb-2"><strong>Data/Hora:</strong> {{ row.response_date.strftime("%d/%m/%Y %H:%M") if row.response_date else '-' }}</p>
+          <p class="mb-1"><strong>Data/Hora:</strong> {{ row.response_date.strftime("%d/%m/%Y %H:%M") if row.response_date else '-' }}</p>
+          <p class="mb-1">
+            {% if row.custom_message %}
+              <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#obsModalMobile{{ row.id }}">
+                Ver Obs
+              </button>
+            {% else %}
+              <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#obsModalMobile{{ row.id }}">
+                Sem Obs
+              </button>
+            {% endif %}
+          </p>
 
-          <div class="d-flex flex-wrap gap-2">
+          <!-- Modal Mobile -->
+          <div class="modal fade" id="obsModalMobile{{ row.id }}" tabindex="-1">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title">Observação de {{ row.name }}</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                  {% if row.custom_message %}
+                    <p>{{ row.custom_message }}</p>
+                  {% else %}
+                    <p class="text-muted">Nenhuma observação adicionada.</p>
+                  {% endif %}
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-2">
             <a href="{{ url_for('invite', token=row.token) }}" class="btn btn-sm btn-outline-primary" target="_blank">Ver Convite</a>
             {% if row.whatsapp_url %}
               <a href="{{ row.whatsapp_url }}" class="btn btn-sm btn-success" target="_blank">WhatsApp</a>
@@ -133,6 +203,7 @@
     </div>
   </div>
 
+  <!-- Paginação -->
   <nav aria-label="Paginação">
     <ul class="pagination justify-content-center mt-4">
       {% if page > 1 %}
@@ -155,7 +226,6 @@
 
 </div>
 
-<!-- Seus modais e rodapé permanecem iguais -->
 <div class="text-center mt-5 mb-3 text-muted small">
   {{ app_version }}
 </div>

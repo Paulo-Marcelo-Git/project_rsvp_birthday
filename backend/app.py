@@ -16,7 +16,7 @@ from openpyxl import Workbook
 load_dotenv()
 
 # Definir versão
-APP_VERSION = "Comemore+ v1.1.1"
+APP_VERSION = "Comemore+ v1.1.2"
 
 # Setup de logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -106,13 +106,20 @@ def invite(token):
 
         if request.method == 'POST':
             response = request.form.get('response')
+            observacao = request.form.get('observacao') or None
             if result['response'] is None and response in ['yes', 'no']:
                 conn.execute(
-                    text("UPDATE invitees SET response=:response, response_date=NOW() WHERE token=:token"),
-                    {"response": response, "token": token}
+                    text("""
+                        UPDATE invitees
+                        SET response=:response,
+                            response_date=NOW(),
+                            custom_message=:obs
+                        WHERE token=:token
+                    """),
+                    {"response": response, "token": token, "obs": observacao}
                 )
                 conn.commit()
-                logger.info(f"Resposta registrada: {result['name']} -> {response}")
+                logger.info(f"Resposta registrada: {result['name']} -> {response} | Obs: {observacao}")
             return redirect(url_for('invite', token=token))
 
         settings = conn.execute(
@@ -155,7 +162,7 @@ def respostas():
     params.update({"limit": per_page, "offset": offset})
 
     with engine.connect() as conn:
-        sql = f"SELECT id,name,email,phone,response,response_date,token FROM invitees {where_clause} {order_clause} {limit_clause}"
+        sql = f"SELECT id,name,email,phone,response,response_date,token,custom_message FROM invitees {where_clause} {order_clause} {limit_clause}"
         result = conn.execute(text(sql), params).mappings().all()
 
         convidados = []
@@ -216,16 +223,15 @@ def exportar_convidados_xlsx():
         params['search'] = f"%{search}%"
 
     with engine.connect() as conn:
-        sql = f"""SELECT name, email, phone, response, response_date 
+        sql = f"""SELECT name, email, phone, response, response_date, custom_message
                   FROM invitees {where_clause}
                   ORDER BY response_date IS NULL, response_date DESC"""
         result = conn.execute(text(sql), params).mappings().all()
 
-    # Criar planilha
     wb = Workbook()
     ws = wb.active
     ws.title = "Convidados"
-    ws.append(["Nome", "Email", "Telefone", "Resposta", "Data/Hora"])
+    ws.append(["Nome", "Email", "Telefone", "Resposta", "Data/Hora", "Observação"])
 
     for row in result:
         ws.append([
@@ -233,10 +239,10 @@ def exportar_convidados_xlsx():
             row['email'] or "",
             row['phone'] or "",
             row['response'] or "",
-            row['response_date'].strftime("%d/%m/%Y %H:%M") if row['response_date'] else ""
+            row['response_date'].strftime("%d/%m/%Y %H:%M") if row['response_date'] else "",
+            row['custom_message'] or ""
         ])
 
-    # Ajuste simples de largura
     for col in ws.columns:
         max_length = 0
         col_letter = col[0].column_letter

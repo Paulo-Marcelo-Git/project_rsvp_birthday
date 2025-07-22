@@ -1,4 +1,4 @@
-<!-- backend\templates\invite.html -->
+<!-- backend/templates/invite.html -->
 
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -19,6 +19,8 @@
       display: inline-block;
       box-shadow: 0 0 10px #ccc;
       position: relative;
+      max-width: 500px;
+      width: 100%;
     }
     .antonio-photo {
       width: 100%;
@@ -27,6 +29,24 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.2);
       margin-bottom: 20px;
     }
+    label {
+      display: block;
+      text-align: left;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #333;
+    }
+    textarea {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      padding: 8px;
+      margin-bottom: 15px;
+      font-family: inherit;
+      font-size: 14px;
+      resize: vertical;
+      min-height: 60px;
+    }
     button {
       padding: 10px 20px;
       font-size: 16px;
@@ -34,14 +54,21 @@
       border: none;
       border-radius: 8px;
       cursor: pointer;
+      transition: background-color 0.2s ease;
     }
     .btn-confirm {
       background: #2196f3;
       color: white;
     }
+    .btn-confirm:hover {
+      background: #1976d2;
+    }
     .btn-decline {
       background: #e53935;
       color: white;
+    }
+    .btn-decline:hover {
+      background: #c62828;
     }
     .admin-link {
       position: absolute;
@@ -68,8 +95,15 @@
         {{ post_yes_text if invitee.response=='yes'
            else post_no_text }}
       </p>
+      {% if invitee.custom_message %}
+        <p><strong>Sua observação:</strong><br>{{ invitee.custom_message }}</p>
+      {% endif %}
     {% else %}
       <form method="post">
+        <div>
+          <label for="observacao">Observação (opcional):</label>
+          <textarea id="observacao" name="observacao" placeholder="Deixe aqui algum comentário ou observação..."></textarea>
+        </div>
         <button type="submit" name="response" value="yes" class="btn-confirm">{{ yes_text }}</button>
         <button type="submit" name="response" value="no" class="btn-decline">{{ no_text }}</button>
       </form>
