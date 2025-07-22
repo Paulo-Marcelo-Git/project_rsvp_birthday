@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS invitees (
   response ENUM('yes', 'no') DEFAULT NULL,
   response_date DATETIME DEFAULT NULL,
   custom_message TEXT,
+  diaper_size VARCHAR(100),
+  gift VARCHAR(255),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4

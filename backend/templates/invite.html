@@ -1,5 +1,5 @@
 <!-- backend/templates/invite.html -->
-
+ 
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -45,7 +45,6 @@
       font-family: inherit;
       font-size: 14px;
       resize: vertical;
-      min-height: 60px;
     }
     button {
       padding: 10px 20px;
@@ -82,6 +81,14 @@
       color: #555;
       text-decoration: underline;
     }
+    .info-block {
+      margin: 10px 0;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      text-align: left;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -91,25 +98,31 @@
     <h2>{{ question_text }}</h2>
 
     {% if invitee.response %}
-      <p>
-        {{ post_yes_text if invitee.response=='yes'
-           else post_no_text }}
-      </p>
+      <p>{{ post_yes_text if invitee.response=='yes' else post_no_text }}</p>
+
       {% if invitee.custom_message %}
-        <p><strong>Sua observação:</strong><br>{{ invitee.custom_message }}</p>
+        <div class="info-block"><strong>Observação:</strong><br>{{ invitee.custom_message }}</div>
       {% endif %}
+      {% if invitee.diaper_size %}
+        <div class="info-block">{{ invitee.diaper_size }}</div>
+      {% endif %}
+
     {% else %}
       <form method="post">
         <div>
           <label for="observacao">Observação (opcional):</label>
           <textarea id="observacao" name="observacao" placeholder="Deixe aqui algum comentário ou observação..."></textarea>
         </div>
+
+        {% if invitee.diaper_size %}
+          <div class="info-block">{{ invitee.diaper_size }}</div>
+        {% endif %}
+
         <button type="submit" name="response" value="yes" class="btn-confirm">{{ yes_text }}</button>
         <button type="submit" name="response" value="no" class="btn-decline">{{ no_text }}</button>
       </form>
     {% endif %}
 
-    <!-- Link discreto para admin -->
     <a href="{{ url_for('login') }}" class="admin-link">Área Administrativa</a>
   </div>
 </body>

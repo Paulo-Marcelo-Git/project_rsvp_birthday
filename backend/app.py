@@ -15,10 +15,10 @@ from openpyxl import Workbook
 # Carregar variáveis de ambiente
 load_dotenv()
 
-# Definir versão
-APP_VERSION = "Comemore+ v1.1.2"
+# Versão
+APP_VERSION = "Comemore+ v1.1.7"
 
-# Setup de logging
+# Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
 logging.basicConfig(
@@ -31,18 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Flask App
+# Flask
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
-
-# Injetar versão nos templates
 app.config['APP_VERSION'] = APP_VERSION
 
 @app.context_processor
 def inject_version():
     return dict(app_version=app.config['APP_VERSION'])
 
-# SQLAlchemy
+# DB
 db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(
     db_url,
@@ -53,7 +51,7 @@ engine = create_engine(
     future=True
 )
 
-# Flask-Login
+# Login
 login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
@@ -69,45 +67,39 @@ def load_user(user_id):
         return AdminUser()
     return None
 
-@app.route("/login", methods=["GET", "POST"])
+# Login
+@app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-        if username == os.getenv("ADMIN_USER") and password == os.getenv("ADMIN_PASS"):
-            user = AdminUser()
-            login_user(user)
-            logger.info(f"Login bem-sucedido para: {username}")
+        if request.form["username"] == os.getenv("ADMIN_USER") and request.form["password"] == os.getenv("ADMIN_PASS"):
+            login_user(AdminUser())
+            logger.info("Login bem-sucedido.")
             flash("Login realizado com sucesso.", "success")
             return redirect(url_for("respostas"))
-        logger.warning(f"Tentativa de login inválida: {username}")
         flash("Usuário ou senha inválidos.", "danger")
     return render_template("login.html")
 
 @app.route("/logout")
 @login_required
 def logout():
-    logger.info(f"Logout realizado por: {current_user.id}")
     logout_user()
     flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
 
-@app.route('/invite/<token>', methods=['GET','POST'])
+# Página convite
+@app.route("/invite/<token>", methods=["GET","POST"])
 def invite(token):
     with engine.connect() as conn:
         result = conn.execute(
-            text("SELECT * FROM invitees WHERE token=:token"),
-            {"token": token}
+            text("SELECT * FROM invitees WHERE token=:token"), {"token": token}
         ).mappings().fetchone()
-
         if not result:
-            logger.warning(f"Token inválido acessado: {token}")
             abort(404)
-
-        if request.method == 'POST':
+        if request.method == "POST":
             response = request.form.get('response')
             observacao = request.form.get('observacao') or None
-            if result['response'] is None and response in ['yes', 'no']:
+            # Não altera diaper_size aqui, apenas salva a observação
+            if result['response'] is None and response in ['yes','no']:
                 conn.execute(
                     text("""
                         UPDATE invitees
@@ -116,36 +108,30 @@ def invite(token):
                             custom_message=:obs
                         WHERE token=:token
                     """),
-                    {"response": response, "token": token, "obs": observacao}
+                    {"response": response, "obs": observacao, "token": token}
                 )
                 conn.commit()
-                logger.info(f"Resposta registrada: {result['name']} -> {response} | Obs: {observacao}")
+                logger.info(f"Resposta: {result['name']} -> {response} | Obs: {observacao}")
             return redirect(url_for('invite', token=token))
 
         settings = conn.execute(
-            text("""SELECT `key`, `value` FROM settings 
-                    WHERE `key` IN 
-                    ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
+            text("""SELECT `key`,`value` FROM settings
+                    WHERE `key` IN ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
         ).mappings().all()
+        texts = {r['key']: r['value'] for r in settings}
 
-        texts = {row['key']: row['value'] for row in settings}
+        return render_template("invite.html",
+                               invitee=result,
+                               question_text=texts.get('question_text'),
+                               yes_text=texts.get('yes_text'),
+                               no_text=texts.get('no_text'),
+                               post_yes_text=texts.get('post_yes_text'),
+                               post_no_text=texts.get('post_no_text'))
 
-        return render_template(
-            'invite.html',
-            invitee=result,
-            question_text=texts.get('question_text'),
-            yes_text=texts.get('yes_text'),
-            no_text=texts.get('no_text'),
-            post_yes_text=texts.get('post_yes_text'),
-            post_no_text=texts.get('post_no_text')
-        )
-
-# ✅ ROTA COM PAGINAÇÃO E FILTRO
+# Painel admin
 @app.route("/admin/respostas")
 @login_required
 def respostas():
-    logger.info(f"Acesso ao painel de respostas por {current_user.id}")
-
     page = int(request.args.get('page', 1))
     per_page = 20
     search = request.args.get('search', '').strip()
@@ -158,36 +144,36 @@ def respostas():
         params['search'] = f"%{search}%"
 
     order_clause = " ORDER BY response_date IS NULL, response_date DESC"
-    limit_clause = " LIMIT :limit OFFSET :offset"
-    params.update({"limit": per_page, "offset": offset})
+
+    sql = f"""SELECT id,name,email,phone,response,response_date,token,
+                     custom_message,diaper_size
+              FROM invitees {where_clause} {order_clause}
+              LIMIT {per_page} OFFSET {offset}"""
 
     with engine.connect() as conn:
-        sql = f"SELECT id,name,email,phone,response,response_date,token,custom_message FROM invitees {where_clause} {order_clause} {limit_clause}"
         result = conn.execute(text(sql), params).mappings().all()
-
         convidados = []
-        for row in result:
-            row = dict(row)
+        for r in result:
+            row = dict(r)
             if row['response_date']:
                 row['response_date'] -= timedelta(hours=3)
             convidados.append(row)
 
         total_sql = f"SELECT COUNT(*) AS total FROM invitees {where_clause}"
-        total_res = conn.execute(text(total_sql), {"search": params.get("search")}).mappings().fetchone()
-        total_convidados = total_res['total']
+        total_count = conn.execute(text(total_sql), {"search": params.get('search')}).mappings().fetchone()
+        total_convidados = total_count['total']
 
         settings = conn.execute(
-            text("""SELECT `key`,`value` FROM settings 
-                    WHERE `key` IN 
-                    ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
+            text("""SELECT `key`,`value` FROM settings
+                    WHERE `key` IN ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
         ).mappings().all()
-        texts = {row['key']: row['value'] for row in settings}
+        texts = {r['key']: r['value'] for r in settings}
 
         for row in convidados:
             if row['phone']:
                 phone_clean = row['phone'].replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
                 invite_url = url_for('invite', token=row['token'], _external=True)
-                message = f"{texts.get('question_text', '')} {invite_url}"
+                message = f"{texts.get('question_text','')} {invite_url}"
                 row['whatsapp_url'] = f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
             else:
                 row['whatsapp_url'] = None
@@ -198,7 +184,7 @@ def respostas():
     total_pages = (total_convidados + per_page - 1) // per_page
 
     return render_template(
-        'admin_responses.html',
+        "admin_responses.html",
         convidados=convidados,
         texts=texts,
         total_sim=total_sim,
@@ -209,21 +195,19 @@ def respostas():
         search=search
     )
 
-# ✅ NOVA ROTA PARA EXPORTAR EXCEL
+# Exportar Excel
 @app.route("/admin/exportar_xlsx")
 @login_required
 def exportar_convidados_xlsx():
-    logger.info(f"Exportação XLSX solicitada por {current_user.id}")
-    search = request.args.get('search', '').strip()
-
+    search = request.args.get('search','').strip()
     where_clause = ""
     params = {}
     if search:
         where_clause = " WHERE name LIKE :search OR email LIKE :search"
         params['search'] = f"%{search}%"
-
     with engine.connect() as conn:
-        sql = f"""SELECT name, email, phone, response, response_date, custom_message
+        sql = f"""SELECT name,email,phone,response,response_date,
+                         custom_message,diaper_size
                   FROM invitees {where_clause}
                   ORDER BY response_date IS NULL, response_date DESC"""
         result = conn.execute(text(sql), params).mappings().all()
@@ -231,25 +215,24 @@ def exportar_convidados_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "Convidados"
-    ws.append(["Nome", "Email", "Telefone", "Resposta", "Data/Hora", "Observação"])
-
-    for row in result:
+    ws.append(["Nome","Email","Telefone","Resposta","Data/Hora","Observação","Fralda"])
+    for r in result:
         ws.append([
-            row['name'],
-            row['email'] or "",
-            row['phone'] or "",
-            row['response'] or "",
-            row['response_date'].strftime("%d/%m/%Y %H:%M") if row['response_date'] else "",
-            row['custom_message'] or ""
+            r['name'],
+            r['email'] or "",
+            r['phone'] or "",
+            r['response'] or "",
+            r['response_date'].strftime("%d/%m/%Y %H:%M") if r['response_date'] else "",
+            r['custom_message'] or "",
+            r['diaper_size'] or ""
         ])
-
     for col in ws.columns:
-        max_length = 0
+        max_len = 0
         col_letter = col[0].column_letter
         for cell in col:
             if cell.value:
-                max_length = max(max_length, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = max_length + 2
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = max_len + 2
 
     output = BytesIO()
     wb.save(output)
@@ -258,9 +241,10 @@ def exportar_convidados_xlsx():
     return Response(
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment;filename=convidados.xlsx"}
+        headers={"Content-Disposition":"attachment;filename=convidados.xlsx"}
     )
 
+# Adicionar convidado
 @app.route("/admin/convidados/add", methods=['POST'])
 @login_required
 def add_convidado():
@@ -268,63 +252,51 @@ def add_convidado():
     email = request.form.get('email') or None
     phone = request.form.get('phone')
     msg = request.form.get('custom_message') or None
+    diaper = request.form.get('diaper_size') or None
 
     if not name:
-        flash("Nome é obrigatório.", "danger")
+        flash("Nome é obrigatório.","danger")
         return redirect(url_for('respostas'))
 
     token = os.urandom(16).hex()
     with engine.connect() as conn:
         conn.execute(
-            text("""INSERT INTO invitees (name, email, phone, token, custom_message)
-                    VALUES (:name, :email, :phone, :token, :msg)"""),
-            {"name": name, "email": email, "phone": phone, "token": token, "msg": msg}
+            text("""INSERT INTO invitees (name,email,phone,token,custom_message,diaper_size)
+                    VALUES (:name,:email,:phone,:token,:msg,:diaper)"""),
+            {"name":name,"email":email,"phone":phone,"token":token,"msg":msg,"diaper":diaper}
         )
         conn.commit()
 
-    logger.info(f"Novo convidado adicionado: {name}")
-    flash(f"Convidado “{name}” adicionado com sucesso!", "success")
+    flash(f"Convidado “{name}” adicionado com sucesso!","success")
     return redirect(url_for('respostas'))
 
 @app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
 @login_required
 def delete_convidado(id):
     with engine.connect() as conn:
-        result = conn.execute(
-            text("SELECT name FROM invitees WHERE id=:id"), {"id": id}
-        ).mappings().fetchone()
-
-        conn.execute(text("DELETE FROM invitees WHERE id=:id"), {"id": id})
+        res = conn.execute(text("SELECT name FROM invitees WHERE id=:id"),{"id":id}).mappings().fetchone()
+        conn.execute(text("DELETE FROM invitees WHERE id=:id"),{"id":id})
         conn.commit()
-
-    logger.warning(f"Convidado excluído: {result['name'] if result else 'ID ' + str(id)}")
-    flash("Convidado excluído com sucesso.", "warning")
+    flash("Convidado excluído com sucesso.","warning")
     return redirect(url_for('respostas'))
 
 @app.route("/admin/textos", methods=['POST'])
 @login_required
 def update_textos():
     textos = {
-        "question_text": request.form.get('question_text') or "",
-        "yes_text": request.form.get('yes_text') or "",
-        "no_text": request.form.get('no_text') or "",
-        "post_yes_text": request.form.get('post_yes_text') or "",
-        "post_no_text": request.form.get('post_no_text') or ""
+        "question_text":request.form.get('question_text') or "",
+        "yes_text":request.form.get('yes_text') or "",
+        "no_text":request.form.get('no_text') or "",
+        "post_yes_text":request.form.get('post_yes_text') or "",
+        "post_no_text":request.form.get('post_no_text') or ""
     }
-
     with engine.connect() as conn:
-        for key, value in textos.items():
-            conn.execute(
-                text("REPLACE INTO settings (`key`,`value`) VALUES (:key, :value)"),
-                {"key": key, "value": value}
-            )
+        for k,v in textos.items():
+            conn.execute(text("REPLACE INTO settings (`key`,`value`) VALUES (:key,:value)"),{"key":k,"value":v})
         conn.commit()
-
-    logger.info("Textos do convite atualizados com sucesso.")
-    flash("Textos atualizados com sucesso!", "success")
+    flash("Textos atualizados com sucesso!","success")
     return redirect(url_for('respostas'))
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
-    logger.info("Iniciando Comemore+")
-    logger.info(f"Versão: {APP_VERSION}")
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=8000)
+    logger.info(f"Comemore+ iniciado. Versão: {APP_VERSION}")
