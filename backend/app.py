@@ -11,12 +11,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 from io import BytesIO
 from openpyxl import Workbook
+from werkzeug.utils import secure_filename
+import uuid
 
 # Carregar variáveis de ambiente
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.1.8"
+APP_VERSION = "Comemore+ v1.2.1"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -24,10 +26,7 @@ os.makedirs(os.path.dirname(log_path), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_path),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(log_path), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -36,24 +35,30 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 app.config['APP_VERSION'] = APP_VERSION
 
+# Uploads
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4"}
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.context_processor
 def inject_version():
     return dict(app_version=app.config['APP_VERSION'])
 
 # DB
-db_url = (
-    f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-    f"@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
-)
-
+db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(
     db_url,
     poolclass=QueuePool,
     pool_size=5,
     max_overflow=10,
     pool_recycle=3600,
-    pool_pre_ping=True,                 # evita conexões mortas no pool
-    pool_timeout=10,                    # não espera indefinidamente por conexão
+    pool_pre_ping=True,
+    pool_timeout=10,
     connect_args={"connect_timeout": 5},
     future=True
 )
@@ -105,7 +110,6 @@ def invite(token):
         if request.method == "POST":
             response = request.form.get('response')
             observacao = request.form.get('observacao') or None
-            # Não altera diaper_size aqui, apenas salva a observação
             if result['response'] is None and response in ['yes','no']:
                 conn.execute(
                     text("""
@@ -153,7 +157,7 @@ def respostas():
     order_clause = " ORDER BY response_date IS NULL, response_date DESC"
 
     sql = f"""SELECT id,name,email,phone,response,response_date,token,
-                     custom_message,diaper_size
+                     custom_message,diaper_size,media_file
               FROM invitees {where_clause} {order_clause}
               LIMIT {per_page} OFFSET {offset}"""
 
@@ -214,7 +218,7 @@ def exportar_convidados_xlsx():
         params['search'] = f"%{search}%"
     with engine.connect() as conn:
         sql = f"""SELECT name,email,phone,response,response_date,
-                         custom_message,diaper_size
+                         custom_message,diaper_size,media_file
                   FROM invitees {where_clause}
                   ORDER BY response_date IS NULL, response_date DESC"""
         result = conn.execute(text(sql), params).mappings().all()
@@ -222,7 +226,7 @@ def exportar_convidados_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "Convidados"
-    ws.append(["Nome","Email","Telefone","Resposta","Data/Hora","Observação","Fralda"])
+    ws.append(["Nome","Email","Telefone","Resposta","Data/Hora","Observação","Fralda","Arquivo"])
     for r in result:
         ws.append([
             r['name'],
@@ -231,7 +235,8 @@ def exportar_convidados_xlsx():
             r['response'] or "",
             r['response_date'].strftime("%d/%m/%Y %H:%M") if r['response_date'] else "",
             r['custom_message'] or "",
-            r['diaper_size'] or ""
+            r['diaper_size'] or "",
+            r['media_file'] or ""
         ])
     for col in ws.columns:
         max_len = 0
@@ -261,6 +266,18 @@ def add_convidado():
     msg = request.form.get('custom_message') or None
     diaper = request.form.get('diaper_size') or None
 
+    media_filename = None
+    file = request.files.get('media_file')
+    if file and file.filename:
+        if not allowed_file(file.filename):
+            flash("Arquivo inválido. Use .jpg/.jpeg ou .mp4 (até 20MB).", "danger")
+            return redirect(url_for('respostas'))
+        ext = file.filename.rsplit(".", 1)[1].lower()
+        safe = secure_filename(f"{uuid.uuid4().hex}.{ext}")
+        save_path = os.path.join(app.config["UPLOAD_FOLDER"], safe)
+        file.save(save_path)
+        media_filename = safe
+
     if not name:
         flash("Nome é obrigatório.","danger")
         return redirect(url_for('respostas'))
@@ -268,9 +285,9 @@ def add_convidado():
     token = os.urandom(16).hex()
     with engine.connect() as conn:
         conn.execute(
-            text("""INSERT INTO invitees (name,email,phone,token,custom_message,diaper_size)
-                    VALUES (:name,:email,:phone,:token,:msg,:diaper)"""),
-            {"name":name,"email":email,"phone":phone,"token":token,"msg":msg,"diaper":diaper}
+            text("""INSERT INTO invitees (name,email,phone,token,custom_message,diaper_size,media_file)
+                    VALUES (:name,:email,:phone,:token,:msg,:diaper,:media)"""),
+            {"name":name,"email":email,"phone":phone,"token":token,"msg":msg,"diaper":diaper,"media":media_filename}
         )
         conn.commit()
 
@@ -281,9 +298,13 @@ def add_convidado():
 @login_required
 def delete_convidado(id):
     with engine.connect() as conn:
-        res = conn.execute(text("SELECT name FROM invitees WHERE id=:id"),{"id":id}).mappings().fetchone()
+        res = conn.execute(text("SELECT name, media_file FROM invitees WHERE id=:id"),{"id":id}).mappings().fetchone()
         conn.execute(text("DELETE FROM invitees WHERE id=:id"),{"id":id})
         conn.commit()
+    # (Opcional) remover arquivo físico se desejar:
+    # if res and res["media_file"]:
+    #     try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_file"]))
+    #     except FileNotFoundError: pass
     flash("Convidado excluído com sucesso.","warning")
     return redirect(url_for('respostas'))
 

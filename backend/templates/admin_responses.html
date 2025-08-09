@@ -45,11 +45,9 @@
           <th>Resposta</th>
           <th>Data/Hora</th>
           <th>Obs</th>
-          <th>Fralda</th>
-          <th>Ver Convite</th>
           <th>URL do Convite</th>
           <th>WhatsApp</th>
-          <th>Excluir</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -78,19 +76,19 @@
               </div></div>
             </div>
           </td>
+          <td><a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a></td>
           <td>
-            {% if row.diaper_size %}
-              {{ row.diaper_size }}
+            {% if row.whatsapp_url %}
+              <a href="{{ row.whatsapp_url }}" class="btn btn-sm btn-success" target="_blank">WhatsApp</a>
             {% else %}
-              <span class="text-muted">-</span>
+              <span class="text-muted">Sem número</span>
             {% endif %}
           </td>
-          <td><a href="{{ url_for('invite', token=row.token) }}" class="btn btn-sm btn-outline-primary" target="_blank">Ver Convite</a></td>
-          <td><a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a></td>
-          <td>{% if row.whatsapp_url %}<a href="{{ row.whatsapp_url }}" class="btn btn-sm btn-success" target="_blank">WhatsApp</a>{% else %}<span class="text-muted">Sem número</span>{% endif %}</td>
           <td>
             <form action="{{ url_for('delete_convidado', id=row.id) }}" method="post" onsubmit="return confirm('Excluir {{ row.name }}?')">
-              <button class="btn btn-sm btn-outline-danger">Excluir</button>
+              <button class="btn btn-sm btn-outline-danger" title="Excluir">
+                <i class="bi bi-trash"></i>
+              </button>
             </form>
           </td>
         </tr>
@@ -121,10 +119,9 @@
 
           <div class="d-flex gap-2 flex-wrap my-2">
             <button class="btn btn-sm {% if row.custom_message %}btn-success{% else %}btn-danger{% endif %}" data-bs-toggle="modal" data-bs-target="#obsModalM{{ row.id }}">Obs</button>
-            <button class="btn btn-sm {% if row.diaper_size %}btn-success{% else %}btn-danger{% endif %}" data-bs-toggle="modal" data-bs-target="#fraldaModalM{{ row.id }}">Fralda</button>
           </div>
 
-          <!-- Modais Mobile -->
+          <!-- Modal Mobile Obs -->
           <div class="modal fade" id="obsModalM{{ row.id }}" tabindex="-1">
             <div class="modal-dialog"><div class="modal-content">
               <div class="modal-header"><h5 class="modal-title">Observação</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -132,26 +129,21 @@
               <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button></div>
             </div></div>
           </div>
-          <div class="modal fade" id="fraldaModalM{{ row.id }}" tabindex="-1">
-            <div class="modal-dialog"><div class="modal-content">
-              <div class="modal-header"><h5 class="modal-title">Fralda</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-              <div class="modal-body">{% if row.diaper_size %}<p>{{ row.diaper_size }}</p>{% else %}<p class="text-muted">Nenhuma informação.</p>{% endif %}</div>
-              <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button></div>
-            </div></div>
+
+          <div class="mt-2 small">
+            <strong>URL do Convite:</strong><br>
+            <a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a>
           </div>
 
           <div class="d-flex flex-wrap gap-2 mt-2">
-            <a href="{{ url_for('invite', token=row.token) }}" class="btn btn-sm btn-outline-primary" target="_blank">Ver Convite</a>
             {% if row.whatsapp_url %}
               <a href="{{ row.whatsapp_url }}" class="btn btn-sm btn-success" target="_blank">WhatsApp</a>
             {% endif %}
             <form action="{{ url_for('delete_convidado', id=row.id) }}" method="post" onsubmit="return confirm('Excluir {{ row.name }}?')">
-              <button class="btn btn-sm btn-outline-danger">Excluir</button>
+              <button class="btn btn-sm btn-outline-danger" title="Excluir">
+                <i class="bi bi-trash"></i>
+              </button>
             </form>
-          </div>
-          <div class="mt-2 small">
-            <strong>URL do Convite:</strong><br>
-            <a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a>
           </div>
         </div>
       </div>
@@ -183,7 +175,7 @@
   <!-- ===== MODAL ADICIONAR CONVIDADO ===== -->
   <div class="modal fade" id="modalAdd" tabindex="-1">
     <div class="modal-dialog">
-      <form class="modal-content" action="{{ url_for('add_convidado') }}" method="post">
+      <form class="modal-content" action="{{ url_for('add_convidado') }}" method="post" enctype="multipart/form-data">
         <div class="modal-header">
           <h5 class="modal-title">Adicionar Novo Convidado</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -193,7 +185,10 @@
           <div class="mb-3"><label class="form-label">Email</label><input name="email" type="email" class="form-control"></div>
           <div class="mb-3"><label class="form-label">Telefone</label><input name="phone" class="form-control"></div>
           <div class="mb-3"><label class="form-label">Observação (opcional)</label><textarea name="custom_message" class="form-control"></textarea></div>
-          <div class="mb-3"><label class="form-label">Escreva aqui o tamanho da fralda e o mimo (opcional)</label><input name="diaper_size" class="form-control"></div>
+          <div class="mb-3">
+            <label class="form-label">Arquivo (JPG/MP4, até 20MB)</label>
+            <input type="file" name="media_file" accept=".jpg,.jpeg,.mp4" class="form-control">
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
