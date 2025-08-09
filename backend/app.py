@@ -16,7 +16,7 @@ from openpyxl import Workbook
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.1.7"
+APP_VERSION = "Comemore+ v1.1.8"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -41,13 +41,20 @@ def inject_version():
     return dict(app_version=app.config['APP_VERSION'])
 
 # DB
-db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+db_url = (
+    f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+    f"@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+)
+
 engine = create_engine(
     db_url,
     poolclass=QueuePool,
     pool_size=5,
     max_overflow=10,
     pool_recycle=3600,
+    pool_pre_ping=True,                 # evita conexões mortas no pool
+    pool_timeout=10,                    # não espera indefinidamente por conexão
+    connect_args={"connect_timeout": 5},
     future=True
 )
 
@@ -298,5 +305,5 @@ def update_textos():
     return redirect(url_for('respostas'))
 
 if __name__=="__main__":
-    app.run(host="0.0.0.0",port=8000)
     logger.info(f"Comemore+ iniciado. Versão: {APP_VERSION}")
+    app.run(host="0.0.0.0",port=8000)

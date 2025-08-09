@@ -33,7 +33,17 @@ services:
       - ./backend:/app
       - ./logs:/app/logs
     working_dir: /app
-    command: gunicorn -w 1 -b 0.0.0.0:8000 app:app
+    command: >
+      gunicorn app:app
+      -w 2
+      --threads 4
+      -k gthread
+      -b 0.0.0.0:8000
+      --timeout 120
+      --graceful-timeout 30
+      --keep-alive 5
+      --access-logfile -
+      --access-logformat '%(t)s | %(p)s | %(m)s %(U)s | status=%(s)s | resp_time=%(L)s sec | size=%(B)s bytes'
 
 volumes:
   db_data:

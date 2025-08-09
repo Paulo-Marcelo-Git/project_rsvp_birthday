@@ -1,7 +1,6 @@
 -- backend/init.sql
 
 SET NAMES utf8mb4;
--- garante que o SQL seja interpretado como UTF-8
 
 CREATE TABLE IF NOT EXISTS invitees (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -27,8 +26,13 @@ CREATE TABLE IF NOT EXISTS settings (
   COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO settings (`key`,`value`) VALUES
-  ('question_text','Você confirma a sua presença no aniversário do Antony?'),
-  ('yes_text','Sim'),
-  ('no_text','Não'),
-  ('post_yes_text','Sim'),
-  ('post_no_text','Não');
+  ('question_text','Texto para convite'),
+  ('yes_text','Botão Sim'),
+  ('no_text','Botão Não'),
+  ('post_yes_text','Texto Botão Sim'),
+  ('post_no_text','Texto Botão Não');
+
+-- Índices para performance (busca/ordenação)
+CREATE INDEX idx_invitees_name ON invitees (name);
+CREATE INDEX idx_invitees_email ON invitees (email);
+CREATE INDEX idx_invitees_response_date ON invitees (response_date);

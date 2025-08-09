@@ -2,20 +2,28 @@
 
 FROM python:3.12-slim
 
-# Diretório de trabalho
 WORKDIR /app
 
-# Instala dependências do sistema
 RUN apt-get update && apt-get install -y \
     gcc \
     default-libmysqlclient-dev \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# Copia os arquivos do projeto
 COPY . .
 
-# Instala dependências Python
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8000", "app:app"]
+# Deixa todos os args do gunicorn em uma única env (sem brigar com JSON)
+ENV GUNICORN_CMD_ARGS="\
+-w 2 \
+--threads 4 \
+-k gthread \
+-b 0.0.0.0:8000 \
+--timeout 120 \
+--graceful-timeout 30 \
+--keep-alive 5 \
+--access-logfile - \
+--access-logformat '%(t)s | %(p)s | %(m)s %(U)s | status=%(s)s | resp_time=%(L)s sec | size=%(B)s bytes'"
+
+CMD ["gunicorn", "app:app"]
