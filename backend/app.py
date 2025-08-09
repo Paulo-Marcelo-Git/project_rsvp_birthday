@@ -18,7 +18,7 @@ import uuid
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.2.1"
+APP_VERSION = "Comemore+ v1.3.0"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -36,7 +36,7 @@ app.secret_key = os.getenv("SECRET_KEY")
 app.config['APP_VERSION'] = APP_VERSION
 
 # Uploads
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4"}
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
@@ -157,7 +157,7 @@ def respostas():
     order_clause = " ORDER BY response_date IS NULL, response_date DESC"
 
     sql = f"""SELECT id,name,email,phone,response,response_date,token,
-                     custom_message,diaper_size,media_file
+                     custom_message,media_file
               FROM invitees {where_clause} {order_clause}
               LIMIT {per_page} OFFSET {offset}"""
 
@@ -206,7 +206,7 @@ def respostas():
         search=search
     )
 
-# Exportar Excel
+# Exportar Excel (sem fralda)
 @app.route("/admin/exportar_xlsx")
 @login_required
 def exportar_convidados_xlsx():
@@ -218,7 +218,7 @@ def exportar_convidados_xlsx():
         params['search'] = f"%{search}%"
     with engine.connect() as conn:
         sql = f"""SELECT name,email,phone,response,response_date,
-                         custom_message,diaper_size,media_file
+                         custom_message,media_file
                   FROM invitees {where_clause}
                   ORDER BY response_date IS NULL, response_date DESC"""
         result = conn.execute(text(sql), params).mappings().all()
@@ -226,7 +226,7 @@ def exportar_convidados_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "Convidados"
-    ws.append(["Nome","Email","Telefone","Resposta","Data/Hora","Observação","Fralda","Arquivo"])
+    ws.append(["Nome","Email","Telefone","Resposta","Data/Hora","Observação","Arquivo"])
     for r in result:
         ws.append([
             r['name'],
@@ -235,7 +235,6 @@ def exportar_convidados_xlsx():
             r['response'] or "",
             r['response_date'].strftime("%d/%m/%Y %H:%M") if r['response_date'] else "",
             r['custom_message'] or "",
-            r['diaper_size'] or "",
             r['media_file'] or ""
         ])
     for col in ws.columns:
@@ -264,13 +263,12 @@ def add_convidado():
     email = request.form.get('email') or None
     phone = request.form.get('phone')
     msg = request.form.get('custom_message') or None
-    diaper = request.form.get('diaper_size') or None
 
     media_filename = None
     file = request.files.get('media_file')
     if file and file.filename:
         if not allowed_file(file.filename):
-            flash("Arquivo inválido. Use .jpg/.jpeg ou .mp4 (até 20MB).", "danger")
+            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
             return redirect(url_for('respostas'))
         ext = file.filename.rsplit(".", 1)[1].lower()
         safe = secure_filename(f"{uuid.uuid4().hex}.{ext}")
@@ -285,13 +283,69 @@ def add_convidado():
     token = os.urandom(16).hex()
     with engine.connect() as conn:
         conn.execute(
-            text("""INSERT INTO invitees (name,email,phone,token,custom_message,diaper_size,media_file)
-                    VALUES (:name,:email,:phone,:token,:msg,:diaper,:media)"""),
-            {"name":name,"email":email,"phone":phone,"token":token,"msg":msg,"diaper":diaper,"media":media_filename}
+            text("""INSERT INTO invitees (name,email,phone,token,custom_message,media_file)
+                    VALUES (:name,:email,:phone,:token,:msg,:media)"""),
+            {"name":name,"email":email,"phone":phone,"token":token,"msg":msg,"media":media_filename}
         )
         conn.commit()
 
     flash(f"Convidado “{name}” adicionado com sucesso!","success")
+    return redirect(url_for('respostas'))
+
+# Editar convidado (novo)
+@app.route("/admin/convidados/<int:id>/edit", methods=['POST'])
+@login_required
+def edit_convidado(id):
+    name = request.form.get('name')
+    email = request.form.get('email') or None
+    phone = request.form.get('phone') or None
+    msg = request.form.get('custom_message') or None
+    response_val = request.form.get('response')  # "yes", "no" ou "" (aguardando)
+
+    if response_val not in ('yes', 'no', ''):
+        response_val = ''
+
+    response_db = None if response_val == '' else response_val
+
+    # upload opcional para substituir
+    new_media = None
+    file = request.files.get('media_file')
+    if file and file.filename:
+        if not allowed_file(file.filename):
+            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
+            return redirect(url_for('respostas'))
+        ext = file.filename.rsplit(".", 1)[1].lower()
+        safe = secure_filename(f"{uuid.uuid4().hex}.{ext}")
+        save_path = os.path.join(app.config["UPLOAD_FOLDER"], safe)
+        file.save(save_path)
+        new_media = safe
+
+    with engine.connect() as conn:
+        # Se enviar novo arquivo, atualiza media_file; senão preserva
+        conn.execute(
+            text("""
+                UPDATE invitees
+                SET name=:name,
+                    email=:email,
+                    phone=:phone,
+                    custom_message=:msg,
+                    response=:response
+                    {media_part}
+                WHERE id=:id
+            """.format(media_part=", media_file=:media_file" if new_media else "")),
+            {
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "msg": msg,
+                "response": response_db,
+                "media_file": new_media,
+                "id": id
+            }
+        )
+        conn.commit()
+
+    flash("Convidado atualizado com sucesso!", "success")
     return redirect(url_for('respostas'))
 
 @app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
@@ -301,7 +355,7 @@ def delete_convidado(id):
         res = conn.execute(text("SELECT name, media_file FROM invitees WHERE id=:id"),{"id":id}).mappings().fetchone()
         conn.execute(text("DELETE FROM invitees WHERE id=:id"),{"id":id})
         conn.commit()
-    # (Opcional) remover arquivo físico se desejar:
+    # (Opcional) remover arquivo físico:
     # if res and res["media_file"]:
     #     try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_file"]))
     #     except FileNotFoundError: pass
