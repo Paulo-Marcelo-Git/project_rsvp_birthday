@@ -27,6 +27,5 @@ db_data/
 # Testes
 populate.py
 
-#Uploads
-.mp4
-.jpeg
+#Pasta De Uploads
+Uploads
