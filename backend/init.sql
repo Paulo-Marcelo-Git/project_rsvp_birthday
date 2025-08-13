@@ -35,3 +35,9 @@ INSERT IGNORE INTO settings (`key`,`value`) VALUES
 
 -- Para bancos já existentes, garante a coluna (idempotente no MySQL 8+)
 ALTER TABLE invitees ADD COLUMN IF NOT EXISTS media_file VARCHAR(255);
+
+
+-- Índices para performance (busca/ordenação)
+CREATE INDEX idx_invitees_name ON invitees (name);
+CREATE INDEX idx_invitees_email ON invitees (email);
+CREATE INDEX idx_invitees_response_date ON invitees (response_date);
