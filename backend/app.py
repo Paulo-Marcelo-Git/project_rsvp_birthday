@@ -18,7 +18,7 @@ import uuid
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.3.0"
+APP_VERSION = "Comemore+ v1.1.1"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -144,7 +144,7 @@ def invite(token):
 @login_required
 def respostas():
     page = int(request.args.get('page', 1))
-    per_page = 20
+    per_page = 50  # 50 por página
     search = request.args.get('search', '').strip()
     offset = (page - 1) * per_page
 
@@ -162,6 +162,7 @@ def respostas():
               LIMIT {per_page} OFFSET {offset}"""
 
     with engine.connect() as conn:
+        # Página atual
         result = conn.execute(text(sql), params).mappings().all()
         convidados = []
         for r in result:
@@ -170,16 +171,32 @@ def respostas():
                 row['response_date'] -= timedelta(hours=3)
             convidados.append(row)
 
+        # Total de registros (para paginação)
         total_sql = f"SELECT COUNT(*) AS total FROM invitees {where_clause}"
-        total_count = conn.execute(text(total_sql), {"search": params.get('search')}).mappings().fetchone()
+        total_count = conn.execute(text(total_sql), params).mappings().fetchone()
         total_convidados = total_count['total']
 
+        # >>> TOTAIS GLOBAIS (para o filtro atual, sem limitar por página) <<<
+        counts_sql = f"""
+            SELECT
+              SUM(CASE WHEN response = 'yes' THEN 1 ELSE 0 END) AS total_sim,
+              SUM(CASE WHEN response = 'no'  THEN 1 ELSE 0 END) AS total_nao,
+              SUM(CASE WHEN response IS NULL THEN 1 ELSE 0 END) AS total_aguardando
+            FROM invitees {where_clause}
+        """
+        counts = conn.execute(text(counts_sql), params).mappings().fetchone()
+        total_sim = counts['total_sim'] or 0
+        total_nao = counts['total_nao'] or 0
+        total_aguardando = counts['total_aguardando'] or 0
+
+        # Textos
         settings = conn.execute(
             text("""SELECT `key`,`value` FROM settings
                     WHERE `key` IN ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
         ).mappings().all()
         texts = {r['key']: r['value'] for r in settings}
 
+        # Link do WhatsApp por linha
         for row in convidados:
             if row['phone']:
                 phone_clean = row['phone'].replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
@@ -189,9 +206,6 @@ def respostas():
             else:
                 row['whatsapp_url'] = None
 
-    total_sim = sum(1 for c in convidados if c['response'] == 'yes')
-    total_nao = sum(1 for c in convidados if c['response'] == 'no')
-    total_aguardando = sum(1 for c in convidados if c['response'] is None)
     total_pages = (total_convidados + per_page - 1) // per_page
 
     return render_template(
@@ -205,6 +219,7 @@ def respostas():
         total_pages=total_pages,
         search=search
     )
+
 
 # Exportar Excel (sem fralda)
 @app.route("/admin/exportar_xlsx")
