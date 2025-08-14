@@ -7,6 +7,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Convite</title>
   <style>
+    /* Garante que padding/borda não somem largura */
+    *, *::before, *::after { box-sizing: border-box; }
+
     :root {
       --bg-grad-a: #fce4ec;
       --bg-grad-b: #e3f2fd;
@@ -29,7 +32,8 @@
     }
 
     .invite-container {
-      width: min(680px, 92vw);
+      width: 100%;
+      max-width: 680px;
       background: #fff;
       border-radius: var(--radius);
       box-shadow: var(--shadow);
@@ -41,21 +45,19 @@
       width: 100%;
       border-radius: calc(var(--radius) - 2px);
       box-shadow: 0 4px 16px rgba(0,0,0,.12);
-      overflow: visible; /* não corta a mídia */
+      overflow: hidden;
       position: relative;
       margin: 0 auto clamp(16px, 2.5vw, 22px);
       background: #fff;
     }
 
-    /* mídia SEM cortes */
     .media-box .media {
       display: block;
       width: 100%;
-      max-width: 100%;
       height: auto;
-      max-height: none;
-      object-fit: contain !important;
+      max-height: clamp(320px, 60vh, 820px);
       border-radius: calc(var(--radius) - 2px);
+      object-fit: contain;
       background: linear-gradient(90deg, var(--bg-grad-a), var(--bg-grad-b));
     }
 
@@ -148,11 +150,6 @@
 
     @media (min-width: 640px) {
       .buttons { grid-template-columns: 1fr 1fr; }
-    }
-
-    @media (max-width: 480px) {
-      .invite-container { padding: 12px; }
-      .media-box { margin-bottom: 12px; }
     }
   </style>
 </head>
