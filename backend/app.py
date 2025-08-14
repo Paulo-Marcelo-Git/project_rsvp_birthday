@@ -18,7 +18,7 @@ import uuid
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.1.1"
+APP_VERSION = "Comemore+ v1.1.2"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
@@ -39,7 +39,7 @@ app.config['APP_VERSION'] = APP_VERSION
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def allowed_file(filename: str) -> bool:
