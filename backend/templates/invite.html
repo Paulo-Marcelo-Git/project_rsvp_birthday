@@ -46,14 +46,14 @@
       background: #fff;
     }
 
-    /* mídia SEM cortes + laterais com o mesmo degradê do fundo */
+    /* mídia SEM cortes – sem limite de altura */
     .media-box .media {
       display: block;
       width: 100%;
-      height: auto;
-      max-height: clamp(320px, 60vh, 820px);
+      max-width: 100%;
+      height: auto;                 /* altura flui conforme a largura */
       border-radius: calc(var(--radius) - 2px);
-      object-fit: contain;
+      object-fit: contain;          /* garante proporção, sem cortar */
       background: linear-gradient(90deg, var(--bg-grad-a), var(--bg-grad-b));
     }
 
