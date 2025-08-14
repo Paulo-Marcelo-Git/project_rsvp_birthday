@@ -1,4 +1,5 @@
 <!-- backend/templates/invite.html -->
+ 
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -40,20 +41,21 @@
       width: 100%;
       border-radius: calc(var(--radius) - 2px);
       box-shadow: 0 4px 16px rgba(0,0,0,.12);
-      overflow: hidden;
+      overflow: visible; /* não corta a mídia */
       position: relative;
       margin: 0 auto clamp(16px, 2.5vw, 22px);
       background: #fff;
     }
 
-    /* mídia SEM cortes – sem limite de altura */
+    /* mídia SEM cortes */
     .media-box .media {
       display: block;
       width: 100%;
       max-width: 100%;
-      height: auto;                 /* altura flui conforme a largura */
+      height: auto;
+      max-height: none;
+      object-fit: contain !important;
       border-radius: calc(var(--radius) - 2px);
-      object-fit: contain;          /* garante proporção, sem cortar */
       background: linear-gradient(90deg, var(--bg-grad-a), var(--bg-grad-b));
     }
 
@@ -146,6 +148,11 @@
 
     @media (min-width: 640px) {
       .buttons { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 480px) {
+      .invite-container { padding: 12px; }
+      .media-box { margin-bottom: 12px; }
     }
   </style>
 </head>
