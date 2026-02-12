@@ -33,10 +33,6 @@ INSERT IGNORE INTO settings (`key`,`value`) VALUES
   ('post_yes_text','Texto Botão Sim'),
   ('post_no_text','Texto Botão Não');
 
--- Para bancos já existentes, garante a coluna (idempotente no MySQL 8+)
-ALTER TABLE invitees ADD COLUMN IF NOT EXISTS media_file VARCHAR(255);
-
-
 -- Índices para performance (busca/ordenação)
 CREATE INDEX idx_invitees_name ON invitees (name);
 CREATE INDEX idx_invitees_email ON invitees (email);
