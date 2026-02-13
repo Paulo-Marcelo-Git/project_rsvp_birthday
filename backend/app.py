@@ -18,7 +18,7 @@ import uuid
 load_dotenv()
 
 # Versão
-APP_VERSION = "Comemore+ v1.1.4"
+APP_VERSION = "Comemore+ v1.1.5"
 
 # Logging
 log_path = os.getenv("LOG_FILE", "logs/app.log")
