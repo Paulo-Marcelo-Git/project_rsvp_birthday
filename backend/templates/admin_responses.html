@@ -1,5 +1,5 @@
 <!-- backend/templates/admin_responses.html -->
- 
+
 {% extends "base.html" %}
 {% block title %}Comemore+ - Admin{% endblock %}
 
@@ -7,7 +7,10 @@
 <div class="container py-3 d-flex justify-content-between align-items-center border-bottom mb-4">
   <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+</h3>
   <div class="d-flex align-items-center gap-3">
-    <span class="text-muted small">Olá, {{ current_user.id }}</span>
+    <span class="text-muted small">Olá, {{ current_user.username }}</span>
+    {% if is_super_admin %}
+      <a href="{{ url_for('admin_usuarios') }}" class="btn btn-sm btn-outline-primary">Usuários</a>
+    {% endif %}
     <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>
   </div>
 </div>
@@ -17,7 +20,9 @@
   <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
     <h2 class="mb-0">Status das Respostas</h2>
     <div class="d-flex gap-2">
-      <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
+      {% if is_super_admin %}
+        <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
+      {% endif %}
       <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd">+ Convidado</button>
       <a href="{{ url_for('exportar_convidados_xlsx', search=search) }}" class="btn btn-success">📥 Exportar Excel</a>
     </div>
@@ -45,9 +50,10 @@
           <th>Resposta</th>
           <th>Data/Hora</th>
           <th>Obs</th>
+          {% if is_super_admin %}<th>Usuário</th>{% endif %}
           <th>URL do Convite</th>
           <th>WhatsApp</th>
-          <th class="text-center" style="width:96px;"></th> <!-- sem cabeçalho (Editar/Excluir) -->
+          <th class="text-center" style="width:96px;"></th>
         </tr>
       </thead>
       <tbody>
@@ -76,6 +82,9 @@
               </div></div>
             </div>
           </td>
+          {% if is_super_admin %}
+          <td><span class="badge bg-light text-dark border">{{ row.owner_username }}</span></td>
+          {% endif %}
           <td><a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a></td>
           <td>
             {% if row.whatsapp_url %}
@@ -85,7 +94,6 @@
             {% endif %}
           </td>
           <td class="text-center">
-            <!-- Botão Editar -->
             <button
               class="btn btn-sm btn-outline-success me-1"
               title="Editar"
@@ -100,9 +108,8 @@
             >
               <i class="bi bi-pencil"></i>
             </button>
-
-            <!-- Botão Excluir -->
             <form action="{{ url_for('delete_convidado', id=row.id) }}" method="post" class="d-inline" onsubmit="return confirm('Excluir {{ row.name }}?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" title="Excluir">
                 <i class="bi bi-trash"></i>
               </button>
@@ -120,7 +127,12 @@
       {% for row in convidados %}
       <div class="card shadow-sm">
         <div class="card-body">
-          <h5 class="card-title mb-2">{{ row.name }}</h5>
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h5 class="card-title mb-0">{{ row.name }}</h5>
+            {% if is_super_admin %}
+              <span class="badge bg-light text-dark border ms-2">{{ row.owner_username }}</span>
+            {% endif %}
+          </div>
           <p><strong>Email:</strong> {{ row.email or '-' }}</p>
           <p><strong>Telefone:</strong> {{ row.phone or '-' }}</p>
           <p><strong>Resposta:</strong>
@@ -138,7 +150,6 @@
             <button class="btn btn-sm {% if row.custom_message %}btn-success{% else %}btn-danger{% endif %}" data-bs-toggle="modal" data-bs-target="#obsModalM{{ row.id }}">Obs</button>
           </div>
 
-          <!-- Modal Mobile Obs -->
           <div class="modal fade" id="obsModalM{{ row.id }}" tabindex="-1">
             <div class="modal-dialog"><div class="modal-content">
               <div class="modal-header"><h5 class="modal-title">Observação</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -171,6 +182,7 @@
               <i class="bi bi-pencil"></i>
             </button>
             <form action="{{ url_for('delete_convidado', id=row.id) }}" method="post" class="d-inline" onsubmit="return confirm('Excluir {{ row.name }}?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" title="Excluir">
                 <i class="bi bi-trash"></i>
               </button>
@@ -207,6 +219,7 @@
   <div class="modal fade" id="modalAdd" tabindex="-1">
     <div class="modal-dialog">
       <form class="modal-content" action="{{ url_for('add_convidado') }}" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title">Adicionar Novo Convidado</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -233,6 +246,7 @@
   <div class="modal fade" id="modalEdit" tabindex="-1">
     <div class="modal-dialog">
       <form id="editForm" class="modal-content" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title">Editar Convidado</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -264,20 +278,22 @@
     </div>
   </div>
 
-  <!-- ===== MODAL TEXTOS ===== -->
+  <!-- ===== MODAL TEXTOS (apenas super-admin) ===== -->
+  {% if is_super_admin %}
   <div class="modal fade" id="modalTextos" tabindex="-1">
     <div class="modal-dialog">
       <form class="modal-content" action="{{ url_for('update_textos') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title">Editar Textos do Convite</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <div class="mb-3"><label class="form-label">Pergunta</label><input name="question_text" value="{{ texts.question_text }}" class="form-control"></div>
-          <div class="mb-3"><label class="form-label">Texto do botão “Sim”</label><input name="yes_text" value="{{ texts.yes_text }}" class="form-control"></div>
-          <div class="mb-3"><label class="form-label">Texto do botão “Não”</label><input name="no_text" value="{{ texts.no_text }}" class="form-control"></div>
-          <div class="mb-3"><label class="form-label">Mensagem após “Sim”</label><input name="post_yes_text" value="{{ texts.post_yes_text }}" class="form-control"></div>
-          <div class="mb-3"><label class="form-label">Mensagem após “Não”</label><input name="post_no_text" value="{{ texts.post_no_text }}" class="form-control"></div>
+          <div class="mb-3"><label class="form-label">Texto do botão "Sim"</label><input name="yes_text" value="{{ texts.yes_text }}" class="form-control"></div>
+          <div class="mb-3"><label class="form-label">Texto do botão "Não"</label><input name="no_text" value="{{ texts.no_text }}" class="form-control"></div>
+          <div class="mb-3"><label class="form-label">Mensagem após "Sim"</label><input name="post_yes_text" value="{{ texts.post_yes_text }}" class="form-control"></div>
+          <div class="mb-3"><label class="form-label">Mensagem após "Não"</label><input name="post_no_text" value="{{ texts.post_no_text }}" class="form-control"></div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -286,6 +302,7 @@
       </form>
     </div>
   </div>
+  {% endif %}
 
 </div>
 
@@ -293,27 +310,17 @@
   {{ app_version }}
 </div>
 
-<!-- Preenche o modal de edição com os dados do botão clicado -->
 <script>
   const modalEdit = document.getElementById('modalEdit');
   modalEdit.addEventListener('show.bs.modal', function (event) {
     const button = event.relatedTarget;
-
+    document.getElementById('edit-name').value = button.getAttribute('data-name') || '';
+    document.getElementById('edit-email').value = button.getAttribute('data-email') || '';
+    document.getElementById('edit-phone').value = button.getAttribute('data-phone') || '';
+    document.getElementById('edit-custom_message').value = button.getAttribute('data-custom_message') || '';
+    document.getElementById('edit-response').value = button.getAttribute('data-response') || '';
     const id = button.getAttribute('data-id');
-    const name = button.getAttribute('data-name') || '';
-    const email = button.getAttribute('data-email') || '';
-    const phone = button.getAttribute('data-phone') || '';
-    const custom_message = button.getAttribute('data-custom_message') || '';
-    const response = button.getAttribute('data-response') || '';
-
-    document.getElementById('edit-name').value = name;
-    document.getElementById('edit-email').value = email;
-    document.getElementById('edit-phone').value = phone;
-    document.getElementById('edit-custom_message').value = custom_message;
-    document.getElementById('edit-response').value = response;
-
-    const form = document.getElementById('editForm');
-    form.action = "{{ url_for('edit_convidado', id=0) }}".replace('/0/', '/' + id + '/');
+    document.getElementById('editForm').action = "{{ url_for('edit_convidado', id=0) }}".replace('/0/', '/' + id + '/');
   });
 </script>
 {% endblock %}

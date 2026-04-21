@@ -2,6 +2,16 @@
 
 SET NAMES utf8mb4;
 
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS invitees (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -11,10 +21,10 @@ CREATE TABLE IF NOT EXISTS invitees (
   response ENUM('yes', 'no') DEFAULT NULL,
   response_date DATETIME DEFAULT NULL,
   custom_message TEXT,
-  diaper_size VARCHAR(100),
-  gift VARCHAR(255),
-  media_file VARCHAR(255),              -- arquivo .jpg ou .mp4
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  media_file VARCHAR(255),
+  user_id INT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_invitees_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
