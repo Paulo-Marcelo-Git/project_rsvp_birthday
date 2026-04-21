@@ -31,6 +31,7 @@ services:
     volumes:
       - ./backend:/app
       - ./logs:/app/logs
+      - ./VERSION:/VERSION:ro
     working_dir: /app
     command: >
       gunicorn app:app
