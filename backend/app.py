@@ -20,7 +20,7 @@ import uuid
 
 load_dotenv()
 
-APP_VERSION = "Comemore+ v1.2.0"
+APP_VERSION = "Comemore+ v1.2.1"
 
 log_path = os.getenv("LOG_FILE", "logs/app.log")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
