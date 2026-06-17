@@ -22,6 +22,7 @@ services:
     build: ./backend
     container_name: rsvp_backend
     restart: always
+    user: "1002:1002"   # <-- adicionar esta linhauser
     env_file: .env
     ports:
       - "127.0.0.1:3000:8000"
