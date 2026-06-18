@@ -1,19 +1,23 @@
-# Comemore+ 🎉  
-Sistema de RSVP para convites de aniversário
+# Comemore+ 🎉
+Sistema de RSVP para convites de aniversário — v1.2.3
 
-Este é um projeto web simples desenvolvido com **Flask**, **MySQL** e **Docker**, que permite o envio de convites personalizados e o acompanhamento das respostas dos convidados (Sim / Não). Ideal para organizar festas e eventos!
+Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o envio de convites personalizados com link único e o acompanhamento das respostas dos convidados em tempo real.
 
 ---
 
 ## ✨ Funcionalidades
 
-- Envio de convites personalizados com link único
-- Página pública de confirmação (Sim / Não)
+- Convites com link único por convidado
+- Página pública de confirmação (Sim / Não) com campo de observação
+- Upload de mídia personalizada por convidado (imagem ou vídeo)
 - Painel administrativo protegido por login
-- Estatísticas em tempo real das respostas
-- Botão de envio direto por WhatsApp
-- Customização de textos do convite
-- Layout responsivo e visual moderno
+- Estatísticas em tempo real (confirmados / recusados / aguardando)
+- Envio direto via WhatsApp com link pré-preenchido
+- Exportação da lista de convidados para Excel (.xlsx)
+- Textos do convite configuráveis pelo painel
+- Gerenciamento de sub-usuários (cada um vê apenas seus próprios convidados)
+- Troca de senha obrigatória para novos usuários
+- Deploy automatizado via GitHub Actions
 
 ---
 
@@ -21,24 +25,28 @@ Este é um projeto web simples desenvolvido com **Flask**, **MySQL** e **Docker*
 
 ```
 project_rsvp_birthday/
-│
 ├── backend/
 │   ├── app.py               # Aplicação principal Flask
-│   ├── Dockerfile           # Imagem do backend
-│   ├── init.sql             # Script para inicializar o banco MySQL
+│   ├── Dockerfile           # Imagem Python 3.12-slim
+│   ├── init.sql             # Criação das tabelas MySQL
 │   ├── requirements.txt     # Dependências Python
 │   ├── static/
 │   │   ├── admin.css        # Estilo do painel admin
-│   │   └── antonio.jpg      # Imagem do aniversariante
+│   │   └── imagen.jpg       # Imagem da página de convite
 │   └── templates/
 │       ├── base.html
 │       ├── login.html
 │       ├── invite.html
-│       └── admin_responses.html
-│
+│       ├── admin_responses.html
+│       ├── admin_users.html
+│       └── change_password.html
+├── .github/
+│   └── workflows/
+│       └── deploy.yml       # CI/CD: push em main → deploy SSH
 ├── .env                     # Variáveis de ambiente (não versionado)
 ├── .gitignore
-└── docker-compose.yml       # Orquestração com Docker
+├── VERSION                  # Versão atual da aplicação
+└── docker-compose.yml       # Orquestração dos containers
 ```
 
 ---
@@ -51,50 +59,76 @@ project_rsvp_birthday/
 
 ### 2. Configurar variáveis de ambiente
 
-Crie um arquivo `.env` na raiz com o seguinte conteúdo:
+Crie um arquivo `.env` na raiz:
 
-```
+```env
 DB_NAME=rsvp_db
 DB_USER=root
 DB_PASSWORD=sua_senha_mysql
 DB_HOST=db
 
 ADMIN_USER=admin
-ADMIN_PASS=sua_senha_admin
+ADMIN_PASS=hash_bcrypt_da_senha
 
-SECRET_KEY=chave_secreta_flask
+SECRET_KEY=chave_secreta_flask_aleatoria
+
+# Opcionais
+TZ_OFFSET_HOURS=-3
+LOG_FILE=logs/app.log
+UPLOAD_FOLDER=static/uploads
 ```
+
+> `ADMIN_PASS` deve ser o hash gerado com `generate_password_hash()` do Werkzeug — nunca a senha em texto puro.
 
 ### 3. Subir os containers
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-- Acesse o **painel admin** em: [http://localhost:3000/login](http://localhost:3000/login)
-- Acesse os **convites** pelos links gerados (ex: http://localhost:3000/invite/...)
+- Painel admin: [http://localhost:3000/login](http://localhost:3000/login)
+- Convites: `http://localhost:3000/invite/<token>`
 
 ---
 
-## 🛠️ Acesso Padrão
+## 🛠️ Acesso
 
-- Usuário: `admin`
-- Senha: definida na variável `ADMIN_PASS`
+| Tipo | Usuário | Senha |
+|------|---------|-------|
+| Super admin | valor de `ADMIN_USER` no `.env` | valor de `ADMIN_PASS` (hash) |
+| Sub-usuário | criado no painel `/admin/usuarios` | `102030@` (padrão, troca obrigatória no primeiro login) |
+
+---
+
+## 👥 Níveis de Acesso
+
+- **Super admin** — acesso total: vê todos os convidados, gerencia sub-usuários, edita textos
+- **Sub-usuário** — vê e gerencia apenas os convidados que ele mesmo cadastrou
 
 ---
 
 ## 🗃️ Banco de Dados
 
-As tabelas são criadas automaticamente no primeiro uso via `init.sql`. As principais tabelas são:
+As tabelas são criadas automaticamente via `init.sql`. O sistema também aplica migrações incrementais em cada inicialização.
 
-- `invitees`: convidados e respostas
-- `settings`: textos configuráveis do convite
+| Tabela | Descrição |
+|--------|-----------|
+| `users` | Sub-usuários do painel |
+| `invitees` | Convidados, tokens únicos e respostas |
+| `settings` | Textos configuráveis do convite |
 
 ---
 
-## 📸 Exemplo de Tela
+## 🔄 CI/CD
 
-![Exemplo do painel admin](backend/static/antonio.jpg)
+Push na branch `main` dispara deploy automático via GitHub Actions:
+
+1. Conecta na VPS via SSH
+2. `git pull origin main`
+3. `docker compose up -d --build --remove-orphans`
+4. Remove imagens antigas
+
+Secrets necessários no repositório: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`, `VPS_PATH`.
 
 ---
 

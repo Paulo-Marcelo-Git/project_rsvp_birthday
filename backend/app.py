@@ -67,7 +67,7 @@ engine = create_engine(
     future=True
 )
 
-DEFAULT_PASSWORD = "102030@"
+DEFAULT_PASSWORD = os.getenv("DEFAULT_PASSWORD", "102030@")
 
 def _col_exists(conn, table, column):
     return conn.execute(text("""

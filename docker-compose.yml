@@ -3,7 +3,8 @@ services:
     image: mysql:8
     container_name: rsvp_mysql
     restart: always
-    env_file: .env
+    env_file:
+      - .env
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
@@ -22,8 +23,9 @@ services:
     build: ./backend
     container_name: rsvp_backend
     restart: always
-    user: "1002:1002"   # <-- adicionar esta linhauser
-    env_file: .env
+    user: "1002:1002"
+    env_file:
+      - .env
     ports:
       - "127.0.0.1:3000:8000"
     depends_on:
