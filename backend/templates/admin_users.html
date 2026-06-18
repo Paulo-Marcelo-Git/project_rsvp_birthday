@@ -62,8 +62,7 @@
             </button>
 
             <!-- Resetar senha -->
-            <form action="{{ url_for('reset_senha_usuario', id=u.id) }}" method="post" class="d-inline"
-                  onsubmit="return confirm('Resetar senha de {{ u.username }} para a senha padrão?')">
+            <form action="{{ url_for('reset_senha_usuario', id=u.id) }}" method="post" class="d-inline reset-user-form" data-username="{{ u.username }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-warning me-1" title="Resetar senha">
                 <i class="bi bi-key"></i>
@@ -71,8 +70,7 @@
             </form>
 
             <!-- Excluir -->
-            <form action="{{ url_for('delete_usuario', id=u.id) }}" method="post" class="d-inline"
-                  onsubmit="return confirm('Excluir usuário {{ u.username }}? Seus convidados ficarão visíveis apenas ao admin.')">
+            <form action="{{ url_for('delete_usuario', id=u.id) }}" method="post" class="d-inline delete-user-form" data-username="{{ u.username }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" title="Excluir">
                 <i class="bi bi-trash"></i>
@@ -107,15 +105,13 @@
                     data-id="{{ u.id }}" data-username="{{ u.username }}">
               <i class="bi bi-pencil"></i> Editar
             </button>
-            <form action="{{ url_for('reset_senha_usuario', id=u.id) }}" method="post" class="d-inline"
-                  onsubmit="return confirm('Resetar senha de {{ u.username }}?')">
+            <form action="{{ url_for('reset_senha_usuario', id=u.id) }}" method="post" class="d-inline reset-user-form" data-username="{{ u.username }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-warning">
                 <i class="bi bi-key"></i> Resetar senha
               </button>
             </form>
-            <form action="{{ url_for('delete_usuario', id=u.id) }}" method="post" class="d-inline"
-                  onsubmit="return confirm('Excluir usuário {{ u.username }}?')">
+            <form action="{{ url_for('delete_usuario', id=u.id) }}" method="post" class="d-inline delete-user-form" data-username="{{ u.username }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger">
                 <i class="bi bi-trash"></i> Excluir
@@ -194,6 +190,18 @@
 </div>
 
 <script>
+  document.querySelectorAll('.reset-user-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Resetar senha de ' + this.dataset.username + ' para a senha padrão?')) e.preventDefault();
+    });
+  });
+
+  document.querySelectorAll('.delete-user-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Excluir usuário ' + this.dataset.username + '? Seus convidados ficarão visíveis apenas ao admin.')) e.preventDefault();
+    });
+  });
+
   const modalEditUser = document.getElementById('modalEditUser');
   modalEditUser.addEventListener('show.bs.modal', function(event) {
     const btn = event.relatedTarget;

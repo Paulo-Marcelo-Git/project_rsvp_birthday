@@ -285,7 +285,10 @@ def invite(token):
 @app.route("/admin/respostas")
 @login_required
 def respostas():
-    page = max(1, int(request.args.get('page', 1)))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (ValueError, TypeError):
+        page = 1
     per_page = 50
     search = request.args.get('search', '').strip()
     offset = (page - 1) * per_page
