@@ -111,3 +111,88 @@ def test_forgot_password_post_usuario_valido_envia_email(client, db):
     assert args[0] == 'joao@test.com'
     assert args[1] == 'joao'
     assert '/reset_password/' in args[2]
+
+
+def test_reset_password_token_invalido_redireciona(client, db):
+    setup_db(db, qresult(fetchone=None))
+    resp = client.get('/reset_password/tokeninvalido')
+    assert resp.status_code == 302
+    assert '/forgot_password' in resp.headers['Location']
+
+
+def test_reset_password_token_valido_exibe_formulario(client, db):
+    from datetime import datetime, timedelta
+    token_row = {
+        'id': 1, 'user_id': 2, 'token': 'validtoken123',
+        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'used': False,
+    }
+    setup_db(db, qresult(fetchone=token_row))
+    resp = client.get('/reset_password/validtoken123')
+    assert resp.status_code == 200
+    assert 'Nova senha' in resp.data.decode() or 'nova senha' in resp.data.decode().lower()
+
+
+def test_reset_password_post_senha_fraca_retorna_erro(client, db):
+    from datetime import datetime, timedelta
+    token_row = {
+        'id': 1, 'user_id': 2, 'token': 'tok',
+        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'used': False,
+    }
+    # GET valida token, POST revalida token
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=token_row),
+        qresult(fetchone=token_row),
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    resp = client.post('/reset_password/tok',
+                       data={'new_password': '123', 'confirm_password': '123'},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert '8' in resp.data.decode() or 'caractere' in resp.data.decode().lower()
+
+
+def test_reset_password_post_senhas_diferentes_retorna_erro(client, db):
+    from datetime import datetime, timedelta
+    token_row = {
+        'id': 1, 'user_id': 2, 'token': 'tok2',
+        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'used': False,
+    }
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=token_row),
+        qresult(fetchone=token_row),
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    resp = client.post('/reset_password/tok2',
+                       data={'new_password': 'SenhaForte@1', 'confirm_password': 'Diferente@1'},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert 'coincidem' in resp.data.decode() or 'diferentes' in resp.data.decode().lower()
+
+
+def test_reset_password_post_sucesso_redireciona_login(client, db):
+    from datetime import datetime, timedelta
+    token_row = {
+        'id': 1, 'user_id': 2, 'token': 'tok3',
+        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'used': False,
+    }
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=token_row),  # revalidação no POST
+        MagicMock(),                   # UPDATE users SET password_hash
+        MagicMock(),                   # UPDATE tokens SET used=TRUE
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    resp = client.post('/reset_password/tok3',
+                       data={'new_password': 'NovaSenha@99',
+                             'confirm_password': 'NovaSenha@99'})
+    assert resp.status_code == 302
+    assert '/login' in resp.headers['Location']

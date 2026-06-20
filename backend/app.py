@@ -431,6 +431,53 @@ def forgot_password():
     return render_template("forgot_password.html")
 
 
+def _get_valid_token(conn, token: str):
+    """Retorna a row do token se válido (existente, não usado, não expirado)."""
+    return conn.execute(
+        text("""SELECT id, user_id FROM password_reset_tokens
+                WHERE token=:tok AND used=FALSE AND expires_at > UTC_TIMESTAMP()"""),
+        {"tok": token}
+    ).mappings().fetchone()
+
+
+@app.route("/reset_password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    with engine.connect() as conn:
+        tok_row = _get_valid_token(conn, token)
+        if not tok_row:
+            flash("Link de redefinição inválido ou expirado.", "danger")
+            return redirect(url_for("forgot_password"))
+
+        if request.method == "POST":
+            new_password = request.form.get("new_password", "")
+            confirm      = request.form.get("confirm_password", "")
+
+            if len(new_password) < 8:
+                flash("A senha deve ter pelo menos 8 caracteres.", "danger")
+                return render_template("reset_password.html", token=token)
+            if new_password == DEFAULT_PASSWORD:
+                flash("Escolha uma senha diferente da senha padrão.", "danger")
+                return render_template("reset_password.html", token=token)
+            if new_password != confirm:
+                flash("As senhas não coincidem.", "danger")
+                return render_template("reset_password.html", token=token)
+
+            conn.execute(
+                text("UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"),
+                {"pw": generate_password_hash(new_password), "id": tok_row['user_id']}
+            )
+            conn.execute(
+                text("UPDATE password_reset_tokens SET used=TRUE WHERE id=:id"),
+                {"id": tok_row['id']}
+            )
+            conn.commit()
+            logger.info(f"Senha redefinida via token para user_id={tok_row['user_id']}.")
+            flash("Senha redefinida com sucesso! Faça login com sua nova senha.", "success")
+            return redirect(url_for("login"))
+
+    return render_template("reset_password.html", token=token)
+
+
 @app.route("/invite/<token>", methods=["GET", "POST"])
 @csrf.exempt
 def invite(token):
