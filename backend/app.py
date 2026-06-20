@@ -787,7 +787,7 @@ def update_textos():
 def admin_usuarios():
     with engine.connect() as conn:
         users = conn.execute(
-            text("SELECT id, username, created_at FROM users ORDER BY created_at DESC")
+            text("SELECT id, username, email, whatsapp, must_change_password, created_at FROM users ORDER BY created_at DESC")
         ).mappings().all()
         counts_rows = conn.execute(
             text("""SELECT user_id, COUNT(*) AS total FROM invitees
@@ -803,22 +803,29 @@ def admin_usuarios():
 @super_admin_required
 def add_usuario():
     username = request.form.get('username', '').strip()
+    email    = request.form.get('email', '').strip()
+    whatsapp = request.form.get('whatsapp', '').strip() or None
+
     if not username:
         flash("Nome de usuário é obrigatório.", "danger")
+        return redirect(url_for('admin_usuarios'))
+    if not email:
+        flash("Email é obrigatório.", "danger")
         return redirect(url_for('admin_usuarios'))
 
     try:
         with engine.connect() as conn:
             conn.execute(
-                text("""INSERT INTO users (username, password_hash, must_change_password)
-                        VALUES (:u, :pw, TRUE)"""),
-                {"u": username, "pw": generate_password_hash(DEFAULT_PASSWORD)}
+                text("""INSERT INTO users (username, password_hash, must_change_password, email, whatsapp)
+                        VALUES (:u, :pw, TRUE, :email, :whatsapp)"""),
+                {"u": username, "pw": generate_password_hash(DEFAULT_PASSWORD),
+                 "email": email, "whatsapp": whatsapp}
             )
             conn.commit()
         logger.info(f"Usuário '{username}' criado por '{current_user.username}'.")
         flash(f'Usuário "{username}" criado. Senha padrão: {DEFAULT_PASSWORD}', "success")
     except Exception:
-        flash("Erro: nome de usuário já existe.", "danger")
+        flash("Erro: nome de usuário ou email já existe.", "danger")
 
     return redirect(url_for('admin_usuarios'))
 
@@ -827,8 +834,14 @@ def add_usuario():
 @super_admin_required
 def edit_usuario(id):
     new_username = request.form.get('username', '').strip()
+    new_email    = request.form.get('email', '').strip()
+    new_whatsapp = request.form.get('whatsapp', '').strip() or None
+
     if not new_username:
         flash("Nome de usuário não pode ser vazio.", "danger")
+        return redirect(url_for('admin_usuarios'))
+    if not new_email:
+        flash("Email é obrigatório.", "danger")
         return redirect(url_for('admin_usuarios'))
 
     try:
@@ -839,14 +852,14 @@ def edit_usuario(id):
             if not user:
                 abort(404)
             conn.execute(
-                text("UPDATE users SET username=:u WHERE id=:id"),
-                {"u": new_username, "id": id}
+                text("UPDATE users SET username=:u, email=:email, whatsapp=:whatsapp WHERE id=:id"),
+                {"u": new_username, "email": new_email, "whatsapp": new_whatsapp, "id": id}
             )
             conn.commit()
-        logger.info(f"Usuário id={id} renomeado para '{new_username}' por '{current_user.username}'.")
-        flash(f'Usuário renomeado para "{new_username}".', "success")
+        logger.info(f"Usuário id={id} atualizado por '{current_user.username}'.")
+        flash(f'Usuário "{new_username}" atualizado.', "success")
     except Exception:
-        flash("Erro: nome de usuário já existe.", "danger")
+        flash("Erro: nome de usuário ou email já existe.", "danger")
 
     return redirect(url_for('admin_usuarios'))
 

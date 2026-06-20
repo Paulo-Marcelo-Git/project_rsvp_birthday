@@ -96,3 +96,13 @@ GUEST_ROW = {
     'owner_username': '(admin)',
     'user_id': None,
 }
+
+USER_ROW_FULL = {
+    'id': 1,
+    'username': 'operador',
+    'password_hash': generate_password_hash('Default@1234'),
+    'must_change_password': False,
+    'email': 'operador@test.com',
+    'whatsapp': '11999990000',
+    'created_at': None,
+}

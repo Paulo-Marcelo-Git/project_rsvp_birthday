@@ -31,6 +31,8 @@
           <th>#</th>
           <th>Usuário</th>
           <th>Criado em</th>
+          <th>Email</th>
+          <th>WhatsApp</th>
           <th>Convidados</th>
           <th>Status</th>
           <th class="text-center" style="width:130px;">Ações</th>
@@ -42,6 +44,8 @@
           <td class="text-muted small">{{ u.id }}</td>
           <td><strong>{{ u.username }}</strong></td>
           <td>{{ u.created_at.strftime("%d/%m/%Y %H:%M") if u.created_at else '-' }}</td>
+          <td>{{ u.email or '-' }}</td>
+          <td>{{ u.whatsapp or '-' }}</td>
           <td><span class="badge bg-secondary">{{ u.guest_count }}</span></td>
           <td>
             {% if u.must_change_password %}
@@ -57,7 +61,9 @@
                     data-bs-toggle="modal"
                     data-bs-target="#modalEditUser"
                     data-id="{{ u.id }}"
-                    data-username="{{ u.username }}">
+                    data-username="{{ u.username }}"
+                    data-email="{{ u.email or '' }}"
+                    data-whatsapp="{{ u.whatsapp or '' }}">
               <i class="bi bi-pencil"></i>
             </button>
 
@@ -102,7 +108,9 @@
           <div class="d-flex gap-2 flex-wrap">
             <button class="btn btn-sm btn-outline-primary"
                     data-bs-toggle="modal" data-bs-target="#modalEditUser"
-                    data-id="{{ u.id }}" data-username="{{ u.username }}">
+                    data-id="{{ u.id }}" data-username="{{ u.username }}"
+                    data-email="{{ u.email or '' }}"
+                    data-whatsapp="{{ u.whatsapp or '' }}">
               <i class="bi bi-pencil"></i> Editar
             </button>
             <form action="{{ url_for('reset_senha_usuario', id=u.id) }}" method="post" class="d-inline reset-user-form" data-username="{{ u.username }}">
@@ -152,6 +160,16 @@
           <label class="form-label">Nome de usuário *</label>
           <input name="username" class="form-control" required autocomplete="off" placeholder="ex: maria">
         </div>
+        <div class="mb-3">
+          <label class="form-label">Email *</label>
+          <input name="email" type="email" class="form-control" required
+                 autocomplete="off" placeholder="email@exemplo.com">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">WhatsApp</label>
+          <input name="whatsapp" class="form-control" autocomplete="off"
+                 placeholder="11999990000">
+        </div>
         <div class="alert alert-info small mb-0">
           <i class="bi bi-info-circle"></i>
           A senha inicial será <strong>{{ default_password }}</strong>.
@@ -180,6 +198,14 @@
           <label class="form-label">Nome de usuário *</label>
           <input id="edit-username" name="username" class="form-control" required autocomplete="off">
         </div>
+        <div class="mb-3">
+          <label class="form-label">Email *</label>
+          <input id="edit-email" name="email" type="email" class="form-control" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">WhatsApp</label>
+          <input id="edit-whatsapp" name="whatsapp" class="form-control">
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -206,6 +232,8 @@
   modalEditUser.addEventListener('show.bs.modal', function(event) {
     const btn = event.relatedTarget;
     document.getElementById('edit-username').value = btn.getAttribute('data-username') || '';
+    document.getElementById('edit-email').value = btn.getAttribute('data-email') || '';
+    document.getElementById('edit-whatsapp').value = btn.getAttribute('data-whatsapp') || '';
     document.getElementById('editUserForm').action =
       "{{ url_for('edit_usuario', id=0) }}".replace('/0/', '/' + btn.getAttribute('data-id') + '/');
   });
