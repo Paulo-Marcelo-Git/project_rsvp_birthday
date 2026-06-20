@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import email.charset as _email_charset
 from urllib.parse import quote_plus
 from flask import Flask, render_template, request, redirect, url_for, abort, flash, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
@@ -318,14 +317,12 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
 </body>
 </html>"""
 
-    # Plain text body uses ASCII-only so msg.as_string() keeps usernames/URLs
-    # readable (avoids base64 encoding that would hide them in unit tests)
     text_body = (
-        f"Ola, {username}!\n\n"
-        f"Voce solicitou a redefinicao de senha da sua conta no Comemore+.\n\n"
-        f"Acesse o link abaixo para criar uma nova senha (valido por 1 hora):\n"
+        f"Olá, {username}!\n\n"
+        f"Você solicitou a redefinição de senha da sua conta no Comemore+.\n\n"
+        f"Acesse o link abaixo para criar uma nova senha (válido por 1 hora):\n"
         f"{reset_url}\n\n"
-        f"Se voce nao solicitou isso, ignore este email.\n\n"
+        f"Se você não solicitou isso, ignore este email.\n\n"
         f"-- Equipe Comemore+"
     )
 
@@ -333,16 +330,21 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
     msg['Subject'] = subject
     msg['From']    = from_addr
     msg['To']      = to_address
-    msg.attach(MIMEText(text_body, 'plain', 'us-ascii'))
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
     msg.attach(MIMEText(html_body, 'html',  'utf-8'))
 
     try:
         server = smtplib.SMTP(smtp_host, smtp_port)
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_addr, to_address, msg.as_string())
-        server.quit()
-        logger.info(f"Email de reset enviado para '{to_address}'.")
+        try:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_addr, to_address, msg.as_string())
+            logger.info(f"Email de reset enviado para '{to_address}'.")
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
     except Exception as e:
         logger.error(f"Falha ao enviar email de reset para '{to_address}': {e}")
 

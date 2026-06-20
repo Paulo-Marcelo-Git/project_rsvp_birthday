@@ -34,8 +34,20 @@ def test_send_reset_email_com_config_chama_smtp(monkeypatch):
     # Verifica que o email contém o username e a URL
     call_args = mock_smtp_instance.sendmail.call_args
     msg_str = call_args[0][2]
-    assert 'joao' in msg_str
-    assert 'tok123' in msg_str
+    # Decode all content for assertion (plain-text part may be base64-encoded)
+    import base64
+    import email as email_module
+    full_content = msg_str
+    try:
+        parsed = email_module.message_from_string(msg_str)
+        for part in parsed.walk():
+            payload = part.get_payload(decode=True)
+            if payload:
+                full_content += payload.decode('utf-8', errors='replace')
+    except Exception:
+        pass
+    assert 'joao' in full_content
+    assert 'tok123' in full_content
 
 
 def test_init_db_cria_tabela_tokens(db, monkeypatch):
