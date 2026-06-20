@@ -388,6 +388,46 @@ def logout():
     flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
 
+
+@app.route("/forgot_password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email_to_send = None
+        username_to_send = None
+        token_to_send = None
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("""SELECT id, username, email
+                        FROM users WHERE username=:u"""),
+                {"u": username}
+            ).mappings().fetchone()
+
+            if row and row['email']:
+                token = uuid.uuid4().hex
+                expires = datetime.utcnow() + timedelta(hours=1)
+                conn.execute(
+                    text("""INSERT INTO password_reset_tokens
+                            (user_id, token, expires_at) VALUES (:uid, :tok, :exp)"""),
+                    {"uid": row['id'], "tok": token, "exp": expires}
+                )
+                conn.commit()
+                base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+                email_to_send = row['email']
+                username_to_send = row['username']
+                token_to_send = f"{base_url}/reset_password/{token}"
+
+        if email_to_send:
+            send_reset_email(email_to_send, username_to_send, token_to_send)
+
+        flash("Se o usuário existir e tiver email cadastrado, "
+              "você receberá um link de redefinição em breve.", "info")
+        return redirect(url_for("login"))
+
+    return render_template("forgot_password.html")
+
+
 @app.route("/invite/<token>", methods=["GET", "POST"])
 @csrf.exempt
 def invite(token):

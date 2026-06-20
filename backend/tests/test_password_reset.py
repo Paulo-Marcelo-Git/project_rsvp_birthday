@@ -62,3 +62,51 @@ def test_init_db_cria_tabela_tokens(db, monkeypatch):
 
     assert db.connect.called
     assert conn.execute.called
+
+
+def test_forgot_password_page_carrega(client):
+    resp = client.get('/forgot_password')
+    assert resp.status_code == 200
+    assert 'Esqueci' in resp.data.decode() or 'senha' in resp.data.decode().lower()
+
+
+def test_forgot_password_post_usuario_nao_encontrado_mostra_mensagem_generica(client, db):
+    setup_db(db, qresult(fetchone=None))
+    resp = client.post('/forgot_password', data={'username': 'ninguem'},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # Mensagem genérica — não revela se usuário existe
+    assert 'Se o usuário existir' in body or 'verifique seu email' in body.lower() \
+           or 'email' in body.lower()
+
+
+def test_forgot_password_post_usuario_sem_email_mostra_mensagem_generica(client, db):
+    user_row = {'id': 1, 'username': 'maria', 'password_hash': 'x',
+                'must_change_password': False, 'email': None, 'whatsapp': None}
+    setup_db(db, qresult(fetchone=user_row))
+    resp = client.post('/forgot_password', data={'username': 'maria'},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+
+
+def test_forgot_password_post_usuario_valido_envia_email(client, db):
+    user_row = {'id': 2, 'username': 'joao', 'password_hash': 'x',
+                'must_change_password': False, 'email': 'joao@test.com', 'whatsapp': None}
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=user_row),  # SELECT user
+        MagicMock(),                  # INSERT token
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    with patch('app.send_reset_email') as mock_email:
+        resp = client.post('/forgot_password', data={'username': 'joao'})
+
+    assert resp.status_code == 302
+    assert '/login' in resp.headers['Location']
+    mock_email.assert_called_once()
+    args = mock_email.call_args[0]
+    assert args[0] == 'joao@test.com'
+    assert args[1] == 'joao'
+    assert '/reset_password/' in args[2]
