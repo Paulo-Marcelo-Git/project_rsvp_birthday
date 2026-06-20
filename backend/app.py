@@ -419,7 +419,10 @@ def forgot_password():
                 token_to_send = f"{base_url}/reset_password/{token}"
 
         if email_to_send:
-            send_reset_email(email_to_send, username_to_send, token_to_send)
+            try:
+                send_reset_email(email_to_send, username_to_send, token_to_send)
+            except Exception as e:
+                logger.error(f"Erro ao enviar email de reset: {e}")
 
         flash("Se o usuário existir e tiver email cadastrado, "
               "você receberá um link de redefinição em breve.", "info")

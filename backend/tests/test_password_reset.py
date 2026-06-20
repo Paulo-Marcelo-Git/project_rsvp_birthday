@@ -88,6 +88,7 @@ def test_forgot_password_post_usuario_sem_email_mostra_mensagem_generica(client,
     resp = client.post('/forgot_password', data={'username': 'maria'},
                        follow_redirects=True)
     assert resp.status_code == 200
+    assert 'Se o usuário existir' in resp.data.decode() or 'email' in resp.data.decode().lower()
 
 
 def test_forgot_password_post_usuario_valido_envia_email(client, db):
