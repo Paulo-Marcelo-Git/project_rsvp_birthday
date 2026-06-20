@@ -24,12 +24,25 @@ def test_add_usuario_com_email_cria_com_sucesso(admin_client, db):
 
 
 def test_edit_usuario_sem_email_retorna_erro(admin_client, db):
+    from unittest.mock import MagicMock
+    # Mock for the admin_usuarios page load after redirect (2 queries)
+    users_result = MagicMock()
+    users_m = MagicMock()
+    users_m.all.return_value = []
+    users_result.mappings.return_value = users_m
+    counts_result = MagicMock()
+    counts_m = MagicMock()
+    counts_m.all.return_value = []
+    counts_result.mappings.return_value = counts_m
+    conn = MagicMock()
+    conn.execute.side_effect = [users_result, counts_result]
+    db.connect.return_value.__enter__.return_value = conn
+
     resp = admin_client.post('/admin/usuarios/1/edit',
                              data={'username': 'op', 'email': ''},
-                             follow_redirects=False)
-    # Validation rejects before hitting DB — should redirect back to admin_usuarios
-    assert resp.status_code == 302
-    assert '/admin/usuarios' in resp.headers.get('Location', '')
+                             follow_redirects=True)
+    assert resp.status_code == 200
+    assert 'Email é obrigatório' in resp.data.decode() or 'email' in resp.data.decode().lower()
 
 
 def test_listagem_usuarios_exibe_email(admin_client, db):

@@ -104,7 +104,9 @@
             {% endif %}
           </div>
           <p class="mb-1"><strong>Criado em:</strong> {{ u.created_at.strftime("%d/%m/%Y %H:%M") if u.created_at else '-' }}</p>
-          <p class="mb-3"><strong>Convidados:</strong> <span class="badge bg-secondary">{{ u.guest_count }}</span></p>
+          <p class="mb-1"><strong>Convidados:</strong> <span class="badge bg-secondary">{{ u.guest_count }}</span></p>
+          <p class="mb-1"><strong>Email:</strong> {{ u.email or '-' }}</p>
+          <p class="mb-3"><strong>WhatsApp:</strong> {{ u.whatsapp or '-' }}</p>
           <div class="d-flex gap-2 flex-wrap">
             <button class="btn btn-sm btn-outline-primary"
                     data-bs-toggle="modal" data-bs-target="#modalEditUser"
