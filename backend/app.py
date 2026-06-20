@@ -5,7 +5,10 @@ import time
 import logging
 from functools import wraps
 from dotenv import load_dotenv
-from datetime import timedelta
+from datetime import datetime, timedelta
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from urllib.parse import quote_plus
 from flask import Flask, render_template, request, redirect, url_for, abort, flash, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
@@ -101,6 +104,30 @@ def init_db():
                         ALTER TABLE users
                         ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE
                     """))
+
+                # Migração: colunas email e whatsapp em users
+                if not _col_exists(conn, 'users', 'email'):
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL"
+                    ))
+                if not _col_exists(conn, 'users', 'whatsapp'):
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN whatsapp VARCHAR(30) NULL"
+                    ))
+
+                # Tabela de tokens de reset de senha
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                      id         INT AUTO_INCREMENT PRIMARY KEY,
+                      user_id    INT NOT NULL,
+                      token      VARCHAR(64) NOT NULL UNIQUE,
+                      expires_at DATETIME NOT NULL,
+                      used       BOOLEAN NOT NULL DEFAULT FALSE,
+                      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                      CONSTRAINT fk_prt_user
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """))
                 conn.commit()
             logger.info("DB inicializado com sucesso.")
             return
