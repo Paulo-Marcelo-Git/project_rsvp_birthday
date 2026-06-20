@@ -219,7 +219,8 @@ def super_admin_required(f):
 
 @app.before_request
 def protect_swagger():
-    if request.path.startswith('/apidocs') or request.path.startswith('/apispec'):
+    if (request.path.startswith('/apidocs') or request.path.startswith('/apispec')
+            or request.path.startswith('/flasgger_static')):
         if not current_user.is_authenticated or not current_user.is_super_admin:
             return redirect(url_for('login'))
 

@@ -171,6 +171,45 @@ def test_reset_password_post_sucesso_redireciona_login(client, db):
     assert '/login' in resp.headers['Location']
 
 
+def test_reset_password_post_token_expirado_redireciona(client, db):
+    """POST com token expirado/usado deve redirecionar para /forgot_password."""
+    setup_db(db, qresult(fetchone=None))  # _get_valid_token returns None
+    resp = client.post('/reset_password/tokenexpirado',
+                       data={'new_password': 'NovaSenha@99',
+                             'confirm_password': 'NovaSenha@99'})
+    assert resp.status_code == 302
+    assert '/forgot_password' in resp.headers['Location']
+
+
+def test_reset_password_post_sucesso_marca_token_como_usado(client, db):
+    """POST bem-sucedido deve marcar token como used=TRUE no banco."""
+    from datetime import datetime, timedelta
+    token_row = {
+        'id': 5, 'user_id': 3, 'token': 'tok_used_check',
+        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'used': False,
+    }
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=token_row),  # _get_valid_token
+        MagicMock(),                   # UPDATE users SET password_hash
+        MagicMock(),                   # UPDATE password_reset_tokens SET used=TRUE
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    resp = client.post('/reset_password/tok_used_check',
+                       data={'new_password': 'NovaSenha@99',
+                             'confirm_password': 'NovaSenha@99'})
+
+    assert resp.status_code == 302
+    assert '/login' in resp.headers['Location']
+    # Verify 3 execute calls: token validation + 2 UPDATEs
+    assert conn.execute.call_count == 3
+    # Third call must update password_reset_tokens with used=TRUE
+    third_call_sql = str(conn.execute.call_args_list[2][0][0])
+    assert 'used' in third_call_sql.lower() or 'password_reset_tokens' in third_call_sql.lower()
+
+
 def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
     import os
     default_pw = os.environ.get('DEFAULT_PASSWORD', 'Default@1234')
