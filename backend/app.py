@@ -13,6 +13,7 @@ from urllib.parse import quote_plus
 from flask import Flask, render_template, request, redirect, url_for, abort, flash, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from flask_wtf.csrf import CSRFProtect
+from flasgger import Swagger
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -42,6 +43,26 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
 
 csrf = CSRFProtect(app)
+
+swagger = Swagger(app, config={
+    "headers": [],
+    "specs": [{"endpoint": "apispec_1", "route": "/apispec_1.json",
+               "rule_filter": lambda rule: True, "model_filter": lambda tag: True}],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs/",
+    "title": "Comemore+ API",
+    "version": APP_VERSION,
+    "description": "API do sistema de RSVP para convites de aniversário Comemore+.",
+    "termsOfService": "",
+    "contact": {"email": "seu@email.com"},
+}, template={
+    "info": {
+        "title": "Comemore+ API",
+        "description": "Documentação completa das APIs do sistema Comemore+.",
+        "version": APP_VERSION,
+    }
+})
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
@@ -195,6 +216,13 @@ def super_admin_required(f):
             abort(403)
         return f(*args, **kwargs)
     return decorated
+
+@app.before_request
+def protect_swagger():
+    if request.path.startswith('/apidocs') or request.path.startswith('/apispec'):
+        if not current_user.is_authenticated or not current_user.is_super_admin:
+            return redirect(url_for('login'))
+
 
 @app.before_request
 def force_password_change():
@@ -351,6 +379,25 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
 # Rotas
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """
+    Login de usuário
+    ---
+    tags: [Auth]
+    parameters:
+      - in: formData
+        name: username
+        type: string
+        required: true
+      - in: formData
+        name: password
+        type: string
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/respostas (sucesso) ou reexibe form (falha)
+      200:
+        description: Página de login
+    """
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -384,6 +431,14 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
+    """
+    Encerra a sessão do usuário
+    ---
+    tags: [Auth]
+    responses:
+      302:
+        description: Redireciona para /login
+    """
     logout_user()
     flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
@@ -391,6 +446,21 @@ def logout():
 
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
+    """
+    Solicitar redefinição de senha por email
+    ---
+    tags: [Auth]
+    parameters:
+      - in: formData
+        name: username
+        type: string
+        required: true
+    responses:
+      302:
+        description: Sempre redireciona para /login com mensagem genérica
+      200:
+        description: Formulário de solicitação
+    """
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         email_to_send = None
@@ -442,6 +512,29 @@ def _get_valid_token(conn, token: str):
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
+    """
+    Redefinir senha via token de email
+    ---
+    tags: [Auth]
+    parameters:
+      - in: path
+        name: token
+        type: string
+        required: true
+      - in: formData
+        name: new_password
+        type: string
+        required: false
+      - in: formData
+        name: confirm_password
+        type: string
+        required: false
+    responses:
+      302:
+        description: Sucesso redireciona /login; token inválido redireciona /forgot_password
+      200:
+        description: Formulário de nova senha
+    """
     if request.method == "POST":
         new_password = request.form.get("new_password", "")
         confirm      = request.form.get("confirm_password", "")
@@ -486,6 +579,30 @@ def reset_password(token):
 @app.route("/invite/<token>", methods=["GET", "POST"])
 @csrf.exempt
 def invite(token):
+    """
+    Página de confirmação de presença do convidado
+    ---
+    tags: [Convite]
+    parameters:
+      - in: path
+        name: token
+        type: string
+        required: true
+      - in: formData
+        name: response
+        type: string
+        enum: [yes, no]
+        required: false
+      - in: formData
+        name: observacao
+        type: string
+        required: false
+    responses:
+      200:
+        description: Página de convite
+      404:
+        description: Token inválido
+    """
     with engine.connect() as conn:
         result = conn.execute(
             text("SELECT * FROM invitees WHERE token=:token"), {"token": token}
@@ -518,6 +635,24 @@ def invite(token):
 @app.route("/admin/respostas")
 @login_required
 def respostas():
+    """
+    Lista de respostas dos convidados
+    ---
+    tags: [Respostas]
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+      - in: query
+        name: search
+        type: string
+    responses:
+      200:
+        description: Lista paginada de respostas
+      302:
+        description: Redireciona para /login se não autenticado
+    """
     try:
         page = max(1, int(request.args.get('page', 1)))
     except (ValueError, TypeError):
@@ -601,6 +736,16 @@ def respostas():
 @app.route("/admin/exportar_xlsx")
 @login_required
 def exportar_convidados_xlsx():
+    """
+    Download da lista de convidados em Excel
+    ---
+    tags: [Respostas]
+    responses:
+      200:
+        description: Arquivo .xlsx para download
+      302:
+        description: Redireciona para /login se não autenticado
+    """
     search = request.args.get('search', '').strip()
     is_admin = current_user.is_super_admin
     uid = None if is_admin else current_user.db_id
@@ -645,6 +790,30 @@ def exportar_convidados_xlsx():
 @app.route("/admin/convidados/add", methods=['POST'])
 @login_required
 def add_convidado():
+    """
+    Adicionar novo convidado
+    ---
+    tags: [Convidados]
+    parameters:
+      - in: formData
+        name: name
+        type: string
+        required: true
+      - in: formData
+        name: email
+        type: string
+      - in: formData
+        name: phone
+        type: string
+      - in: formData
+        name: media_file
+        type: file
+    responses:
+      302:
+        description: Redireciona para /admin/respostas
+      403:
+        description: Sem permissão
+    """
     name = request.form.get('name', '').strip()
     if not name:
         flash("Nome é obrigatório.", "danger")
@@ -683,6 +852,32 @@ def add_convidado():
 @app.route("/admin/convidados/<int:id>/edit", methods=['POST'])
 @login_required
 def edit_convidado(id):
+    """
+    Editar dados de convidado
+    ---
+    tags: [Convidados]
+    parameters:
+      - in: path
+        name: id
+        type: integer
+        required: true
+      - in: formData
+        name: name
+        type: string
+      - in: formData
+        name: email
+        type: string
+      - in: formData
+        name: phone
+        type: string
+    responses:
+      302:
+        description: Redireciona para /admin/respostas
+      403:
+        description: Sem permissão
+      404:
+        description: Convidado não encontrado
+    """
     with engine.connect() as conn:
         guest = conn.execute(
             text("SELECT user_id FROM invitees WHERE id=:id"), {"id": id}
@@ -733,6 +928,23 @@ def edit_convidado(id):
 @app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
 @login_required
 def delete_convidado(id):
+    """
+    Excluir convidado
+    ---
+    tags: [Convidados]
+    parameters:
+      - in: path
+        name: id
+        type: integer
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/respostas
+      403:
+        description: Sem permissão
+      404:
+        description: Convidado não encontrado
+    """
     with engine.connect() as conn:
         res = conn.execute(
             text("SELECT name, media_file, user_id FROM invitees WHERE id=:id"), {"id": id}
@@ -761,6 +973,32 @@ def delete_convidado(id):
 @login_required
 @super_admin_required
 def update_textos():
+    """
+    Atualizar textos do convite
+    ---
+    tags: [Textos]
+    parameters:
+      - in: formData
+        name: question_text
+        type: string
+      - in: formData
+        name: yes_text
+        type: string
+      - in: formData
+        name: no_text
+        type: string
+      - in: formData
+        name: post_yes_text
+        type: string
+      - in: formData
+        name: post_no_text
+        type: string
+    responses:
+      302:
+        description: Redireciona para /admin/respostas
+      403:
+        description: Apenas super admin
+    """
     textos = {
         "question_text": request.form.get('question_text') or "",
         "yes_text":      request.form.get('yes_text') or "",
@@ -785,6 +1023,16 @@ def update_textos():
 @login_required
 @super_admin_required
 def admin_usuarios():
+    """
+    Listar todos os sub-usuários
+    ---
+    tags: [Usuários]
+    responses:
+      200:
+        description: Página de gerenciamento de usuários
+      403:
+        description: Apenas super admin
+    """
     with engine.connect() as conn:
         users = conn.execute(
             text("SELECT id, username, email, whatsapp, must_change_password, created_at FROM users ORDER BY created_at DESC")
@@ -802,6 +1050,28 @@ def admin_usuarios():
 @login_required
 @super_admin_required
 def add_usuario():
+    """
+    Criar novo sub-usuário
+    ---
+    tags: [Usuários]
+    parameters:
+      - in: formData
+        name: username
+        type: string
+        required: true
+      - in: formData
+        name: email
+        type: string
+        required: true
+      - in: formData
+        name: whatsapp
+        type: string
+    responses:
+      302:
+        description: Redireciona para /admin/usuarios
+      403:
+        description: Apenas super admin
+    """
     username = request.form.get('username', '').strip()
     email    = request.form.get('email', '').strip()
     whatsapp = request.form.get('whatsapp', '').strip() or None
@@ -833,6 +1103,34 @@ def add_usuario():
 @login_required
 @super_admin_required
 def edit_usuario(id):
+    """
+    Editar sub-usuário
+    ---
+    tags: [Usuários]
+    parameters:
+      - in: path
+        name: id
+        type: integer
+        required: true
+      - in: formData
+        name: username
+        type: string
+        required: true
+      - in: formData
+        name: email
+        type: string
+        required: true
+      - in: formData
+        name: whatsapp
+        type: string
+    responses:
+      302:
+        description: Redireciona para /admin/usuarios
+      403:
+        description: Apenas super admin
+      404:
+        description: Usuário não encontrado
+    """
     new_username = request.form.get('username', '').strip()
     new_email    = request.form.get('email', '').strip()
     new_whatsapp = request.form.get('whatsapp', '').strip() or None
@@ -867,6 +1165,23 @@ def edit_usuario(id):
 @login_required
 @super_admin_required
 def reset_senha_usuario(id):
+    """
+    Resetar senha de sub-usuário para a senha padrão (admin)
+    ---
+    tags: [Usuários]
+    parameters:
+      - in: path
+        name: id
+        type: integer
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/usuarios
+      403:
+        description: Apenas super admin
+      404:
+        description: Usuário não encontrado
+    """
     with engine.connect() as conn:
         user = conn.execute(
             text("SELECT username FROM users WHERE id=:id"), {"id": id}
@@ -885,6 +1200,25 @@ def reset_senha_usuario(id):
 @app.route("/change_password", methods=["GET", "POST"])
 @login_required
 def change_password():
+    """
+    Troca de senha obrigatória para sub-usuários
+    ---
+    tags: [Auth]
+    parameters:
+      - in: formData
+        name: new_password
+        type: string
+        required: true
+      - in: formData
+        name: confirm_password
+        type: string
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/respostas após sucesso
+      200:
+        description: Formulário de troca de senha
+    """
     if current_user.is_super_admin:
         return redirect(url_for('respostas'))
 
@@ -920,6 +1254,23 @@ def change_password():
 @login_required
 @super_admin_required
 def delete_usuario(id):
+    """
+    Excluir sub-usuário
+    ---
+    tags: [Usuários]
+    parameters:
+      - in: path
+        name: id
+        type: integer
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/usuarios
+      403:
+        description: Apenas super admin
+      404:
+        description: Usuário não encontrado
+    """
     with engine.connect() as conn:
         user = conn.execute(
             text("SELECT username FROM users WHERE id=:id"), {"id": id}
