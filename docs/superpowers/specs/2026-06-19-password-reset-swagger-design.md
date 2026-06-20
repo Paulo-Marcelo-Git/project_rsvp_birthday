@@ -70,20 +70,20 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 ## 4. Configuração — Variáveis de Ambiente
 
-Novas variáveis adicionadas ao `.env.example`:
+Novas variáveis adicionadas ao `.env.example` (nomenclatura já adotada no projeto):
 
 ```env
 # Email (SMTP) — necessário para reset de senha self-service
-MAIL_SERVER=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USE_TLS=true
-MAIL_USERNAME=seu_email@gmail.com
-MAIL_PASSWORD=xxxx xxxx xxxx xxxx
-MAIL_FROM=Comemore+ <seu_email@gmail.com>
+EMAIL_SMTP=smtp.gmail.com
+EMAIL_PORTA=587
+EMAIL_USER=seu@email.com
+EMAIL_PASS=xxxx xxxx xxxx xxxx   # Gmail App Password
 APP_BASE_URL=https://seu-dominio.com
 ```
 
-**Comportamento sem SMTP configurado:** se `MAIL_SERVER` não estiver definido, o sistema loga um aviso (`logger.warning`) mas não lança exceção. O token é gerado e salvo no banco, mas o email não é enviado — útil para desenvolvimento local.
+O remetente exibido no email será sempre `Comemore+ <seu@email.com>`.
+
+**Comportamento sem SMTP configurado:** se `EMAIL_SMTP` ou `EMAIL_USER` não estiver definido, o sistema loga um aviso (`logger.warning`) mas não lança exceção. O token é gerado e salvo no banco, mas o email não é enviado — útil para desenvolvimento local.
 
 ---
 
@@ -99,7 +99,7 @@ Exibe formulário com campo `username`.
 - **Se encontrado com email:**
   1. Gera token `uuid4().hex`
   2. Salva em `password_reset_tokens` com `expires_at = NOW() + 1h`
-  3. Chama `send_reset_email(to_address, reset_url)`
+  3. Chama `send_reset_email(to_address, username, reset_url)`
   4. Redireciona para `/login` com flash de instrução genérica
 - Rota isenta de `@login_required`
 - CSRF protegido (token no form)
@@ -125,12 +125,71 @@ Exibe formulário com campo `username`.
 ## 6. Função de Envio de Email
 
 ```python
-def send_reset_email(to_address: str, reset_url: str) -> None:
-    # usa smtplib + email.mime — sem dependência externa
-    # loga warning e retorna sem erro se MAIL_SERVER não configurado
+def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
+    # usa smtplib + email.mime.multipart + email.mime.text — sem dependência externa
+    # loga warning e retorna sem erro se EMAIL_SMTP/EMAIL_USER não configurados
 ```
 
-Usa `smtplib.SMTP` com `starttls()`. O template do email é texto simples + HTML básico com o link de reset.
+Usa `smtplib.SMTP` com `starttls()`. Envia mensagem `multipart/alternative` com parte `text/plain` e parte `text/html`.
+
+### 6.1 Design do Email (HTML)
+
+O email é **responsivo, totalmente inline (sem CSS externo)**, compatível com Gmail, Outlook e clientes mobile. Estrutura:
+
+```
+┌─────────────────────────────────────────────┐
+│  [Cabeçalho rosa-azul gradiente]             │
+│  🎉  Comemore+                               │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Olá, {username}!                           │
+│                                             │
+│  Recebemos uma solicitação para redefinir   │
+│  a senha da sua conta no Comemore+.         │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │   [ Redefinir minha senha ]         │   │  ← botão azul (#1976d2)
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  Este link é válido por 1 hora.             │
+│  Se você não solicitou a redefinição,       │
+│  ignore este email — sua senha permanece    │
+│  a mesma.                                   │
+│                                             │
+│  Caso o botão não funcione, copie e cole   │
+│  o link abaixo no seu navegador:            │
+│  {reset_url}                                │
+│                                             │
+├─────────────────────────────────────────────┤
+│  © 2025 Comemore+ · Enviado por             │
+│  seu@email.com                      │
+│  Este é um email automático, não responda.  │
+└─────────────────────────────────────────────┘
+```
+
+**Detalhes visuais:**
+- Cabeçalho: `background: linear-gradient(to right, #fce4ec, #e3f2fd)` (mesmo gradiente da tela de login)
+- Logo/título: "Comemore+" em `font-size: 28px; font-weight: 700; color: #2c3e50`
+- Botão CTA: `background: #1976d2; color: #fff; border-radius: 8px; padding: 14px 32px`
+- Corpo: fonte `Arial, sans-serif`, fundo branco, `max-width: 520px`, centralizado
+- Rodapé: fundo `#f5f5f5`, texto `#888`, `font-size: 12px`
+- Linha separadora `border-top: 1px solid #eee` entre corpo e rodapé
+
+**Assunto do email:** `Redefinição de senha — Comemore+`
+
+**Parte text/plain** (fallback para clientes que não suportam HTML):
+```
+Olá, {username}!
+
+Você solicitou a redefinição de senha da sua conta no Comemore+.
+
+Acesse o link abaixo para criar uma nova senha (válido por 1 hora):
+{reset_url}
+
+Se você não solicitou isso, ignore este email.
+
+— Equipe Comemore+
+```
 
 ---
 
