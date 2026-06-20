@@ -32,3 +32,6 @@ Uploads
 
 #Meu Docker Atual 13-02
 docker-compose-old.yml
+
+# Specs e documentos internos (não subir para repo público)
+docs/superpowers/
