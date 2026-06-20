@@ -134,20 +134,6 @@ def test_reset_password_token_valido_exibe_formulario(client, db):
 
 
 def test_reset_password_post_senha_fraca_retorna_erro(client, db):
-    from datetime import datetime, timedelta
-    token_row = {
-        'id': 1, 'user_id': 2, 'token': 'tok',
-        'expires_at': datetime.utcnow() + timedelta(hours=1),
-        'used': False,
-    }
-    # GET valida token, POST revalida token
-    conn = MagicMock()
-    conn.execute.side_effect = [
-        qresult(fetchone=token_row),
-        qresult(fetchone=token_row),
-    ]
-    db.connect.return_value.__enter__.return_value = conn
-
     resp = client.post('/reset_password/tok',
                        data={'new_password': '123', 'confirm_password': '123'},
                        follow_redirects=True)
@@ -156,19 +142,6 @@ def test_reset_password_post_senha_fraca_retorna_erro(client, db):
 
 
 def test_reset_password_post_senhas_diferentes_retorna_erro(client, db):
-    from datetime import datetime, timedelta
-    token_row = {
-        'id': 1, 'user_id': 2, 'token': 'tok2',
-        'expires_at': datetime.utcnow() + timedelta(hours=1),
-        'used': False,
-    }
-    conn = MagicMock()
-    conn.execute.side_effect = [
-        qresult(fetchone=token_row),
-        qresult(fetchone=token_row),
-    ]
-    db.connect.return_value.__enter__.return_value = conn
-
     resp = client.post('/reset_password/tok2',
                        data={'new_password': 'SenhaForte@1', 'confirm_password': 'Diferente@1'},
                        follow_redirects=True)
@@ -185,9 +158,9 @@ def test_reset_password_post_sucesso_redireciona_login(client, db):
     }
     conn = MagicMock()
     conn.execute.side_effect = [
-        qresult(fetchone=token_row),  # revalidação no POST
+        qresult(fetchone=token_row),  # _get_valid_token in POST
         MagicMock(),                   # UPDATE users SET password_hash
-        MagicMock(),                   # UPDATE tokens SET used=TRUE
+        MagicMock(),                   # UPDATE password_reset_tokens SET used=TRUE
     ]
     db.connect.return_value.__enter__.return_value = conn
 
@@ -196,3 +169,13 @@ def test_reset_password_post_sucesso_redireciona_login(client, db):
                              'confirm_password': 'NovaSenha@99'})
     assert resp.status_code == 302
     assert '/login' in resp.headers['Location']
+
+
+def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
+    import os
+    default_pw = os.environ.get('DEFAULT_PASSWORD', 'Default@1234')
+    resp = client.post('/reset_password/tok4',
+                       data={'new_password': default_pw, 'confirm_password': default_pw},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert 'padrão' in resp.data.decode() or 'diferente' in resp.data.decode().lower()
