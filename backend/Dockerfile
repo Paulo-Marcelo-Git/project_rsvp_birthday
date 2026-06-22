@@ -7,7 +7,8 @@ WORKDIR /app
 COPY . .
 
 RUN pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt \
+ && chmod +x entrypoint.sh
 
 # Deixa todos os args do gunicorn em uma única env (sem brigar com JSON)
 ENV GUNICORN_CMD_ARGS="\
@@ -21,4 +22,4 @@ ENV GUNICORN_CMD_ARGS="\
 --access-logfile - \
 --access-logformat '%(t)s | %(p)s | %(m)s %(U)s | status=%(s)s | resp_time=%(L)s sec | size=%(B)s bytes'"
 
-CMD ["gunicorn", "app:app"]
+CMD ["./entrypoint.sh"]

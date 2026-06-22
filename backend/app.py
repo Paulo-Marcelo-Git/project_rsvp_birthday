@@ -149,6 +149,17 @@ def _index_exists(conn, table: str, index_name: str) -> bool:
 
 
 def init_db():
+    # Guard: se o Alembic já aplicou as migrations (alembic_version existe),
+    # o schema é gerenciado por ele — init_db() seria destrutivo, então sai.
+    # Removido completamente na Fase 2A (commit de refactor do app.py).
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM alembic_version LIMIT 1"))
+            logger.info("Schema gerenciado pelo Alembic — init_db() ignorado.")
+            return
+    except Exception:
+        pass
+
     for attempt in range(10):
         try:
             with engine.connect() as conn:

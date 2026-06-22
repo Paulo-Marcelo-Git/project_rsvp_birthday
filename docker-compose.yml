@@ -10,7 +10,6 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
     volumes:
       - db_data:/var/lib/mysql
-      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "127.0.0.1:3306:3306"
     healthcheck:
@@ -38,17 +37,6 @@ services:
       - ./logs:/app/logs
       - ./VERSION:/VERSION:ro
     working_dir: /app
-    command: >
-      gunicorn app:app
-      -w 2
-      --threads 4
-      -k gthread
-      -b 0.0.0.0:8000
-      --timeout 120
-      --graceful-timeout 30
-      --keep-alive 5
-      --access-logfile -
-      --access-logformat '%(t)s | %(p)s | %(m)s %(U)s | status=%(s)s | resp_time=%(L)s sec | size=%(B)s bytes'
     networks:
       - rsvp_net
 
