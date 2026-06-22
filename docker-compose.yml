@@ -52,6 +52,33 @@ services:
     networks:
       - rsvp_net
 
+  # Serviço exclusivo para testes de integração (nunca sobe com `docker compose up`).
+  # Uso: docker compose --profile test run --rm backend-test
+  #
+  # TEST_DB_* usa prefixo próprio para não ser sobrescrito pelo conftest.py dos
+  # testes unitários, que faz os.environ.update() com credenciais falsas (DB_*).
+  backend-test:
+    build: ./backend
+    env_file:
+      - .env
+    environment:
+      TEST_DB_HOST: db
+      TEST_DB_USER: ${DB_USER}
+      TEST_DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./VERSION:/VERSION:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install pytest==8.3.5 -q && python -m pytest -m integration -v --tb=short"
+    networks:
+      - rsvp_net
+    profiles:
+      - test
+
 networks:
   rsvp_net:
     driver: bridge
