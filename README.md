@@ -1,5 +1,5 @@
 # Comemore+ 🎉
-Sistema de RSVP para convites de aniversário — v1.2.3
+Sistema de RSVP para convites de aniversário — v1.2.9
 
 Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o envio de convites personalizados com link único e o acompanhamento das respostas dos convidados em tempo real.
 
@@ -17,6 +17,7 @@ Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o
 - Textos do convite configuráveis pelo painel
 - Gerenciamento de sub-usuários (cada um vê apenas seus próprios convidados)
 - Troca de senha obrigatória para novos usuários
+- **Reset de senha self-service** por username ou email (link enviado por email)
 - Deploy automatizado via GitHub Actions
 
 ---
@@ -39,7 +40,9 @@ project_rsvp_birthday/
 │       ├── invite.html
 │       ├── admin_responses.html
 │       ├── admin_users.html
-│       └── change_password.html
+│       ├── change_password.html
+│       ├── forgot_password.html
+│       └── reset_password.html
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml       # CI/CD: push em main → deploy SSH
@@ -76,9 +79,23 @@ SECRET_KEY=chave_secreta_flask_aleatoria
 TZ_OFFSET_HOURS=-3
 LOG_FILE=logs/app.log
 UPLOAD_FOLDER=static/uploads
+DEFAULT_PASSWORD=102030@
+
+# Email SMTP — necessário para reset de senha self-service
+EMAIL_SMTP=smtp.gmail.com
+EMAIL_PORTA=587
+EMAIL_USER=seu_email@gmail.com
+EMAIL_PASS=app_password_gmail
+
+# URL base usada nos links de email
+APP_BASE_URL=https://seudominio.com.br
 ```
 
 > `ADMIN_PASS` deve ser o hash gerado com `generate_password_hash()` do Werkzeug — nunca a senha em texto puro.
+
+> `EMAIL_PASS` deve ser um **App Password** do Google. Gere em: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+
+> `APP_BASE_URL` sem barra no final.
 
 ### 3. Subir os containers
 
@@ -107,15 +124,33 @@ docker compose up --build
 
 ---
 
+## 🗂️ Rotas
+
+| Rota | Acesso | Descrição |
+|------|--------|-----------|
+| `/login` | Público | Login |
+| `/forgot_password` | Público | Solicitar reset de senha (username ou email) |
+| `/reset_password/<token>` | Público | Redefinir senha via link enviado por email |
+| `/invite/<token>` | Público | Página de confirmação do convidado |
+| `/admin/respostas` | Login | Lista de respostas com paginação e busca |
+| `/admin/exportar_xlsx` | Login | Download da lista em Excel |
+| `/admin/convidados/add` | Login | Adicionar convidado |
+| `/admin/textos` | Super admin | Editar textos do convite |
+| `/admin/usuarios` | Super admin | Gerenciar sub-usuários |
+| `/change_password` | Login (DbUser) | Troca de senha obrigatória |
+
+---
+
 ## 🗃️ Banco de Dados
 
 As tabelas são criadas automaticamente via `init.sql`. O sistema também aplica migrações incrementais em cada inicialização.
 
 | Tabela | Descrição |
 |--------|-----------|
-| `users` | Sub-usuários do painel |
+| `users` | Sub-usuários do painel (com `email`, `whatsapp` e UNIQUE em email) |
 | `invitees` | Convidados, tokens únicos e respostas |
 | `settings` | Textos configuráveis do convite |
+| `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used` |
 
 ---
 

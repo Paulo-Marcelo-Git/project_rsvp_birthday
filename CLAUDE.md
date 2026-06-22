@@ -27,7 +27,9 @@ project_rsvp_birthday/
 │       ├── invite.html
 │       ├── admin_responses.html
 │       ├── admin_users.html
-│       └── change_password.html
+│       ├── change_password.html
+│       ├── forgot_password.html
+│       └── reset_password.html
 ├── .github/workflows/deploy.yml   # Push em main → deploy SSH na VPS
 ├── docker-compose.yml
 ├── VERSION                        # Lido em runtime como APP_VERSION
@@ -52,9 +54,22 @@ TZ_OFFSET_HOURS=-3                # Ajuste de fuso nas datas (padrão: -3)
 LOG_FILE=logs/app.log
 UPLOAD_FOLDER=static/uploads
 DEFAULT_PASSWORD=102030@          # Senha padrão para novos sub-usuários
+
+# Email SMTP — necessário para reset de senha self-service
+EMAIL_SMTP=smtp.gmail.com
+EMAIL_PORTA=587
+EMAIL_USER=seu_email@gmail.com
+EMAIL_PASS=app_password_gmail     # Google App Password
+
+# URL base usada nos links de email (reset de senha)
+APP_BASE_URL=https://seudominio.com.br
 ```
 
 `ADMIN_PASS` deve ser o hash bcrypt gerado por `generate_password_hash()` do Werkzeug.
+
+`EMAIL_PASS` deve ser um **App Password** do Google (não a senha da conta). Gere em: myaccount.google.com/apppasswords.
+
+`APP_BASE_URL` sem barra no final — ex.: `https://zapbyte.com.br`.
 
 ## Como rodar localmente
 
@@ -68,13 +83,14 @@ Convite: `http://localhost:3000/invite/<token>`
 
 ## Banco de Dados
 
-Três tabelas criadas pelo `init.sql` (e garantidas em runtime por `init_db()`):
+Quatro tabelas criadas pelo `init.sql` (e garantidas em runtime por `init_db()`):
 
-- **users** — sub-usuários com `must_change_password` flag
+- **users** — sub-usuários com `must_change_password`, `email` e `whatsapp`
 - **invitees** — convidados, token único, resposta, FK para users
 - **settings** — textos configuráveis do convite (`question_text`, `yes_text`, etc.)
+- **password_reset_tokens** — tokens de reset de senha com TTL de 1h e flag `used`
 
-`init_db()` também aplica migrações incrementais via `_col_exists()` para colunas adicionadas depois do primeiro deploy.
+`init_db()` aplica migrações incrementais via `_col_exists()` e `_index_exists()` para colunas e índices adicionados após o primeiro deploy. `users.email` tem UNIQUE INDEX (`idx_users_email_unique`).
 
 ## Auth e Níveis de Acesso
 
@@ -91,6 +107,8 @@ Senha padrão para novos usuários: `102030@` (constante `DEFAULT_PASSWORD` em `
 | Rota | Acesso | Descrição |
 |------|--------|-----------|
 | `/login` | Público | Login |
+| `/forgot_password` | Público | Solicitar reset de senha (por username ou email) |
+| `/reset_password/<token>` | Público | Redefinir senha via token enviado por email |
 | `/invite/<token>` | Público | Página de confirmação do convidado |
 | `/admin/respostas` | Login | Lista de respostas com paginação e busca |
 | `/admin/exportar_xlsx` | Login | Download da lista em Excel |
