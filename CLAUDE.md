@@ -100,6 +100,7 @@ Fonte de verdade do DDL: **`schema_comemore_saas.sql`** (raiz do projeto). Tabel
 - `role`: `tenant_admin` (gerencia o tenant, vê tudo do tenant) e `member` (vê só os eventos que criou — `events.owner_user_id`).
 - Novos membros: convite por email + link de senha (sem senha padrão hardcoded).
 - Mantém: bcrypt (Werkzeug), CSRF (Flask-WTF), `must_change_password`.
+- **`ADMIN_EMAIL`** (env var, **TRANSITÓRIA — sai na Fase 2D**): email do `AdminUser` para login enquanto o signup (2C) não existir. Após o signup criar um `DbUser` com `role=tenant_admin`, este bloco e as vars `ADMIN_USER`/`ADMIN_PASS`/`ADMIN_EMAIL` são removidos. Login é **exclusivamente por email** (UNIQUE global) — username não autentica.
 
 ---
 
