@@ -4,7 +4,9 @@
 
 **Goal:** Remover o caminho de autenticação por username de `login()` e `forgot_password()` — login e reset de senha passam a aceitar **somente email**, pois `email` é UNIQUE global e resolve o tenant sem ambiguidade.
 
-**Architecture:** `login()` lê o campo `email` (era `username`/`identifier`) e verifica primeiro contra `ADMIN_EMAIL` (env var nova), depois chama `repo.get_user_by_email_global`. `forgot_password()` remove a detecção por `@` e sempre chama `repo.get_user_by_email_global`. Templates recebem `type=email`. Zero novos helpers ou rotas.
+**Architecture:** `login()` lê o campo `email` (era `username`/`identifier`) e verifica primeiro contra `ADMIN_EMAIL` (env var nova, **TRANSITÓRIA**), depois chama `repo.get_user_by_email_global`. `forgot_password()` remove a detecção por `@` e sempre chama `repo.get_user_by_email_global`. Templates recebem `type=email`. Zero novos helpers ou rotas.
+
+> ⚠️ **ADMIN_EMAIL é TRANSITÓRIO:** o bloco `if admin_email and email == admin_email` sai na **Fase 2D**, junto com a remoção completa de `AdminUser`, `ADMIN_USER` e `ADMIN_PASS` por env. Após o signup (2C), todo admin será um `DbUser` com `role=tenant_admin` na tabela `users`. O comentário no código deve deixar isso explícito para que não vire uma segunda via de login permanente.
 
 **Tech Stack:** Python 3.12, Flask 3.0, SQLAlchemy 2.0 `text()`, pytest + MagicMock.
 
@@ -174,6 +176,7 @@ def login():
         password = request.form.get("password", "")
         user = None
 
+        # TRANSITÓRIO (2D): bloco ADMIN_EMAIL sai quando signup criar DbUser tenant_admin
         admin_email = os.getenv("ADMIN_EMAIL", "").lower()
         if admin_email and email == admin_email:
             candidate = AdminUser()
