@@ -49,8 +49,8 @@
     <form method="POST" action="{{ url_for('login') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="mb-3">
-        <label class="form-label">Usuário</label>
-        <input type="text" name="username" class="form-control" required autofocus>
+        <label class="form-label">Email</label>
+        <input type="email" name="email" class="form-control" required autofocus>
       </div>
       <div class="mb-3">
         <label class="form-label">Senha</label>
