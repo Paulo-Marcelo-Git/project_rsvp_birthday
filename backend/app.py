@@ -151,6 +151,7 @@ def init_db():
                         conn.execute(text(
                             "ALTER TABLE users ADD UNIQUE INDEX idx_users_email_unique (email)"
                         ))
+                        conn.commit()
                     except Exception as e:
                         logger.warning(
                             f"Não foi possível adicionar UNIQUE em users.email: {e}"
