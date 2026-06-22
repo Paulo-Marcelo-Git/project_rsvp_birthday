@@ -218,3 +218,17 @@ def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
                        follow_redirects=True)
     assert resp.status_code == 200
     assert 'padrão' in resp.data.decode() or 'diferente' in resp.data.decode().lower()
+
+
+def test_index_exists_retorna_true_quando_indice_existe():
+    """_index_exists deve retornar True quando o índice existe no information_schema."""
+    conn = MagicMock()
+    conn.execute.return_value.scalar.return_value = 1
+    assert _app._index_exists(conn, 'users', 'idx_users_email_unique') is True
+
+
+def test_index_exists_retorna_false_quando_indice_nao_existe():
+    """_index_exists deve retornar False quando o índice não existe."""
+    conn = MagicMock()
+    conn.execute.return_value.scalar.return_value = 0
+    assert _app._index_exists(conn, 'users', 'idx_users_email_unique') is False

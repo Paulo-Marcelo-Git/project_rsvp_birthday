@@ -100,6 +100,15 @@ def _col_exists(conn, table, column):
         AND TABLE_NAME = :t AND COLUMN_NAME = :c
     """), {"t": table, "c": column}).scalar()
 
+def _index_exists(conn, table: str, index_name: str) -> bool:
+    count = conn.execute(text("""
+        SELECT COUNT(*) FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name   = :t
+          AND index_name   = :i
+    """), {"t": table, "i": index_name}).scalar()
+    return bool(count)
+
 def init_db():
     for attempt in range(10):
         try:
@@ -135,6 +144,17 @@ def init_db():
                     conn.execute(text(
                         "ALTER TABLE users ADD COLUMN whatsapp VARCHAR(30) NULL"
                     ))
+
+                # Migração: UNIQUE INDEX em users.email
+                if not _index_exists(conn, "users", "idx_users_email_unique"):
+                    try:
+                        conn.execute(text(
+                            "ALTER TABLE users ADD UNIQUE INDEX idx_users_email_unique (email)"
+                        ))
+                    except Exception as e:
+                        logger.warning(
+                            f"Não foi possível adicionar UNIQUE em users.email: {e}"
+                        )
 
                 # Tabela de tokens de reset de senha
                 conn.execute(text("""
