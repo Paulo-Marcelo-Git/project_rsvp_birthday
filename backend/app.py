@@ -456,7 +456,7 @@ def forgot_password():
         description: Formulário de solicitação
     """
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email = request.form.get("email", "").strip().lower()
         email_to_send = None
         username_to_send = None
         token_to_send = None
