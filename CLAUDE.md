@@ -1,136 +1,137 @@
 # CLAUDE.md — Comemore+
 
-Sistema de RSVP para convites de aniversário. Flask + MySQL + Docker.
+Sistema de RSVP para convites. Flask + MySQL + Docker.
+
+**Objetivo:** evoluir de **single-tenant** (um aniversário, hoje) para **SaaS multi-tenant**, onde N clientes se cadastram sozinhos, criam vários eventos/convites e enviam links personalizados aos convidados.
+
+---
+
+## ⚠️ Estado atual vs. Alvo — LEIA ANTES DE EDITAR
+
+O `app.py` ainda é **single-tenant** (Fase 1 concluída; Fase 2 adapta a lógica).
+
+| Tema | Hoje (no código) | Alvo (SaaS) |
+|------|------------------|-------------|
+| Conta de cliente | Não existe | Tabela `tenants` — **schema criado (Fase 1 ✅)** |
+| Textos do convite | Tabela **global** `settings` | Por evento, dentro de `events` — **schema criado (Fase 1 ✅)** |
+| Evento/convite | Não existe entidade própria | Tabela `events` — **schema criado (Fase 1 ✅)** |
+| Convidado | `invitees` com FK direta p/ `users` | `invitees` com FK p/ `events` + `tenant_id` — **schema criado (Fase 1 ✅)** |
+| Admin | `AdminUser` via env var + `DbUser` (sub-usuários) | Signup self-service cria `tenant` + `tenant_admin` — Fase 2 |
+| Senha nova | `DEFAULT_PASSWORD=102030@` hardcoded | Convite por email + link de definição — Fase 2 |
+| Migrações | `init_db()` manual (`_col_exists`/`_index_exists`) | **Alembic — operacional (Fase 1 ✅)** |
+
+---
 
 ## Stack
 
-- **Backend:** Python 3.12, Flask 3.0, SQLAlchemy 2.0, Gunicorn (gthread)
-- **Banco:** MySQL 8, pool de conexões via QueuePool
-- **Auth:** Flask-Login + Flask-WTF (CSRF), dois níveis de usuário
-- **Deploy:** Docker Compose na VPS (Hostinger), CI/CD via GitHub Actions → SSH
+**Atual:** Python 3.12, Flask 3.0, SQLAlchemy 2.0 (SQL via `text()`), Gunicorn (gthread), MySQL 8 (QueuePool), Flask-Login + Flask-WTF (CSRF), Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH.
+
+**Adições planejadas (todas grátis / open source — sem custo fixo):**
+- **Alembic** — migrações versionadas (substitui `init_db()` manual).
+- **Redis + RQ** — fila para envio de email/convites em massa (hoje é síncrono no request → trava o worker).
+- **Flask-Limiter** — rate limit em login, signup, reset e `/invite/<token>`.
+- **Email transacional:** Brevo (300/dia grátis) ou Resend (3.000/mês grátis), com domínio próprio + SPF/DKIM. Sair do Gmail App Password.
+- **Uploads:** mover de `static/uploads` (disco) para **volume Docker nomeado**; depois Cloudflare R2 (free tier).
+- **Sentry** (free tier) + `mysqldump` por cron (backup).
+
+> **Billing fica adiado.** Lançamento em beta grátis. Stripe/Mercado Pago entram quando for cobrar — não têm custo fixo, só % por venda.
+
+---
 
 ## Estrutura
 
 ```
 project_rsvp_birthday/
 ├── backend/
-│   ├── app.py               # Toda a aplicação Flask (rotas, modelos, auth)
-│   ├── Dockerfile           # Python 3.12-slim, instala requirements.txt
-│   ├── init.sql             # Criação das tabelas e dados iniciais de settings
-│   ├── requirements.txt
+│   ├── app.py                    # Toda a app Flask (rotas, modelos, auth) — monolito
+│   ├── alembic.ini               # Config do Alembic (URL vem de env vars)
+│   ├── alembic/
+│   │   ├── env.py                # Lê DB_* do ambiente; suporta TEST_DB_* p/ testes
+│   │   └── versions/
+│   │       └── 0001_initial_saas_schema.py  # Migration inicial multi-tenant ✅
+│   ├── Dockerfile
+│   ├── init.sql                  # Schema single-tenant legado (ainda usado em dev)
+│   ├── requirements.txt          # Inclui alembic==1.13.3
 │   ├── static/
-│   │   ├── admin.css
-│   │   └── imagen.jpg
-│   └── templates/
-│       ├── base.html
-│       ├── login.html
-│       ├── invite.html
-│       ├── admin_responses.html
-│       ├── admin_users.html
-│       ├── change_password.html
-│       ├── forgot_password.html
-│       └── reset_password.html
-├── .github/workflows/deploy.yml   # Push em main → deploy SSH na VPS
-├── docker-compose.yml
-├── VERSION                        # Lido em runtime como APP_VERSION
-└── .env                           # Nunca versionado
+│   ├── templates/
+│   ├── tests/
+│   │   └── test_migration.py     # Testes de integração (pytest -m integration)
+│   └── logs/
+├── docs/
+├── schema_comemore_saas.sql      # DDL-alvo (fonte de verdade do schema SaaS)
+├── .github/workflows/deploy.yml
+├── .superpowers/
+├── docker-compose.yml            # inclui service backend-test (profile=test)
+├── pytest.ini                    # Raiz: addopts exclui integration por default
+├── backend/pytest.ini            # Registra marker integration no container
+├── requirements-dev.txt
+├── VERSION                       # Lido em runtime como APP_VERSION
+├── .env.example
+└── .env                          # Nunca versionado
 ```
 
-## Variáveis de Ambiente (.env)
+---
 
-```env
-DB_NAME=rsvp_db
-DB_USER=root
-DB_PASSWORD=senha_mysql
-DB_HOST=db
+## Schema-alvo (multi-tenant)
 
-ADMIN_USER=admin
-ADMIN_PASS=hash_bcrypt_da_senha   # gerado com generate_password_hash()
+Fonte de verdade do DDL: **`schema_comemore_saas.sql`** (raiz do projeto). Tabelas:
 
-SECRET_KEY=chave_flask_aleatoria
+- **`tenants`** — conta do cliente. Raiz da árvore: apagar tenant cascateia e remove tudo dele (LGPD).
+- **`users`** — agora com `tenant_id` e `role` (`tenant_admin`/`member`). `email` UNIQUE **global** (login resolve o tenant); `username` UNIQUE **por tenant**.
+- **`events`** — **núcleo do produto**. Cada cliente cria N eventos. Os textos que estavam em `settings` migram para cá. `slug` público não-sequencial.
+- **`invitees`** — FK para `events`. Carrega **`tenant_id` desnormalizado** de propósito (isolamento barato sem JOIN). `token` UNIQUE global (vai na URL pública).
+- **`password_reset_tokens`** — inalterado; `user_id` já carrega o tenant.
 
-# Opcionais
-TZ_OFFSET_HOURS=-3                # Ajuste de fuso nas datas (padrão: -3)
-LOG_FILE=logs/app.log
-UPLOAD_FOLDER=static/uploads
-DEFAULT_PASSWORD=102030@          # Senha padrão para novos sub-usuários
+**IDs:** PKs `BIGINT AUTO_INCREMENT` (rápidas p/ FK). `slug`/`token` públicos são aleatórios via `secrets.token_urlsafe()` — nada de URL enumerável.
 
-# Email SMTP — necessário para reset de senha self-service
-EMAIL_SMTP=smtp.gmail.com
-EMAIL_PORTA=587
-EMAIL_USER=seu_email@gmail.com
-EMAIL_PASS=app_password_gmail     # Google App Password
+> **Nota p/ quem vem do SQL Server:** `invitees` tem dois caminhos de cascade até `tenants` (direto e via `events`). No SQL Server isso dá erro (*multiple cascade paths*); no **MySQL/InnoDB é permitido e correto** — não "conserte".
 
-# URL base usada nos links de email (reset de senha)
-APP_BASE_URL=https://seudominio.com.br
-```
+---
 
-`ADMIN_PASS` deve ser o hash bcrypt gerado por `generate_password_hash()` do Werkzeug.
+## 🔒 Regra de ouro — isolamento por tenant
 
-`EMAIL_PASS` deve ser um **App Password** do Google (não a senha da conta). Gere em: myaccount.google.com/apppasswords.
+**TODA query filtra por `tenant_id`. Sem exceção.** É o ponto onde vaza dado de um cliente para outro — o pior bug possível num SaaS. Centralize isso (helper/escopo de sessão) e cubra com teste que prove que tenant A nunca enxerga dado de B.
 
-`APP_BASE_URL` sem barra no final — ex.: `https://zapbyte.com.br`.
+---
 
-## Como rodar localmente
+## Auth e Níveis (alvo)
 
-```bash
-cp .env.example .env   # editar variáveis
-docker compose up --build
-```
+- Signup público cria `tenant` + primeiro usuário `tenant_admin` (sai `ADMIN_USER`/`ADMIN_PASS` por env).
+- `role`: `tenant_admin` (gerencia o tenant, vê tudo do tenant) e `member` (vê só os eventos que criou — `events.owner_user_id`).
+- Novos membros: convite por email + link de senha (sem senha padrão hardcoded).
+- Mantém: bcrypt (Werkzeug), CSRF (Flask-WTF), `must_change_password`.
 
-Painel admin: `http://localhost:3000/login`
-Convite: `http://localhost:3000/invite/<token>`
+---
 
-## Banco de Dados
+## Roadmap faseado
 
-Quatro tabelas criadas pelo `init.sql` (e garantidas em runtime por `init_db()`):
+1. **✅ Fase 1 — Fundação de schema (concluída):** Alembic 1.13.3 instalado; migration `0001` cria `tenants`, `users` (com `tenant_id`+`role`), `events`, `invitees` (com `tenant_id` desnormalizado e dois caminhos de FK cascade), `password_reset_tokens`. Testes de integração (9) validam schema, índices de isolamento e FKs. `app.py` intacto.
+2. **🔜 Fase 2 — App multi-tenant (próxima):**
+   - Remover `init_db()`, `_col_exists()`, `_index_exists()` e `init.sql` do compose.
+   - Startup do container roda `alembic upgrade head` antes do gunicorn.
+   - Adaptar `AdminUser`/`DbUser` → `TenantAdmin`/`Member` com `tenant_id`.
+   - Reescrever queries para filtrar `tenant_id` em toda leitura/escrita.
+   - Rota `/signup`: cria `tenant` + primeiro usuário `role=tenant_admin`.
+   - Testes de isolamento: prova que tenant A nunca vê dados de tenant B.
+3. **Fase 3 — Escala:** email transacional (Brevo/Resend) + fila (Redis/RQ) + uploads em volume nomeado.
+4. **Fase 4 — Produto:** enforcement de limites por plano + painel super-admin do SaaS (dono).
+5. **Fase 5 — Conformidade:** LGPD (termos, exclusão real, rate limiting) + Sentry + backup automático testado.
 
-- **users** — sub-usuários com `must_change_password`, `email` e `whatsapp`
-- **invitees** — convidados, token único, resposta, FK para users
-- **settings** — textos configuráveis do convite (`question_text`, `yes_text`, etc.)
-- **password_reset_tokens** — tokens de reset de senha com TTL de 1h e flag `used`
+---
 
-`init_db()` aplica migrações incrementais via `_col_exists()` e `_index_exists()` para colunas e índices adicionados após o primeiro deploy. `users.email` tem UNIQUE INDEX (`idx_users_email_unique`).
+## Restrições do projeto
 
-## Auth e Níveis de Acesso
+- **Nada com custo fixo agora.** Só free tier / open source.
+- Manter **Docker Compose**. Toda mudança de schema via **Alembic** (nunca alterar schema na mão com cliente em produção).
+- Não quebrar o que já roda sem avisar e propor plano antes.
 
-Dois tipos de usuário:
-- **AdminUser** (`id="admin"`, `is_super_admin=True`) — credenciais via env var, acesso total
-- **DbUser** (`id="user_<db_id>"`) — criado no painel, vê apenas seus próprios convidados
-
-Sub-usuários com `must_change_password=True` são redirecionados para `/change_password` em toda requisição (via `before_request`).
-
-Senha padrão para novos usuários: `102030@` (constante `DEFAULT_PASSWORD` em `app.py:70`).
-
-## Rotas principais
-
-| Rota | Acesso | Descrição |
-|------|--------|-----------|
-| `/login` | Público | Login |
-| `/forgot_password` | Público | Solicitar reset de senha (por username ou email) |
-| `/reset_password/<token>` | Público | Redefinir senha via token enviado por email |
-| `/invite/<token>` | Público | Página de confirmação do convidado |
-| `/admin/respostas` | Login | Lista de respostas com paginação e busca |
-| `/admin/exportar_xlsx` | Login | Download da lista em Excel |
-| `/admin/convidados/add` | Login | Adicionar convidado |
-| `/admin/textos` | Super admin | Editar textos do convite |
-| `/admin/usuarios` | Super admin | Gerenciar sub-usuários |
-| `/change_password` | Login (DbUser) | Troca de senha obrigatória |
-
-## Deploy
-
-Push para `main` aciona o workflow `.github/workflows/deploy.yml`:
-1. SSH na VPS (secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`, `VPS_PATH`)
-2. `git pull origin main`
-3. `docker compose up -d --build --remove-orphans`
-4. `docker image prune -f`
-
-O backend roda na porta interna 8000, exposta apenas em `127.0.0.1:3000` (nginx/proxy na frente).
-Usuário do container: `1002:1002` (deve coincidir com o UID do usuário na VPS).
+---
 
 ## Convenções
 
-- Todo SQL usa `text()` do SQLAlchemy com parâmetros nomeados — sem concatenação direta.
-- Uploads salvos com nome UUID (`uuid4().hex`) + extensão original via `secure_filename`.
-- Extensões permitidas para upload: `jpg`, `jpeg`, `png`, `mp4` (máx 50MB).
-- Versão da aplicação lida do arquivo `VERSION` na raiz e injetada nos templates via `context_processor`.
+- SQL via `text()` do SQLAlchemy com parâmetros nomeados — sem concatenação (mantém).
+- **Todo acesso a dados filtra `tenant_id`.**
+- Uploads: UUID (`uuid4().hex`) + `secure_filename`; extensões `jpg/jpeg/png/mp4` (máx 50MB). Mover p/ volume nomeado → object storage.
+- `slug`/`token` públicos via `secrets.token_urlsafe()`; PKs internas sequenciais.
+- Charset `utf8mb4` (acentos PT-BR e emojis).
+- Versão lida de `VERSION` e injetada nos templates via `context_processor`.

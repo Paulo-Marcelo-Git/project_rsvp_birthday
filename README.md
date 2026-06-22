@@ -143,14 +143,34 @@ docker compose up --build
 
 ## 🗃️ Banco de Dados
 
-As tabelas são criadas automaticamente via `init.sql`. O sistema também aplica migrações incrementais em cada inicialização.
+As migrações são gerenciadas pelo **Alembic**. Para aplicar o schema num banco vazio:
+
+```bash
+# Aplica todas as migrations (banco vazio → schema SaaS multi-tenant)
+docker compose exec backend alembic upgrade head
+
+# Reverte tudo (apenas para dev/teste)
+docker compose exec backend alembic downgrade base
+```
+
+Schema SaaS multi-tenant (fonte de verdade: `schema_comemore_saas.sql`):
 
 | Tabela | Descrição |
 |--------|-----------|
-| `users` | Sub-usuários do painel (com `email`, `whatsapp` e UNIQUE em email) |
-| `invitees` | Convidados, tokens únicos e respostas |
-| `settings` | Textos configuráveis do convite |
-| `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used` |
+| `tenants` | Conta do cliente SaaS. Raiz da árvore de FK (apagar cascateia tudo). |
+| `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`). Email UNIQUE global. |
+| `events` | Núcleo do produto — N eventos por tenant, com textos do convite por evento. |
+| `invitees` | Convidados com `tenant_id` desnormalizado e `token` UNIQUE global. |
+| `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used`. |
+
+> **Nota:** `invitees` tem dois caminhos de FK cascade até `tenants` (direto e via `events`). MySQL/InnoDB aceita; SQL Server bloquearia com *multiple cascade paths*.
+
+### Testes de integração
+
+```bash
+# Valida schema, índices de tenant_id e FKs num banco rsvp_test dedicado
+docker compose --profile test run --rm backend-test
+```
 
 ---
 
