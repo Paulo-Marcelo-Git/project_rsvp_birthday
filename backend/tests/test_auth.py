@@ -8,11 +8,10 @@ def test_login_page_loads(client):
 
 
 def test_login_credenciais_invalidas_exibe_erro(client, db):
-    # Nenhum usuário encontrado no banco
     setup_db(db, qresult(fetchone=None))
 
     resp = client.post('/login', data={
-        'username': 'ninguem',
+        'email': 'ninguem@test.com',
         'password': 'errada',
     }, follow_redirects=True)
 
@@ -22,7 +21,7 @@ def test_login_credenciais_invalidas_exibe_erro(client, db):
 
 def test_login_admin_valido_redireciona_para_respostas(client):
     resp = client.post('/login', data={
-        'username': 'testadmin',
+        'email': 'testadmin@test.com',
         'password': ADMIN_PASSWORD,
     })
 
@@ -49,6 +48,7 @@ def test_login_usuario_db_com_troca_obrigatoria_redireciona(client, db):
     user_row = {
         'id': 1,
         'username': 'operador',
+        'email': 'operador@test.com',
         'password_hash': user_hash,
         'must_change_password': True,
         'tenant_id': 1,
@@ -58,9 +58,21 @@ def test_login_usuario_db_com_troca_obrigatoria_redireciona(client, db):
     setup_db(db, qresult(fetchone=user_row))
 
     resp = client.post('/login', data={
-        'username': 'operador',
+        'email': 'operador@test.com',
         'password': 'Default@1234',
     })
 
-    # Login bem-sucedido — redireciona (before_request cuida do /change_password)
     assert resp.status_code == 302
+
+
+def test_login_por_username_falha_limpo(client, db):
+    """Submeter username sem @ não autentica — o caminho por username foi removido."""
+    setup_db(db, qresult(fetchone=None))
+
+    resp = client.post('/login', data={
+        'email': 'operador',
+        'password': 'Default@1234',
+    }, follow_redirects=True)
+
+    assert resp.status_code == 200
+    assert 'inválidos' in resp.data.decode()

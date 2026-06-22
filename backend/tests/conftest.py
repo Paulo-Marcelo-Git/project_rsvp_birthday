@@ -13,6 +13,7 @@ os.environ.update({
     'DB_NAME': 'test_db',
     'SECRET_KEY': 'test-secret-key-for-pytest-only!!',
     'ADMIN_USER': 'testadmin',
+    'ADMIN_EMAIL': 'testadmin@test.com',
     'ADMIN_PASS': generate_password_hash(ADMIN_PASSWORD),
     'DEFAULT_PASSWORD': 'Default@1234',
 })

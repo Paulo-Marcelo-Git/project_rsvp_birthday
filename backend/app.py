@@ -375,7 +375,7 @@ def login():
     tags: [Auth]
     parameters:
       - in: formData
-        name: username
+        name: email
         type: string
         required: true
       - in: formData
@@ -389,20 +389,19 @@ def login():
         description: Página de login
     """
     if request.method == "POST":
-        identifier = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         user = None
 
-        if identifier == os.getenv("ADMIN_USER", "admin"):
+        # TRANSITÓRIO (2D): bloco ADMIN_EMAIL sai quando signup criar DbUser tenant_admin
+        admin_email = os.getenv("ADMIN_EMAIL", "").lower()
+        if admin_email and email == admin_email:
             candidate = AdminUser()
             if candidate.check_password(password):
                 user = candidate
         else:
             with engine.connect() as conn:
-                if "@" in identifier:
-                    row = repo.get_user_by_email_global(conn, identifier)
-                else:
-                    row = repo.get_user_by_username(conn, tenant_id=1, username=identifier)
+                row = repo.get_user_by_email_global(conn, email)
                 if row and row.get("is_active"):
                     candidate = DbUser(
                         row["id"], row["username"], row["password_hash"],
@@ -413,12 +412,12 @@ def login():
 
         if user:
             login_user(user)
-            logger.info(f"Login bem-sucedido: '{identifier}'.")
+            logger.info(f"Login bem-sucedido: '{email}'.")
             flash("Login realizado com sucesso.", "success")
             return redirect(url_for("respostas"))
 
-        logger.warning(f"Tentativa de login inválida: '{identifier}'.")
-        flash("Usuário ou senha inválidos.", "danger")
+        logger.warning(f"Tentativa de login inválida: '{email}'.")
+        flash("Email ou senha inválidos.", "danger")
     return render_template("login.html")
 
 
