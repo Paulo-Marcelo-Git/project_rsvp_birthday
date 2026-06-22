@@ -66,7 +66,7 @@ def test_login_usuario_db_com_troca_obrigatoria_redireciona(client, db):
 
 
 def test_login_por_username_falha_limpo(client, db):
-    """Submeter username sem @ não autentica — o caminho por username foi removido."""
+    """Submeter username sem @ não autentica — get_user_by_email_global retorna None para string sem formato de email."""
     setup_db(db, qresult(fetchone=None))
 
     resp = client.post('/login', data={

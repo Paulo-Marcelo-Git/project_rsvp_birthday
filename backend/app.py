@@ -440,13 +440,13 @@ def logout():
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
     """
-    Solicitar redefinição de senha por username ou email
+    Solicitar redefinição de senha por email
     ---
     tags: [Auth]
     parameters:
       - in: formData
-        name: identifier
-        description: Nome de usuário ou endereço de email
+        name: email
+        description: Endereço de email cadastrado
         type: string
         required: true
     responses:
@@ -456,16 +456,13 @@ def forgot_password():
         description: Formulário de solicitação
     """
     if request.method == "POST":
-        identifier = request.form.get("identifier", "").strip()
+        email = request.form.get("email", "").strip()
         email_to_send = None
         username_to_send = None
         token_to_send = None
 
         with engine.connect() as conn:
-            if "@" in identifier:
-                row = repo.get_user_by_email_global(conn, identifier)
-            else:
-                row = repo.get_user_by_username(conn, tenant_id=1, username=identifier)
+            row = repo.get_user_by_email_global(conn, email)
 
             if row and row.get("email"):
                 token = uuid.uuid4().hex
@@ -488,8 +485,7 @@ def forgot_password():
                 logger.error(f"Erro ao enviar email de reset: {e}")
 
         flash(
-            "Se o usuário existir e tiver email cadastrado, "
-            "você receberá um link de redefinição em breve.",
+            "Se o email estiver cadastrado, você receberá um link de redefinição em breve.",
             "info",
         )
         return redirect(url_for("login"))

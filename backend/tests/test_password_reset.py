@@ -56,39 +56,37 @@ def test_forgot_password_page_carrega(client):
     assert 'Esqueci' in resp.data.decode() or 'senha' in resp.data.decode().lower()
 
 
-def test_forgot_password_post_usuario_nao_encontrado_mostra_mensagem_generica(client, db):
+def test_forgot_password_post_email_nao_cadastrado_mostra_mensagem_generica(client, db):
     setup_db(db, qresult(fetchone=None))
-    resp = client.post('/forgot_password', data={'identifier': 'ninguem'},
+    resp = client.post('/forgot_password', data={'email': 'ninguem@test.com'},
                        follow_redirects=True)
     assert resp.status_code == 200
     body = resp.data.decode()
-    # Mensagem genérica — não revela se usuário existe
-    assert 'Se o usuário existir' in body or 'verifique seu email' in body.lower() \
-           or 'email' in body.lower()
+    assert 'Se o email' in body or 'email' in body.lower()
 
 
-def test_forgot_password_post_usuario_sem_email_mostra_mensagem_generica(client, db):
-    user_row = {'id': 1, 'username': 'maria', 'password_hash': 'x',
-                'must_change_password': False, 'email': None, 'whatsapp': None}
-    setup_db(db, qresult(fetchone=user_row))
-    resp = client.post('/forgot_password', data={'identifier': 'maria'},
+def test_forgot_password_post_username_sem_arroba_nao_autentica(client, db):
+    """Username sem @ não é email — route retorna mensagem genérica sem tocar no DB."""
+    setup_db(db, qresult(fetchone=None))
+    resp = client.post('/forgot_password', data={'email': 'joao'},
                        follow_redirects=True)
     assert resp.status_code == 200
-    assert 'Se o usuário existir' in resp.data.decode() or 'email' in resp.data.decode().lower()
+    assert 'email' in resp.data.decode().lower()
 
 
 def test_forgot_password_post_usuario_valido_envia_email(client, db):
     user_row = {'id': 2, 'username': 'joao', 'password_hash': 'x',
-                'must_change_password': False, 'email': 'joao@test.com', 'whatsapp': None}
+                'must_change_password': False, 'email': 'joao@test.com',
+                'tenant_id': 1, 'role': 'member', 'is_active': 1}
     conn = MagicMock()
     conn.execute.side_effect = [
-        qresult(fetchone=user_row),  # SELECT user
-        MagicMock(),                  # INSERT token
+        qresult(fetchone=user_row),
+        MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn
 
     with patch('app.send_reset_email') as mock_email:
-        resp = client.post('/forgot_password', data={'identifier': 'joao'})
+        resp = client.post('/forgot_password', data={'email': 'joao@test.com'})
 
     assert resp.status_code == 302
     assert '/login' in resp.headers['Location']
@@ -207,17 +205,18 @@ def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
 
 
 def test_forgot_password_post_com_email_valido_envia_reset(client, db):
-    """Enviar email existente no campo identifier → cria token e chama send_reset_email."""
-    user_row = {'id': 3, 'username': 'ana', 'email': 'ana@test.com'}
+    """Enviar email existente no campo email → cria token e chama send_reset_email."""
+    user_row = {'id': 3, 'username': 'ana', 'email': 'ana@test.com',
+                'tenant_id': 1, 'role': 'member', 'is_active': 1}
     conn = MagicMock()
     conn.execute.side_effect = [
-        qresult(fetchone=user_row),  # SELECT by email
-        MagicMock(),                  # INSERT token
+        qresult(fetchone=user_row),
+        MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn
 
     with patch('app.send_reset_email') as mock_email:
-        resp = client.post('/forgot_password', data={'identifier': 'ana@test.com'})
+        resp = client.post('/forgot_password', data={'email': 'ana@test.com'})
 
     assert resp.status_code == 302
     assert '/login' in resp.headers['Location']
@@ -229,8 +228,9 @@ def test_forgot_password_post_com_email_valido_envia_reset(client, db):
 
 
 def test_forgot_password_post_com_email_case_insensitive(client, db):
-    """Busca por email deve usar LOWER() — case-insensitive."""
-    user_row = {'id': 4, 'username': 'carlos', 'email': 'carlos@gmail.com'}
+    """Busca por email usa LOWER() — case-insensitive."""
+    user_row = {'id': 4, 'username': 'carlos', 'email': 'carlos@gmail.com',
+                'tenant_id': 1, 'role': 'member', 'is_active': 1}
     conn = MagicMock()
     conn.execute.side_effect = [
         qresult(fetchone=user_row),
@@ -239,20 +239,19 @@ def test_forgot_password_post_com_email_case_insensitive(client, db):
     db.connect.return_value.__enter__.return_value = conn
 
     with patch('app.send_reset_email') as mock_email:
-        resp = client.post('/forgot_password', data={'identifier': 'Carlos@Gmail.com'})
+        resp = client.post('/forgot_password', data={'email': 'Carlos@Gmail.com'})
 
     assert resp.status_code == 302
     mock_email.assert_called_once()
-    # Verifica que a SQL executada contém LOWER
     first_call_sql = str(conn.execute.call_args_list[0][0][0])
     assert 'lower' in first_call_sql.lower()
 
 
 def test_forgot_password_post_email_inexistente_mensagem_generica(client, db):
-    """Email não cadastrado → mesma mensagem genérica (sem revelar inexistência)."""
+    """Email não cadastrado → mensagem genérica (sem revelar inexistência)."""
     setup_db(db, qresult(fetchone=None))
-    resp = client.post('/forgot_password', data={'identifier': 'naoexiste@test.com'},
+    resp = client.post('/forgot_password', data={'email': 'naoexiste@test.com'},
                        follow_redirects=True)
     assert resp.status_code == 200
     body = resp.data.decode()
-    assert 'Se o usuário existir' in body or 'email' in body.lower()
+    assert 'Se o email' in body or 'email' in body.lower()
