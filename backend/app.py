@@ -1,26 +1,43 @@
 # backend/app.py
 
-import os
-import time
 import logging
-from functools import wraps
-from dotenv import load_dotenv
-from datetime import datetime, timedelta
+import os
 import smtplib
+import time
+import uuid
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from functools import wraps
+from io import BytesIO
 from urllib.parse import quote_plus
-from flask import Flask, render_template, request, redirect, url_for, abort, flash, Response
-from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
-from flask_wtf.csrf import CSRFProtect
+
+from dotenv import load_dotenv
 from flasgger import Swagger
+from flask import (
+    Flask,
+    Response,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from flask_wtf.csrf import CSRFProtect
+from openpyxl import Workbook
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 from werkzeug.security import check_password_hash, generate_password_hash
-from io import BytesIO
-from openpyxl import Workbook
 from werkzeug.utils import secure_filename
-import uuid
 
 load_dotenv()
 
@@ -32,37 +49,47 @@ os.makedirs(os.path.dirname(log_path), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler(log_path), logging.StreamHandler()]
+    handlers=[logging.FileHandler(log_path), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
-app.config['APP_VERSION'] = APP_VERSION
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
-app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+app.config["APP_VERSION"] = APP_VERSION
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
 csrf = CSRFProtect(app)
 
-swagger = Swagger(app, config={
-    "headers": [],
-    "specs": [{"endpoint": "apispec_1", "route": "/apispec_1.json",
-               "rule_filter": lambda rule: True, "model_filter": lambda tag: True}],
-    "static_url_path": "/flasgger_static",
-    "swagger_ui": True,
-    "specs_route": "/apidocs/",
-    "title": "Comemore+ API",
-    "version": APP_VERSION,
-    "description": "API do sistema de RSVP para convites de aniversário Comemore+.",
-    "termsOfService": "",
-    "contact": {"email": os.getenv("EMAIL_USER", "")},
-}, template={
-    "info": {
+swagger = Swagger(
+    app,
+    config={
+        "headers": [],
+        "specs": [
+            {
+                "endpoint": "apispec_1",
+                "route": "/apispec_1.json",
+                "rule_filter": lambda rule: True,
+                "model_filter": lambda tag: True,
+            }
+        ],
+        "static_url_path": "/flasgger_static",
+        "swagger_ui": True,
+        "specs_route": "/apidocs/",
         "title": "Comemore+ API",
-        "description": "Documentação completa das APIs do sistema Comemore+.",
         "version": APP_VERSION,
-    }
-})
+        "description": "API do sistema de RSVP para convites de aniversário Comemore+.",
+        "termsOfService": "",
+        "contact": {"email": os.getenv("EMAIL_USER", "")},
+    },
+    template={
+        "info": {
+            "title": "Comemore+ API",
+            "description": "Documentação completa das APIs do sistema Comemore+.",
+            "version": APP_VERSION,
+        }
+    },
+)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
@@ -70,12 +97,15 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 @app.context_processor
 def inject_version():
-    return dict(app_version=app.config['APP_VERSION'])
+    return dict(app_version=app.config["APP_VERSION"])
+
 
 # DB
 db_url = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
@@ -88,32 +118,42 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_timeout=10,
     connect_args={"connect_timeout": 5},
-    future=True
+    future=True,
 )
 
 DEFAULT_PASSWORD = os.getenv("DEFAULT_PASSWORD", "102030@")
 
+
 def _col_exists(conn, table, column):
-    return conn.execute(text("""
+    return conn.execute(
+        text("""
         SELECT COUNT(*) FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
         AND TABLE_NAME = :t AND COLUMN_NAME = :c
-    """), {"t": table, "c": column}).scalar()
+    """),
+        {"t": table, "c": column},
+    ).scalar()
+
 
 def _index_exists(conn, table: str, index_name: str) -> bool:
-    count = conn.execute(text("""
+    count = conn.execute(
+        text("""
         SELECT COUNT(*) FROM information_schema.statistics
         WHERE table_schema = DATABASE()
           AND table_name   = :t
           AND index_name   = :i
-    """), {"t": table, "i": index_name}).scalar()
+    """),
+        {"t": table, "i": index_name},
+    ).scalar()
     return bool(count)
+
 
 def init_db():
     for attempt in range(10):
         try:
             with engine.connect() as conn:
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     CREATE TABLE IF NOT EXISTS users (
                       id INT AUTO_INCREMENT PRIMARY KEY,
                       username VARCHAR(100) UNIQUE NOT NULL,
@@ -121,36 +161,43 @@ def init_db():
                       must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
                       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """))
-                if not _col_exists(conn, 'invitees', 'user_id'):
-                    conn.execute(text("""
+                """)
+                )
+                if not _col_exists(conn, "invitees", "user_id"):
+                    conn.execute(
+                        text("""
                         ALTER TABLE invitees
                         ADD COLUMN user_id INT NULL,
                         ADD CONSTRAINT fk_invitees_user
                         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-                    """))
-                if not _col_exists(conn, 'users', 'must_change_password'):
-                    conn.execute(text("""
+                    """)
+                    )
+                if not _col_exists(conn, "users", "must_change_password"):
+                    conn.execute(
+                        text("""
                         ALTER TABLE users
                         ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE
-                    """))
+                    """)
+                    )
 
                 # Migração: colunas email e whatsapp em users
-                if not _col_exists(conn, 'users', 'email'):
-                    conn.execute(text(
-                        "ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL"
-                    ))
-                if not _col_exists(conn, 'users', 'whatsapp'):
-                    conn.execute(text(
-                        "ALTER TABLE users ADD COLUMN whatsapp VARCHAR(30) NULL"
-                    ))
+                if not _col_exists(conn, "users", "email"):
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL")
+                    )
+                if not _col_exists(conn, "users", "whatsapp"):
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN whatsapp VARCHAR(30) NULL")
+                    )
 
                 # Migração: UNIQUE INDEX em users.email
                 if not _index_exists(conn, "users", "idx_users_email_unique"):
                     try:
-                        conn.execute(text(
-                            "ALTER TABLE users ADD UNIQUE INDEX idx_users_email_unique (email)"
-                        ))
+                        conn.execute(
+                            text(
+                                "ALTER TABLE users ADD UNIQUE INDEX idx_users_email_unique (email)"
+                            )
+                        )
                         conn.commit()
                     except Exception as e:
                         logger.warning(
@@ -158,7 +205,8 @@ def init_db():
                         )
 
                 # Tabela de tokens de reset de senha
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     CREATE TABLE IF NOT EXISTS password_reset_tokens (
                       id         INT AUTO_INCREMENT PRIMARY KEY,
                       user_id    INT NOT NULL,
@@ -169,7 +217,8 @@ def init_db():
                       CONSTRAINT fk_prt_user
                         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """))
+                """)
+                )
                 conn.commit()
             logger.info("DB inicializado com sucesso.")
             return
@@ -177,15 +226,19 @@ def init_db():
             if attempt == 9:
                 logger.error(f"Falha ao inicializar DB: {e}")
                 raise
-            logger.warning(f"DB não disponível, tentando novamente ({attempt+1}/10)...")
+            logger.warning(
+                f"DB não disponível, tentando novamente ({attempt + 1}/10)..."
+            )
             time.sleep(2)
+
 
 init_db()
 
 # Auth
 login_manager = LoginManager()
-login_manager.login_view = 'login'
+login_manager.login_view = "login"
 login_manager.init_app(app)
+
 
 class AdminUser(UserMixin):
     id = "admin"
@@ -198,6 +251,7 @@ class AdminUser(UserMixin):
 
     def check_password(self, password):
         return check_password_hash(os.getenv("ADMIN_PASS"), password)
+
 
 class DbUser(UserMixin):
     is_super_admin = False
@@ -212,6 +266,7 @@ class DbUser(UserMixin):
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)
 
+
 @login_manager.user_loader
 def load_user(user_id):
     if user_id == "admin":
@@ -222,13 +277,25 @@ def load_user(user_id):
         except ValueError:
             return None
         with engine.connect() as conn:
-            row = conn.execute(
-                text("SELECT id, username, password_hash, must_change_password FROM users WHERE id=:id"),
-                {"id": db_id}
-            ).mappings().fetchone()
+            row = (
+                conn.execute(
+                    text(
+                        "SELECT id, username, password_hash, must_change_password FROM users WHERE id=:id"
+                    ),
+                    {"id": db_id},
+                )
+                .mappings()
+                .fetchone()
+            )
             if row:
-                return DbUser(row['id'], row['username'], row['password_hash'], row['must_change_password'])
+                return DbUser(
+                    row["id"],
+                    row["username"],
+                    row["password_hash"],
+                    row["must_change_password"],
+                )
     return None
+
 
 def super_admin_required(f):
     @wraps(f)
@@ -236,31 +303,44 @@ def super_admin_required(f):
         if not current_user.is_authenticated or not current_user.is_super_admin:
             abort(403)
         return f(*args, **kwargs)
+
     return decorated
+
 
 @app.before_request
 def protect_swagger():
-    if (request.path.startswith('/apidocs') or request.path.startswith('/apispec')
-            or request.path.startswith('/flasgger_static')):
+    if (
+        request.path.startswith("/apidocs")
+        or request.path.startswith("/apispec")
+        or request.path.startswith("/flasgger_static")
+    ):
         if not current_user.is_authenticated or not current_user.is_super_admin:
-            return redirect(url_for('login'))
+            return redirect(url_for("login"))
 
 
 @app.before_request
 def force_password_change():
-    if (current_user.is_authenticated
-            and not current_user.is_super_admin
-            and getattr(current_user, 'must_change_password', False)
-            and request.endpoint not in ('change_password', 'logout', 'static')):
-        return redirect(url_for('change_password'))
+    if (
+        current_user.is_authenticated
+        and not current_user.is_super_admin
+        and getattr(current_user, "must_change_password", False)
+        and request.endpoint not in ("change_password", "logout", "static")
+    ):
+        return redirect(url_for("change_password"))
+
 
 # Helpers
 def get_settings(conn):
-    rows = conn.execute(
-        text("""SELECT `key`,`value` FROM settings
+    rows = (
+        conn.execute(
+            text("""SELECT `key`,`value` FROM settings
                 WHERE `key` IN ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
-    ).mappings().all()
-    return {r['key']: r['value'] for r in rows}
+        )
+        .mappings()
+        .all()
+    )
+    return {r["key"]: r["value"] for r in rows}
+
 
 def save_uploaded_file(file):
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -273,31 +353,35 @@ def save_uploaded_file(file):
         return None
     return safe
 
-def build_where(search, user_id=None, super_admin=False, alias=''):
+
+def build_where(search, user_id=None, super_admin=False, alias=""):
     """Monta cláusula WHERE com filtro opcional por user_id e busca."""
     prefix = f"{alias}." if alias else ""
     conditions = []
     params = {}
     if not super_admin:
         conditions.append(f"{prefix}user_id = :user_id")
-        params['user_id'] = user_id
+        params["user_id"] = user_id
     if search:
         conditions.append(f"({prefix}name LIKE :search OR {prefix}email LIKE :search)")
-        params['search'] = f"%{search}%"
+        params["search"] = f"%{search}%"
     where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     return where, params
 
+
 def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
-    smtp_host = os.getenv('EMAIL_SMTP')
-    smtp_user = os.getenv('EMAIL_USER')
+    smtp_host = os.getenv("EMAIL_SMTP")
+    smtp_user = os.getenv("EMAIL_USER")
     if not smtp_host or not smtp_user:
-        logger.warning("EMAIL_SMTP/EMAIL_USER não configurados — email de reset não enviado.")
+        logger.warning(
+            "EMAIL_SMTP/EMAIL_USER não configurados — email de reset não enviado."
+        )
         return
 
-    smtp_port = int(os.getenv('EMAIL_PORTA', '587'))
-    smtp_pass = os.getenv('EMAIL_PASS', '')
+    smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
+    smtp_pass = os.getenv("EMAIL_PASS", "")
     from_addr = f"Comemore+ <{smtp_user}>"
-    subject   = "Redefinição de senha — Comemore+"
+    subject = "Redefinição de senha — Comemore+"
 
     html_body = f"""<!DOCTYPE html>
 <html>
@@ -355,7 +439,7 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
             <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
                        border-top:1px solid #eee;">
               <p style="margin:0;font-size:12px;color:#888;">
-                &copy; 2025 Comemore+ &middot; {smtp_user}<br>
+                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
                 Este é um email automático, não responda.
               </p>
             </td>
@@ -376,12 +460,12 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
         f"-- Equipe Comemore+"
     )
 
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = from_addr
-    msg['To']      = to_address
-    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html_body, 'html',  'utf-8'))
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_address
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
         server = smtplib.SMTP(smtp_host, smtp_port)
@@ -397,6 +481,7 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
                 pass
     except Exception as e:
         logger.error(f"Falha ao enviar email de reset para '{to_address}': {e}")
+
 
 # Rotas
 @app.route("/login", methods=["GET", "POST"])
@@ -431,12 +516,23 @@ def login():
                 user = candidate
         else:
             with engine.connect() as conn:
-                row = conn.execute(
-                    text("SELECT id, username, password_hash, must_change_password FROM users WHERE username=:u"),
-                    {"u": username}
-                ).mappings().fetchone()
+                row = (
+                    conn.execute(
+                        text(
+                            "SELECT id, username, password_hash, must_change_password FROM users WHERE username=:u"
+                        ),
+                        {"u": username},
+                    )
+                    .mappings()
+                    .fetchone()
+                )
                 if row:
-                    candidate = DbUser(row['id'], row['username'], row['password_hash'], row['must_change_password'])
+                    candidate = DbUser(
+                        row["id"],
+                        row["username"],
+                        row["password_hash"],
+                        row["must_change_password"],
+                    )
                     if candidate.check_password(password):
                         user = candidate
 
@@ -449,6 +545,7 @@ def login():
         logger.warning(f"Tentativa de login inválida: '{username}'.")
         flash("Usuário ou senha inválidos.", "danger")
     return render_template("login.html")
+
 
 @app.route("/logout")
 @login_required
@@ -499,18 +596,18 @@ def forgot_password():
                                 WHERE username = :id""")
             row = conn.execute(query, {"id": identifier}).mappings().fetchone()
 
-            if row and row['email']:
+            if row and row["email"]:
                 token = uuid.uuid4().hex
                 expires = datetime.utcnow() + timedelta(hours=1)
                 conn.execute(
                     text("""INSERT INTO password_reset_tokens
                             (user_id, token, expires_at) VALUES (:uid, :tok, :exp)"""),
-                    {"uid": row['id'], "tok": token, "exp": expires}
+                    {"uid": row["id"], "tok": token, "exp": expires},
                 )
                 conn.commit()
                 base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
-                email_to_send = row['email']
-                username_to_send = row['username']
+                email_to_send = row["email"]
+                username_to_send = row["username"]
                 token_to_send = f"{base_url}/reset_password/{token}"
 
         if email_to_send:
@@ -519,8 +616,11 @@ def forgot_password():
             except Exception as e:
                 logger.error(f"Erro ao enviar email de reset: {e}")
 
-        flash("Se o usuário existir e tiver email cadastrado, "
-              "você receberá um link de redefinição em breve.", "info")
+        flash(
+            "Se o usuário existir e tiver email cadastrado, "
+            "você receberá um link de redefinição em breve.",
+            "info",
+        )
         return redirect(url_for("login"))
 
     return render_template("forgot_password.html")
@@ -528,11 +628,15 @@ def forgot_password():
 
 def _get_valid_token(conn, token: str):
     """Retorna a row do token se válido (existente, não usado, não expirado)."""
-    return conn.execute(
-        text("""SELECT id, user_id FROM password_reset_tokens
+    return (
+        conn.execute(
+            text("""SELECT id, user_id FROM password_reset_tokens
                 WHERE token=:tok AND used=FALSE AND expires_at > UTC_TIMESTAMP()"""),
-        {"tok": token}
-    ).mappings().fetchone()
+            {"tok": token},
+        )
+        .mappings()
+        .fetchone()
+    )
 
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
@@ -562,7 +666,7 @@ def reset_password(token):
     """
     if request.method == "POST":
         new_password = request.form.get("new_password", "")
-        confirm      = request.form.get("confirm_password", "")
+        confirm = request.form.get("confirm_password", "")
 
         if len(new_password) < 8:
             flash("A senha deve ter pelo menos 8 caracteres.", "danger")
@@ -580,12 +684,14 @@ def reset_password(token):
                 flash("Link de redefinição inválido ou expirado.", "danger")
                 return redirect(url_for("forgot_password"))
             conn.execute(
-                text("UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"),
-                {"pw": generate_password_hash(new_password), "id": tok_row['user_id']}
+                text(
+                    "UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"
+                ),
+                {"pw": generate_password_hash(new_password), "id": tok_row["user_id"]},
             )
             conn.execute(
                 text("UPDATE password_reset_tokens SET used=TRUE WHERE id=:id"),
-                {"id": tok_row['id']}
+                {"id": tok_row["id"]},
             )
             conn.commit()
 
@@ -629,33 +735,42 @@ def invite(token):
         description: Token inválido
     """
     with engine.connect() as conn:
-        result = conn.execute(
-            text("SELECT * FROM invitees WHERE token=:token"), {"token": token}
-        ).mappings().fetchone()
+        result = (
+            conn.execute(
+                text("SELECT * FROM invitees WHERE token=:token"), {"token": token}
+            )
+            .mappings()
+            .fetchone()
+        )
         if not result:
             abort(404)
         if request.method == "POST":
-            response = request.form.get('response')
-            observacao = request.form.get('observacao') or None
-            if result['response'] is None and response in ['yes', 'no']:
+            response = request.form.get("response")
+            observacao = request.form.get("observacao") or None
+            if result["response"] is None and response in ["yes", "no"]:
                 conn.execute(
                     text("""UPDATE invitees
                             SET response=:response, response_date=NOW(), custom_message=:obs
                             WHERE token=:token"""),
-                    {"response": response, "obs": observacao, "token": token}
+                    {"response": response, "obs": observacao, "token": token},
                 )
                 conn.commit()
-                logger.info(f"Resposta: {result['name']} -> {response} | Obs: {observacao}")
-            return redirect(url_for('invite', token=token))
+                logger.info(
+                    f"Resposta: {result['name']} -> {response} | Obs: {observacao}"
+                )
+            return redirect(url_for("invite", token=token))
 
         texts = get_settings(conn)
-        return render_template("invite.html",
-                               invitee=result,
-                               question_text=texts.get('question_text'),
-                               yes_text=texts.get('yes_text'),
-                               no_text=texts.get('no_text'),
-                               post_yes_text=texts.get('post_yes_text'),
-                               post_no_text=texts.get('post_no_text'))
+        return render_template(
+            "invite.html",
+            invitee=result,
+            question_text=texts.get("question_text"),
+            yes_text=texts.get("yes_text"),
+            no_text=texts.get("no_text"),
+            post_yes_text=texts.get("post_yes_text"),
+            post_no_text=texts.get("post_no_text"),
+        )
+
 
 @app.route("/admin/respostas")
 @login_required
@@ -679,23 +794,27 @@ def respostas():
         description: Redireciona para /login se não autenticado
     """
     try:
-        page = max(1, int(request.args.get('page', 1)))
+        page = max(1, int(request.args.get("page", 1)))
     except (ValueError, TypeError):
         page = 1
     per_page = 50
-    search = request.args.get('search', '').strip()
+    search = request.args.get("search", "").strip()
     offset = (page - 1) * per_page
 
     is_admin = current_user.is_super_admin
     uid = None if is_admin else current_user.db_id
-    where_clause, params = build_where(search, user_id=uid, super_admin=is_admin, alias='i')
+    where_clause, params = build_where(
+        search, user_id=uid, super_admin=is_admin, alias="i"
+    )
     order_clause = " ORDER BY i.response_date IS NULL, i.response_date DESC"
-    params['limit'] = per_page
-    params['offset'] = offset
-    count_params = {k: v for k, v in params.items() if k not in ('limit', 'offset')}
+    params["limit"] = per_page
+    params["offset"] = offset
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
 
     with engine.connect() as conn:
-        result = conn.execute(text(f"""
+        result = (
+            conn.execute(
+                text(f"""
             SELECT i.id, i.name, i.email, i.phone, i.response, i.response_date,
                    i.token, i.custom_message, i.media_file,
                    COALESCE(u.username, '(admin)') AS owner_username
@@ -703,45 +822,72 @@ def respostas():
             LEFT JOIN users u ON i.user_id = u.id
             {where_clause} {order_clause}
             LIMIT :limit OFFSET :offset
-        """), params).mappings().all()
+        """),
+                params,
+            )
+            .mappings()
+            .all()
+        )
 
         tz_offset = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
         convidados = []
         for r in result:
             row = dict(r)
-            if row['response_date']:
-                row['response_date'] += timedelta(hours=tz_offset)
+            if row["response_date"]:
+                row["response_date"] += timedelta(hours=tz_offset)
             convidados.append(row)
 
-        total_count = conn.execute(text(f"""
+        total_count = (
+            conn.execute(
+                text(f"""
             SELECT COUNT(*) AS total
             FROM invitees i LEFT JOIN users u ON i.user_id = u.id
             {where_clause}
-        """), count_params).mappings().fetchone()
-        total_convidados = total_count['total']
+        """),
+                count_params,
+            )
+            .mappings()
+            .fetchone()
+        )
+        total_convidados = total_count["total"]
 
-        counts = conn.execute(text(f"""
+        counts = (
+            conn.execute(
+                text(f"""
             SELECT
               SUM(CASE WHEN i.response = 'yes' THEN 1 ELSE 0 END) AS total_sim,
               SUM(CASE WHEN i.response = 'no'  THEN 1 ELSE 0 END) AS total_nao,
               SUM(CASE WHEN i.response IS NULL  THEN 1 ELSE 0 END) AS total_aguardando
             FROM invitees i LEFT JOIN users u ON i.user_id = u.id
             {where_clause}
-        """), count_params).mappings().fetchone()
-        total_sim = counts['total_sim'] or 0
-        total_nao = counts['total_nao'] or 0
-        total_aguardando = counts['total_aguardando'] or 0
+        """),
+                count_params,
+            )
+            .mappings()
+            .fetchone()
+        )
+        total_sim = counts["total_sim"] or 0
+        total_nao = counts["total_nao"] or 0
+        total_aguardando = counts["total_aguardando"] or 0
 
         texts = get_settings(conn)
 
         for row in convidados:
-            if row['phone']:
-                phone_clean = row['phone'].replace("(","").replace(")","").replace("-","").replace(" ","")
-                invite_url = url_for('invite', token=row['token'], _external=True)
+            if row["phone"]:
+                phone_clean = (
+                    row["phone"]
+                    .replace("(", "")
+                    .replace(")", "")
+                    .replace("-", "")
+                    .replace(" ", "")
+                )
+                invite_url = url_for("invite", token=row["token"], _external=True)
                 message = f"{texts.get('question_text', '')} {invite_url}"
-                row['whatsapp_url'] = f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
+                row["whatsapp_url"] = (
+                    f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
+                )
             else:
-                row['whatsapp_url'] = None
+                row["whatsapp_url"] = None
 
     total_pages = (total_convidados + per_page - 1) // per_page
 
@@ -755,8 +901,9 @@ def respostas():
         page=page,
         total_pages=total_pages,
         search=search,
-        is_super_admin=is_admin
+        is_super_admin=is_admin,
     )
+
 
 @app.route("/admin/exportar_xlsx")
 @login_required
@@ -771,30 +918,46 @@ def exportar_convidados_xlsx():
       302:
         description: Redireciona para /login se não autenticado
     """
-    search = request.args.get('search', '').strip()
+    search = request.args.get("search", "").strip()
     is_admin = current_user.is_super_admin
     uid = None if is_admin else current_user.db_id
     where_clause, params = build_where(search, user_id=uid, super_admin=is_admin)
 
     with engine.connect() as conn:
-        result = conn.execute(text(f"""
+        result = (
+            conn.execute(
+                text(f"""
             SELECT name, email, phone, response, response_date, custom_message, media_file
             FROM invitees
             {where_clause}
             ORDER BY response_date IS NULL, response_date DESC
-        """), params).mappings().all()
+        """),
+                params,
+            )
+            .mappings()
+            .all()
+        )
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Convidados"
-    ws.append(["Nome", "Email", "Telefone", "Resposta", "Data/Hora", "Observação", "Arquivo"])
+    ws.append(
+        ["Nome", "Email", "Telefone", "Resposta", "Data/Hora", "Observação", "Arquivo"]
+    )
     for r in result:
-        ws.append([
-            r['name'], r['email'] or "", r['phone'] or "",
-            r['response'] or "",
-            r['response_date'].strftime("%d/%m/%Y %H:%M") if r['response_date'] else "",
-            r['custom_message'] or "", r['media_file'] or ""
-        ])
+        ws.append(
+            [
+                r["name"],
+                r["email"] or "",
+                r["phone"] or "",
+                r["response"] or "",
+                r["response_date"].strftime("%d/%m/%Y %H:%M")
+                if r["response_date"]
+                else "",
+                r["custom_message"] or "",
+                r["media_file"] or "",
+            ]
+        )
     for col in ws.columns:
         max_len = 0
         col_letter = col[0].column_letter
@@ -809,10 +972,11 @@ def exportar_convidados_xlsx():
     return Response(
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment;filename=convidados.xlsx"}
+        headers={"Content-Disposition": "attachment;filename=convidados.xlsx"},
     )
 
-@app.route("/admin/convidados/add", methods=['POST'])
+
+@app.route("/admin/convidados/add", methods=["POST"])
 @login_required
 def add_convidado():
     """
@@ -839,42 +1003,50 @@ def add_convidado():
       403:
         description: Sem permissão
     """
-    name = request.form.get('name', '').strip()
+    name = request.form.get("name", "").strip()
     if not name:
         flash("Nome é obrigatório.", "danger")
-        return redirect(url_for('respostas'))
+        return redirect(url_for("respostas"))
 
-    email = request.form.get('email') or None
-    phone = request.form.get('phone') or None
-    msg = request.form.get('custom_message') or None
+    email = request.form.get("email") or None
+    phone = request.form.get("phone") or None
+    msg = request.form.get("custom_message") or None
     user_id = None if current_user.is_super_admin else current_user.db_id
 
     media_filename = None
-    file = request.files.get('media_file')
+    file = request.files.get("media_file")
     if file and file.filename:
         if not allowed_file(file.filename):
             flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
-            return redirect(url_for('respostas'))
+            return redirect(url_for("respostas"))
         media_filename = save_uploaded_file(file)
         if media_filename is None:
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for('respostas'))
+            return redirect(url_for("respostas"))
 
     token = os.urandom(16).hex()
     with engine.connect() as conn:
         conn.execute(
             text("""INSERT INTO invitees (name,email,phone,token,custom_message,media_file,user_id)
                     VALUES (:name,:email,:phone,:token,:msg,:media,:user_id)"""),
-            {"name": name, "email": email, "phone": phone, "token": token,
-             "msg": msg, "media": media_filename, "user_id": user_id}
+            {
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "token": token,
+                "msg": msg,
+                "media": media_filename,
+                "user_id": user_id,
+            },
         )
         conn.commit()
 
     logger.info(f"Convidado adicionado: '{name}' por '{current_user.username}'.")
     flash(f'Convidado "{name}" adicionado com sucesso!', "success")
-    return redirect(url_for('respostas'))
+    return redirect(url_for("respostas"))
 
-@app.route("/admin/convidados/<int:id>/edit", methods=['POST'])
+
+@app.route("/admin/convidados/<int:id>/edit", methods=["POST"])
 @login_required
 def edit_convidado(id):
     """
@@ -904,34 +1076,36 @@ def edit_convidado(id):
         description: Convidado não encontrado
     """
     with engine.connect() as conn:
-        guest = conn.execute(
-            text("SELECT user_id FROM invitees WHERE id=:id"), {"id": id}
-        ).mappings().fetchone()
+        guest = (
+            conn.execute(text("SELECT user_id FROM invitees WHERE id=:id"), {"id": id})
+            .mappings()
+            .fetchone()
+        )
 
     if not guest:
         abort(404)
-    if not current_user.is_super_admin and guest['user_id'] != current_user.db_id:
+    if not current_user.is_super_admin and guest["user_id"] != current_user.db_id:
         abort(403)
 
-    name = request.form.get('name', '').strip()
-    email = request.form.get('email') or None
-    phone = request.form.get('phone') or None
-    msg = request.form.get('custom_message') or None
-    response_val = request.form.get('response')
-    if response_val not in ('yes', 'no', ''):
-        response_val = ''
-    response_db = None if response_val == '' else response_val
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email") or None
+    phone = request.form.get("phone") or None
+    msg = request.form.get("custom_message") or None
+    response_val = request.form.get("response")
+    if response_val not in ("yes", "no", ""):
+        response_val = ""
+    response_db = None if response_val == "" else response_val
 
     new_media = None
-    file = request.files.get('media_file')
+    file = request.files.get("media_file")
     if file and file.filename:
         if not allowed_file(file.filename):
             flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
-            return redirect(url_for('respostas'))
+            return redirect(url_for("respostas"))
         new_media = save_uploaded_file(file)
         if new_media is None:
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for('respostas'))
+            return redirect(url_for("respostas"))
 
     with engine.connect() as conn:
         media_part = ", media_file=:media_file" if new_media else ""
@@ -941,16 +1115,24 @@ def edit_convidado(id):
                          custom_message=:msg, response=:response
                          {media_part}
                      WHERE id=:id"""),
-            {"name": name, "email": email, "phone": phone, "msg": msg,
-             "response": response_db, "media_file": new_media, "id": id}
+            {
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "msg": msg,
+                "response": response_db,
+                "media_file": new_media,
+                "id": id,
+            },
         )
         conn.commit()
 
     logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
     flash("Convidado atualizado com sucesso!", "success")
-    return redirect(url_for('respostas'))
+    return redirect(url_for("respostas"))
 
-@app.route("/admin/convidados/<int:id>/delete", methods=['POST'])
+
+@app.route("/admin/convidados/<int:id>/delete", methods=["POST"])
 @login_required
 def delete_convidado(id):
     """
@@ -971,13 +1153,18 @@ def delete_convidado(id):
         description: Convidado não encontrado
     """
     with engine.connect() as conn:
-        res = conn.execute(
-            text("SELECT name, media_file, user_id FROM invitees WHERE id=:id"), {"id": id}
-        ).mappings().fetchone()
+        res = (
+            conn.execute(
+                text("SELECT name, media_file, user_id FROM invitees WHERE id=:id"),
+                {"id": id},
+            )
+            .mappings()
+            .fetchone()
+        )
 
     if not res:
         abort(404)
-    if not current_user.is_super_admin and res['user_id'] != current_user.db_id:
+    if not current_user.is_super_admin and res["user_id"] != current_user.db_id:
         abort(403)
 
     with engine.connect() as conn:
@@ -990,11 +1177,14 @@ def delete_convidado(id):
         except FileNotFoundError:
             pass
 
-    logger.info(f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'.")
+    logger.info(
+        f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'."
+    )
     flash("Convidado excluído com sucesso.", "warning")
-    return redirect(url_for('respostas'))
+    return redirect(url_for("respostas"))
 
-@app.route("/admin/textos", methods=['POST'])
+
+@app.route("/admin/textos", methods=["POST"])
 @login_required
 @super_admin_required
 def update_textos():
@@ -1025,24 +1215,26 @@ def update_textos():
         description: Apenas super admin
     """
     textos = {
-        "question_text": request.form.get('question_text') or "",
-        "yes_text":      request.form.get('yes_text') or "",
-        "no_text":       request.form.get('no_text') or "",
-        "post_yes_text": request.form.get('post_yes_text') or "",
-        "post_no_text":  request.form.get('post_no_text') or ""
+        "question_text": request.form.get("question_text") or "",
+        "yes_text": request.form.get("yes_text") or "",
+        "no_text": request.form.get("no_text") or "",
+        "post_yes_text": request.form.get("post_yes_text") or "",
+        "post_no_text": request.form.get("post_no_text") or "",
     }
     with engine.connect() as conn:
         for k, v in textos.items():
             conn.execute(
                 text("REPLACE INTO settings (`key`,`value`) VALUES (:key,:value)"),
-                {"key": k, "value": v}
+                {"key": k, "value": v},
             )
         conn.commit()
     logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
-    return redirect(url_for('respostas'))
+    return redirect(url_for("respostas"))
+
 
 # ===== Gerenciamento de Usuários =====
+
 
 @app.route("/admin/usuarios")
 @login_required
@@ -1059,19 +1251,32 @@ def admin_usuarios():
         description: Apenas super admin
     """
     with engine.connect() as conn:
-        users = conn.execute(
-            text("SELECT id, username, email, whatsapp, must_change_password, created_at FROM users ORDER BY created_at DESC")
-        ).mappings().all()
-        counts_rows = conn.execute(
-            text("""SELECT user_id, COUNT(*) AS total FROM invitees
+        users = (
+            conn.execute(
+                text(
+                    "SELECT id, username, email, whatsapp, must_change_password, created_at FROM users ORDER BY created_at DESC"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        counts_rows = (
+            conn.execute(
+                text("""SELECT user_id, COUNT(*) AS total FROM invitees
                     WHERE user_id IS NOT NULL GROUP BY user_id""")
-        ).mappings().all()
+            )
+            .mappings()
+            .all()
+        )
 
-    counts_map = {r['user_id']: r['total'] for r in counts_rows}
-    users_list = [dict(u) | {"guest_count": counts_map.get(u['id'], 0)} for u in users]
-    return render_template("admin_users.html", users=users_list, default_password=DEFAULT_PASSWORD)
+    counts_map = {r["user_id"]: r["total"] for r in counts_rows}
+    users_list = [dict(u) | {"guest_count": counts_map.get(u["id"], 0)} for u in users]
+    return render_template(
+        "admin_users.html", users=users_list, default_password=DEFAULT_PASSWORD
+    )
 
-@app.route("/admin/usuarios/add", methods=['POST'])
+
+@app.route("/admin/usuarios/add", methods=["POST"])
 @login_required
 @super_admin_required
 def add_usuario():
@@ -1097,34 +1302,41 @@ def add_usuario():
       403:
         description: Apenas super admin
     """
-    username = request.form.get('username', '').strip()
-    email    = request.form.get('email', '').strip()
-    whatsapp = request.form.get('whatsapp', '').strip() or None
+    username = request.form.get("username", "").strip()
+    email = request.form.get("email", "").strip()
+    whatsapp = request.form.get("whatsapp", "").strip() or None
 
     if not username:
         flash("Nome de usuário é obrigatório.", "danger")
-        return redirect(url_for('admin_usuarios'))
+        return redirect(url_for("admin_usuarios"))
     if not email:
         flash("Email é obrigatório.", "danger")
-        return redirect(url_for('admin_usuarios'))
+        return redirect(url_for("admin_usuarios"))
 
     try:
         with engine.connect() as conn:
             conn.execute(
                 text("""INSERT INTO users (username, password_hash, must_change_password, email, whatsapp)
                         VALUES (:u, :pw, TRUE, :email, :whatsapp)"""),
-                {"u": username, "pw": generate_password_hash(DEFAULT_PASSWORD),
-                 "email": email, "whatsapp": whatsapp}
+                {
+                    "u": username,
+                    "pw": generate_password_hash(DEFAULT_PASSWORD),
+                    "email": email,
+                    "whatsapp": whatsapp,
+                },
             )
             conn.commit()
         logger.info(f"Usuário '{username}' criado por '{current_user.username}'.")
-        flash(f'Usuário "{username}" criado. Senha padrão: {DEFAULT_PASSWORD}', "success")
+        flash(
+            f'Usuário "{username}" criado. Senha padrão: {DEFAULT_PASSWORD}', "success"
+        )
     except Exception:
         flash("Erro: nome de usuário ou email já existe.", "danger")
 
-    return redirect(url_for('admin_usuarios'))
+    return redirect(url_for("admin_usuarios"))
 
-@app.route("/admin/usuarios/<int:id>/edit", methods=['POST'])
+
+@app.route("/admin/usuarios/<int:id>/edit", methods=["POST"])
 @login_required
 @super_admin_required
 def edit_usuario(id):
@@ -1156,27 +1368,38 @@ def edit_usuario(id):
       404:
         description: Usuário não encontrado
     """
-    new_username = request.form.get('username', '').strip()
-    new_email    = request.form.get('email', '').strip()
-    new_whatsapp = request.form.get('whatsapp', '').strip() or None
+    new_username = request.form.get("username", "").strip()
+    new_email = request.form.get("email", "").strip()
+    new_whatsapp = request.form.get("whatsapp", "").strip() or None
 
     if not new_username:
         flash("Nome de usuário não pode ser vazio.", "danger")
-        return redirect(url_for('admin_usuarios'))
+        return redirect(url_for("admin_usuarios"))
     if not new_email:
         flash("Email é obrigatório.", "danger")
-        return redirect(url_for('admin_usuarios'))
+        return redirect(url_for("admin_usuarios"))
 
     try:
         with engine.connect() as conn:
-            user = conn.execute(
-                text("SELECT username FROM users WHERE id=:id"), {"id": id}
-            ).mappings().fetchone()
+            user = (
+                conn.execute(
+                    text("SELECT username FROM users WHERE id=:id"), {"id": id}
+                )
+                .mappings()
+                .fetchone()
+            )
             if not user:
                 abort(404)
             conn.execute(
-                text("UPDATE users SET username=:u, email=:email, whatsapp=:whatsapp WHERE id=:id"),
-                {"u": new_username, "email": new_email, "whatsapp": new_whatsapp, "id": id}
+                text(
+                    "UPDATE users SET username=:u, email=:email, whatsapp=:whatsapp WHERE id=:id"
+                ),
+                {
+                    "u": new_username,
+                    "email": new_email,
+                    "whatsapp": new_whatsapp,
+                    "id": id,
+                },
             )
             conn.commit()
         logger.info(f"Usuário id={id} atualizado por '{current_user.username}'.")
@@ -1184,9 +1407,10 @@ def edit_usuario(id):
     except Exception:
         flash("Erro: nome de usuário ou email já existe.", "danger")
 
-    return redirect(url_for('admin_usuarios'))
+    return redirect(url_for("admin_usuarios"))
 
-@app.route("/admin/usuarios/<int:id>/reset_senha", methods=['POST'])
+
+@app.route("/admin/usuarios/<int:id>/reset_senha", methods=["POST"])
 @login_required
 @super_admin_required
 def reset_senha_usuario(id):
@@ -1208,19 +1432,26 @@ def reset_senha_usuario(id):
         description: Usuário não encontrado
     """
     with engine.connect() as conn:
-        user = conn.execute(
-            text("SELECT username FROM users WHERE id=:id"), {"id": id}
-        ).mappings().fetchone()
+        user = (
+            conn.execute(text("SELECT username FROM users WHERE id=:id"), {"id": id})
+            .mappings()
+            .fetchone()
+        )
         if not user:
             abort(404)
         conn.execute(
-            text("UPDATE users SET password_hash=:pw, must_change_password=TRUE WHERE id=:id"),
-            {"pw": generate_password_hash(DEFAULT_PASSWORD), "id": id}
+            text(
+                "UPDATE users SET password_hash=:pw, must_change_password=TRUE WHERE id=:id"
+            ),
+            {"pw": generate_password_hash(DEFAULT_PASSWORD), "id": id},
         )
         conn.commit()
-    logger.info(f"Senha de '{user['username']}' (id={id}) resetada por '{current_user.username}'.")
+    logger.info(
+        f"Senha de '{user['username']}' (id={id}) resetada por '{current_user.username}'."
+    )
     flash(f'Senha de "{user["username"]}" resetada para a senha padrão.', "success")
-    return redirect(url_for('admin_usuarios'))
+    return redirect(url_for("admin_usuarios"))
+
 
 @app.route("/change_password", methods=["GET", "POST"])
 @login_required
@@ -1245,11 +1476,11 @@ def change_password():
         description: Formulário de troca de senha
     """
     if current_user.is_super_admin:
-        return redirect(url_for('respostas'))
+        return redirect(url_for("respostas"))
 
     if request.method == "POST":
-        new_password = request.form.get('new_password', '')
-        confirm = request.form.get('confirm_password', '')
+        new_password = request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
 
         if new_password == DEFAULT_PASSWORD:
             flash("Escolha uma senha diferente da senha padrão.", "danger")
@@ -1263,19 +1494,22 @@ def change_password():
 
         with engine.connect() as conn:
             conn.execute(
-                text("UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"),
-                {"pw": generate_password_hash(new_password), "id": current_user.db_id}
+                text(
+                    "UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"
+                ),
+                {"pw": generate_password_hash(new_password), "id": current_user.db_id},
             )
             conn.commit()
 
         login_user(load_user(current_user.id))
         logger.info(f"Usuário '{current_user.username}' alterou sua senha.")
         flash("Senha alterada com sucesso!", "success")
-        return redirect(url_for('respostas'))
+        return redirect(url_for("respostas"))
 
     return render_template("change_password.html")
 
-@app.route("/admin/usuarios/<int:id>/delete", methods=['POST'])
+
+@app.route("/admin/usuarios/<int:id>/delete", methods=["POST"])
 @login_required
 @super_admin_required
 def delete_usuario(id):
@@ -1297,17 +1531,25 @@ def delete_usuario(id):
         description: Usuário não encontrado
     """
     with engine.connect() as conn:
-        user = conn.execute(
-            text("SELECT username FROM users WHERE id=:id"), {"id": id}
-        ).mappings().fetchone()
+        user = (
+            conn.execute(text("SELECT username FROM users WHERE id=:id"), {"id": id})
+            .mappings()
+            .fetchone()
+        )
         if not user:
             abort(404)
         conn.execute(text("DELETE FROM users WHERE id=:id"), {"id": id})
         conn.commit()
 
-    logger.info(f"Usuário '{user['username']}' (id={id}) excluído por '{current_user.username}'.")
-    flash(f'Usuário "{user["username"]}" excluído. Seus convidados ficaram sem dono (visíveis só ao admin).', "warning")
-    return redirect(url_for('admin_usuarios'))
+    logger.info(
+        f"Usuário '{user['username']}' (id={id}) excluído por '{current_user.username}'."
+    )
+    flash(
+        f'Usuário "{user["username"]}" excluído. Seus convidados ficaram sem dono (visíveis só ao admin).',
+        "warning",
+    )
+    return redirect(url_for("admin_usuarios"))
+
 
 if __name__ == "__main__":
     logger.info(f"Comemore+ iniciado. Versão: {APP_VERSION}")
