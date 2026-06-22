@@ -55,7 +55,7 @@ swagger = Swagger(app, config={
     "version": APP_VERSION,
     "description": "API do sistema de RSVP para convites de aniversário Comemore+.",
     "termsOfService": "",
-    "contact": {"email": "seu@email.com"},
+    "contact": {"email": os.getenv("EMAIL_USER", "")},
 }, template={
     "info": {
         "title": "Comemore+ API",
