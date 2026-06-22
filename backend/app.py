@@ -2,6 +2,7 @@
 
 import logging
 import os
+import secrets
 import smtplib
 import time
 import uuid
@@ -38,6 +39,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+
+import repo
 
 load_dotenv()
 
@@ -123,128 +126,6 @@ engine = create_engine(
 
 DEFAULT_PASSWORD = os.getenv("DEFAULT_PASSWORD", "102030@")
 
-
-def _col_exists(conn, table, column):
-    return conn.execute(
-        text("""
-        SELECT COUNT(*) FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = :t AND COLUMN_NAME = :c
-    """),
-        {"t": table, "c": column},
-    ).scalar()
-
-
-def _index_exists(conn, table: str, index_name: str) -> bool:
-    count = conn.execute(
-        text("""
-        SELECT COUNT(*) FROM information_schema.statistics
-        WHERE table_schema = DATABASE()
-          AND table_name   = :t
-          AND index_name   = :i
-    """),
-        {"t": table, "i": index_name},
-    ).scalar()
-    return bool(count)
-
-
-def init_db():
-    # Guard: se o Alembic já aplicou as migrations (alembic_version existe),
-    # o schema é gerenciado por ele — init_db() seria destrutivo, então sai.
-    # Removido completamente na Fase 2A (commit de refactor do app.py).
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1 FROM alembic_version LIMIT 1"))
-            logger.info("Schema gerenciado pelo Alembic — init_db() ignorado.")
-            return
-    except Exception:
-        pass
-
-    for attempt in range(10):
-        try:
-            with engine.connect() as conn:
-                conn.execute(
-                    text("""
-                    CREATE TABLE IF NOT EXISTS users (
-                      id INT AUTO_INCREMENT PRIMARY KEY,
-                      username VARCHAR(100) UNIQUE NOT NULL,
-                      password_hash VARCHAR(255) NOT NULL,
-                      must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
-                      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """)
-                )
-                if not _col_exists(conn, "invitees", "user_id"):
-                    conn.execute(
-                        text("""
-                        ALTER TABLE invitees
-                        ADD COLUMN user_id INT NULL,
-                        ADD CONSTRAINT fk_invitees_user
-                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-                    """)
-                    )
-                if not _col_exists(conn, "users", "must_change_password"):
-                    conn.execute(
-                        text("""
-                        ALTER TABLE users
-                        ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE
-                    """)
-                    )
-
-                # Migração: colunas email e whatsapp em users
-                if not _col_exists(conn, "users", "email"):
-                    conn.execute(
-                        text("ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL")
-                    )
-                if not _col_exists(conn, "users", "whatsapp"):
-                    conn.execute(
-                        text("ALTER TABLE users ADD COLUMN whatsapp VARCHAR(30) NULL")
-                    )
-
-                # Migração: UNIQUE INDEX em users.email
-                if not _index_exists(conn, "users", "idx_users_email_unique"):
-                    try:
-                        conn.execute(
-                            text(
-                                "ALTER TABLE users ADD UNIQUE INDEX idx_users_email_unique (email)"
-                            )
-                        )
-                        conn.commit()
-                    except Exception as e:
-                        logger.warning(
-                            f"Não foi possível adicionar UNIQUE em users.email: {e}"
-                        )
-
-                # Tabela de tokens de reset de senha
-                conn.execute(
-                    text("""
-                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-                      id         INT AUTO_INCREMENT PRIMARY KEY,
-                      user_id    INT NOT NULL,
-                      token      VARCHAR(64) NOT NULL UNIQUE,
-                      expires_at DATETIME NOT NULL,
-                      used       BOOLEAN NOT NULL DEFAULT FALSE,
-                      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                      CONSTRAINT fk_prt_user
-                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """)
-                )
-                conn.commit()
-            logger.info("DB inicializado com sucesso.")
-            return
-        except Exception as e:
-            if attempt == 9:
-                logger.error(f"Falha ao inicializar DB: {e}")
-                raise
-            logger.warning(
-                f"DB não disponível, tentando novamente ({attempt + 1}/10)..."
-            )
-            time.sleep(2)
-
-
-init_db()
-
 # Auth
 login_manager = LoginManager()
 login_manager.login_view = "login"
@@ -255,6 +136,8 @@ class AdminUser(UserMixin):
     id = "admin"
     is_super_admin = True
     db_id = None
+    tenant_id = 1       # default tenant até signup substituir env-var auth (2D)
+    role = "tenant_admin"
 
     @property
     def username(self):
@@ -265,14 +148,26 @@ class AdminUser(UserMixin):
 
 
 class DbUser(UserMixin):
-    is_super_admin = False
-
-    def __init__(self, db_id, username, password_hash, must_change_password=False):
+    def __init__(
+        self,
+        db_id,
+        username,
+        password_hash,
+        must_change_password=False,
+        tenant_id=1,
+        role="member",
+    ):
         self.id = f"user_{db_id}"
         self.db_id = db_id
         self.username = username
         self._password_hash = password_hash
         self.must_change_password = bool(must_change_password)
+        self.tenant_id = tenant_id
+        self.role = role
+
+    @property
+    def is_super_admin(self):
+        return self.role == "tenant_admin"
 
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)
@@ -291,7 +186,9 @@ def load_user(user_id):
             row = (
                 conn.execute(
                     text(
-                        "SELECT id, username, password_hash, must_change_password FROM users WHERE id=:id"
+                        "SELECT id, tenant_id, username, password_hash, "
+                        "must_change_password, role "
+                        "FROM users WHERE id=:id AND is_active=1"
                     ),
                     {"id": db_id},
                 )
@@ -304,6 +201,8 @@ def load_user(user_id):
                     row["username"],
                     row["password_hash"],
                     row["must_change_password"],
+                    row["tenant_id"],
+                    row["role"],
                 )
     return None
 
@@ -341,18 +240,6 @@ def force_password_change():
 
 
 # Helpers
-def get_settings(conn):
-    rows = (
-        conn.execute(
-            text("""SELECT `key`,`value` FROM settings
-                WHERE `key` IN ('question_text','yes_text','no_text','post_yes_text','post_no_text')""")
-        )
-        .mappings()
-        .all()
-    )
-    return {r["key"]: r["value"] for r in rows}
-
-
 def save_uploaded_file(file):
     ext = file.filename.rsplit(".", 1)[1].lower()
     safe = secure_filename(f"{uuid.uuid4().hex}.{ext}")
@@ -363,21 +250,6 @@ def save_uploaded_file(file):
         logger.error(f"Falha ao salvar arquivo: {e}")
         return None
     return safe
-
-
-def build_where(search, user_id=None, super_admin=False, alias=""):
-    """Monta cláusula WHERE com filtro opcional por user_id e busca."""
-    prefix = f"{alias}." if alias else ""
-    conditions = []
-    params = {}
-    if not super_admin:
-        conditions.append(f"{prefix}user_id = :user_id")
-        params["user_id"] = user_id
-    if search:
-        conditions.append(f"({prefix}name LIKE :search OR {prefix}email LIKE :search)")
-        params["search"] = f"%{search}%"
-    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-    return where, params
 
 
 def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
@@ -517,43 +389,35 @@ def login():
         description: Página de login
     """
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        identifier = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = None
 
-        if username == os.getenv("ADMIN_USER", "admin"):
+        if identifier == os.getenv("ADMIN_USER", "admin"):
             candidate = AdminUser()
             if candidate.check_password(password):
                 user = candidate
         else:
             with engine.connect() as conn:
-                row = (
-                    conn.execute(
-                        text(
-                            "SELECT id, username, password_hash, must_change_password FROM users WHERE username=:u"
-                        ),
-                        {"u": username},
-                    )
-                    .mappings()
-                    .fetchone()
-                )
-                if row:
+                if "@" in identifier:
+                    row = repo.get_user_by_email_global(conn, identifier)
+                else:
+                    row = repo.get_user_by_username(conn, tenant_id=1, username=identifier)
+                if row and row.get("is_active"):
                     candidate = DbUser(
-                        row["id"],
-                        row["username"],
-                        row["password_hash"],
-                        row["must_change_password"],
+                        row["id"], row["username"], row["password_hash"],
+                        row["must_change_password"], row["tenant_id"], row["role"],
                     )
                     if candidate.check_password(password):
                         user = candidate
 
         if user:
             login_user(user)
-            logger.info(f"Login bem-sucedido: '{username}'.")
+            logger.info(f"Login bem-sucedido: '{identifier}'.")
             flash("Login realizado com sucesso.", "success")
             return redirect(url_for("respostas"))
 
-        logger.warning(f"Tentativa de login inválida: '{username}'.")
+        logger.warning(f"Tentativa de login inválida: '{identifier}'.")
         flash("Usuário ou senha inválidos.", "danger")
     return render_template("login.html")
 
@@ -600,14 +464,11 @@ def forgot_password():
 
         with engine.connect() as conn:
             if "@" in identifier:
-                query = text("""SELECT id, username, email FROM users
-                                WHERE LOWER(email) = LOWER(:id)""")
+                row = repo.get_user_by_email_global(conn, identifier)
             else:
-                query = text("""SELECT id, username, email FROM users
-                                WHERE username = :id""")
-            row = conn.execute(query, {"id": identifier}).mappings().fetchone()
+                row = repo.get_user_by_username(conn, tenant_id=1, username=identifier)
 
-            if row and row["email"]:
+            if row and row.get("email"):
                 token = uuid.uuid4().hex
                 expires = datetime.utcnow() + timedelta(hours=1)
                 conn.execute(
@@ -635,19 +496,6 @@ def forgot_password():
         return redirect(url_for("login"))
 
     return render_template("forgot_password.html")
-
-
-def _get_valid_token(conn, token: str):
-    """Retorna a row do token se válido (existente, não usado, não expirado)."""
-    return (
-        conn.execute(
-            text("""SELECT id, user_id FROM password_reset_tokens
-                WHERE token=:tok AND used=FALSE AND expires_at > UTC_TIMESTAMP()"""),
-            {"tok": token},
-        )
-        .mappings()
-        .fetchone()
-    )
 
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
@@ -690,7 +538,7 @@ def reset_password(token):
             return render_template("reset_password.html", token=token)
 
         with engine.connect() as conn:
-            tok_row = _get_valid_token(conn, token)
+            tok_row = repo.get_valid_reset_token(conn, token)
             if not tok_row:
                 flash("Link de redefinição inválido ou expirado.", "danger")
                 return redirect(url_for("forgot_password"))
@@ -711,7 +559,7 @@ def reset_password(token):
         return redirect(url_for("login"))
 
     with engine.connect() as conn:
-        tok_row = _get_valid_token(conn, token)
+        tok_row = repo.get_valid_reset_token(conn, token)
         if not tok_row:
             flash("Link de redefinição inválido ou expirado.", "danger")
             return redirect(url_for("forgot_password"))
@@ -746,24 +594,18 @@ def invite(token):
         description: Token inválido
     """
     with engine.connect() as conn:
-        result = (
-            conn.execute(
-                text("SELECT * FROM invitees WHERE token=:token"), {"token": token}
-            )
-            .mappings()
-            .fetchone()
-        )
+        result = repo.get_invitee_by_token(conn, token)
         if not result:
             abort(404)
         if request.method == "POST":
             response = request.form.get("response")
             observacao = request.form.get("observacao") or None
-            if result["response"] is None and response in ["yes", "no"]:
-                conn.execute(
-                    text("""UPDATE invitees
-                            SET response=:response, response_date=NOW(), custom_message=:obs
-                            WHERE token=:token"""),
-                    {"response": response, "obs": observacao, "token": token},
+            if result["response"] == "pending" and response in ["yes", "no"]:
+                repo.update_invitee(
+                    conn, result["tenant_id"], result["id"],
+                    response=response,
+                    observation=observacao,
+                    responded_at=datetime.utcnow(),
                 )
                 conn.commit()
                 logger.info(
@@ -771,7 +613,7 @@ def invite(token):
                 )
             return redirect(url_for("invite", token=token))
 
-        texts = get_settings(conn)
+        texts = repo.get_event_texts(conn, result["tenant_id"], result["event_id"])
         return render_template(
             "invite.html",
             invitee=result,
@@ -812,103 +654,57 @@ def respostas():
     search = request.args.get("search", "").strip()
     offset = (page - 1) * per_page
 
+    tid = current_user.tenant_id
     is_admin = current_user.is_super_admin
-    uid = None if is_admin else current_user.db_id
-    where_clause, params = build_where(
-        search, user_id=uid, super_admin=is_admin, alias="i"
-    )
-    order_clause = " ORDER BY i.response_date IS NULL, i.response_date DESC"
-    params["limit"] = per_page
-    params["offset"] = offset
-    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
-        result = (
-            conn.execute(
-                text(f"""
-            SELECT i.id, i.name, i.email, i.phone, i.response, i.response_date,
-                   i.token, i.custom_message, i.media_file,
-                   COALESCE(u.username, '(admin)') AS owner_username
-            FROM invitees i
-            LEFT JOIN users u ON i.user_id = u.id
-            {where_clause} {order_clause}
-            LIMIT :limit OFFSET :offset
-        """),
-                params,
-            )
-            .mappings()
-            .all()
+        convidados_raw = repo.get_invitees(
+            conn, tid,
+            owner_user_id=owner_uid,
+            search=search,
+            limit=per_page,
+            offset=offset,
         )
-
-        tz_offset = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
-        convidados = []
-        for r in result:
-            row = dict(r)
-            if row["response_date"]:
-                row["response_date"] += timedelta(hours=tz_offset)
-            convidados.append(row)
-
-        total_count = (
-            conn.execute(
-                text(f"""
-            SELECT COUNT(*) AS total
-            FROM invitees i LEFT JOIN users u ON i.user_id = u.id
-            {where_clause}
-        """),
-                count_params,
-            )
-            .mappings()
-            .fetchone()
+        counts = repo.count_invitees_by_response(
+            conn, tid, owner_user_id=owner_uid, search=search
         )
-        total_convidados = total_count["total"]
+        event_id = repo.get_default_event_id(conn, tid)
+        texts = repo.get_event_texts(conn, tid, event_id)
 
-        counts = (
-            conn.execute(
-                text(f"""
-            SELECT
-              SUM(CASE WHEN i.response = 'yes' THEN 1 ELSE 0 END) AS total_sim,
-              SUM(CASE WHEN i.response = 'no'  THEN 1 ELSE 0 END) AS total_nao,
-              SUM(CASE WHEN i.response IS NULL  THEN 1 ELSE 0 END) AS total_aguardando
-            FROM invitees i LEFT JOIN users u ON i.user_id = u.id
-            {where_clause}
-        """),
-                count_params,
+    tz_offset = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
+    convidados = []
+    for r in convidados_raw:
+        row = dict(r)
+        if row["response_date"]:
+            row["response_date"] += timedelta(hours=tz_offset)
+        if row["phone"]:
+            phone_clean = (
+                row["phone"]
+                .replace("(", "")
+                .replace(")", "")
+                .replace("-", "")
+                .replace(" ", "")
             )
-            .mappings()
-            .fetchone()
-        )
-        total_sim = counts["total_sim"] or 0
-        total_nao = counts["total_nao"] or 0
-        total_aguardando = counts["total_aguardando"] or 0
+            invite_url = url_for("invite", token=row["token"], _external=True)
+            message = f"{texts.get('question_text', '')} {invite_url}"
+            row["whatsapp_url"] = (
+                f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
+            )
+        else:
+            row["whatsapp_url"] = None
+        convidados.append(row)
 
-        texts = get_settings(conn)
-
-        for row in convidados:
-            if row["phone"]:
-                phone_clean = (
-                    row["phone"]
-                    .replace("(", "")
-                    .replace(")", "")
-                    .replace("-", "")
-                    .replace(" ", "")
-                )
-                invite_url = url_for("invite", token=row["token"], _external=True)
-                message = f"{texts.get('question_text', '')} {invite_url}"
-                row["whatsapp_url"] = (
-                    f"https://wa.me/55{phone_clean}?text={quote_plus(message, encoding='utf-8')}"
-                )
-            else:
-                row["whatsapp_url"] = None
-
+    total_convidados = counts["total"]
     total_pages = (total_convidados + per_page - 1) // per_page
 
     return render_template(
         "admin_responses.html",
         convidados=convidados,
         texts=texts,
-        total_sim=total_sim,
-        total_nao=total_nao,
-        total_aguardando=total_aguardando,
+        total_sim=counts["total_sim"],
+        total_nao=counts["total_nao"],
+        total_aguardando=counts["total_aguardando"],
         page=page,
         total_pages=total_pages,
         search=search,
@@ -930,23 +726,13 @@ def exportar_convidados_xlsx():
         description: Redireciona para /login se não autenticado
     """
     search = request.args.get("search", "").strip()
+    tid = current_user.tenant_id
     is_admin = current_user.is_super_admin
-    uid = None if is_admin else current_user.db_id
-    where_clause, params = build_where(search, user_id=uid, super_admin=is_admin)
+    owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
-        result = (
-            conn.execute(
-                text(f"""
-            SELECT name, email, phone, response, response_date, custom_message, media_file
-            FROM invitees
-            {where_clause}
-            ORDER BY response_date IS NULL, response_date DESC
-        """),
-                params,
-            )
-            .mappings()
-            .all()
+        result = repo.get_invitees(
+            conn, tid, owner_user_id=owner_uid, search=search, limit=10000
         )
 
     wb = Workbook()
@@ -956,17 +742,18 @@ def exportar_convidados_xlsx():
         ["Nome", "Email", "Telefone", "Resposta", "Data/Hora", "Observação", "Arquivo"]
     )
     for r in result:
+        response_display = "" if r["response"] == "pending" else (r["response"] or "")
         ws.append(
             [
                 r["name"],
                 r["email"] or "",
                 r["phone"] or "",
-                r["response"] or "",
+                response_display,
                 r["response_date"].strftime("%d/%m/%Y %H:%M")
                 if r["response_date"]
                 else "",
                 r["custom_message"] or "",
-                r["media_file"] or "",
+                r["media_url"] or "",
             ]
         )
     for col in ws.columns:
@@ -1022,7 +809,6 @@ def add_convidado():
     email = request.form.get("email") or None
     phone = request.form.get("phone") or None
     msg = request.form.get("custom_message") or None
-    user_id = None if current_user.is_super_admin else current_user.db_id
 
     media_filename = None
     file = request.files.get("media_file")
@@ -1035,20 +821,13 @@ def add_convidado():
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
             return redirect(url_for("respostas"))
 
-    token = os.urandom(16).hex()
+    tid = current_user.tenant_id
+    token = secrets.token_urlsafe(16)[:22]
     with engine.connect() as conn:
-        conn.execute(
-            text("""INSERT INTO invitees (name,email,phone,token,custom_message,media_file,user_id)
-                    VALUES (:name,:email,:phone,:token,:msg,:media,:user_id)"""),
-            {
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "token": token,
-                "msg": msg,
-                "media": media_filename,
-                "user_id": user_id,
-            },
+        event_id = repo.get_default_event_id(conn, tid)
+        repo.add_invitee(
+            conn, tid, event_id, name, token,
+            phone=phone, email=email, observation=msg, media_url=media_filename,
         )
         conn.commit()
 
@@ -1086,16 +865,13 @@ def edit_convidado(id):
       404:
         description: Convidado não encontrado
     """
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        guest = (
-            conn.execute(text("SELECT user_id FROM invitees WHERE id=:id"), {"id": id})
-            .mappings()
-            .fetchone()
-        )
+        guest = repo.get_invitee(conn, tid, id)
 
     if not guest:
         abort(404)
-    if not current_user.is_super_admin and guest["user_id"] != current_user.db_id:
+    if not current_user.is_super_admin and guest["event_owner_user_id"] != current_user.db_id:
         abort(403)
 
     name = request.form.get("name", "").strip()
@@ -1105,7 +881,7 @@ def edit_convidado(id):
     response_val = request.form.get("response")
     if response_val not in ("yes", "no", ""):
         response_val = ""
-    response_db = None if response_val == "" else response_val
+    response_db = "pending" if response_val == "" else response_val
 
     new_media = None
     file = request.files.get("media_file")
@@ -1118,24 +894,14 @@ def edit_convidado(id):
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
             return redirect(url_for("respostas"))
 
+    update_fields = dict(
+        name=name, email=email, phone=phone, observation=msg, response=response_db
+    )
+    if new_media:
+        update_fields["media_url"] = new_media
+
     with engine.connect() as conn:
-        media_part = ", media_file=:media_file" if new_media else ""
-        conn.execute(
-            text(f"""UPDATE invitees
-                     SET name=:name, email=:email, phone=:phone,
-                         custom_message=:msg, response=:response
-                         {media_part}
-                     WHERE id=:id"""),
-            {
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "msg": msg,
-                "response": response_db,
-                "media_file": new_media,
-                "id": id,
-            },
-        )
+        repo.update_invitee(conn, tid, id, **update_fields)
         conn.commit()
 
     logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
@@ -1163,28 +929,22 @@ def delete_convidado(id):
       404:
         description: Convidado não encontrado
     """
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        res = (
-            conn.execute(
-                text("SELECT name, media_file, user_id FROM invitees WHERE id=:id"),
-                {"id": id},
-            )
-            .mappings()
-            .fetchone()
-        )
+        res = repo.get_invitee(conn, tid, id)
 
     if not res:
         abort(404)
-    if not current_user.is_super_admin and res["user_id"] != current_user.db_id:
+    if not current_user.is_super_admin and res["event_owner_user_id"] != current_user.db_id:
         abort(403)
 
     with engine.connect() as conn:
-        conn.execute(text("DELETE FROM invitees WHERE id=:id"), {"id": id})
+        repo.delete_invitee(conn, tid, id)
         conn.commit()
 
-    if res["media_file"]:
+    if res["media_url"]:
         try:
-            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_file"]))
+            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_url"]))
         except FileNotFoundError:
             pass
 
@@ -1232,12 +992,10 @@ def update_textos():
         "post_yes_text": request.form.get("post_yes_text") or "",
         "post_no_text": request.form.get("post_no_text") or "",
     }
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        for k, v in textos.items():
-            conn.execute(
-                text("REPLACE INTO settings (`key`,`value`) VALUES (:key,:value)"),
-                {"key": k, "value": v},
-            )
+        event_id = repo.get_default_event_id(conn, tid)
+        repo.update_event_texts(conn, tid, event_id, **textos)
         conn.commit()
     logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
@@ -1261,27 +1019,13 @@ def admin_usuarios():
       403:
         description: Apenas super admin
     """
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        users = (
-            conn.execute(
-                text(
-                    "SELECT id, username, email, whatsapp, must_change_password, created_at FROM users ORDER BY created_at DESC"
-                )
-            )
-            .mappings()
-            .all()
-        )
-        counts_rows = (
-            conn.execute(
-                text("""SELECT user_id, COUNT(*) AS total FROM invitees
-                    WHERE user_id IS NOT NULL GROUP BY user_id""")
-            )
-            .mappings()
-            .all()
-        )
-
-    counts_map = {r["user_id"]: r["total"] for r in counts_rows}
-    users_list = [dict(u) | {"guest_count": counts_map.get(u["id"], 0)} for u in users]
+        users = repo.get_users(conn, tid)
+        users_list = [
+            u | {"guest_count": repo.count_invitees_for_user(conn, tid, u["id"])}
+            for u in users
+        ]
     return render_template(
         "admin_users.html", users=users_list, default_password=DEFAULT_PASSWORD
     )
@@ -1324,17 +1068,15 @@ def add_usuario():
         flash("Email é obrigatório.", "danger")
         return redirect(url_for("admin_usuarios"))
 
+    tid = current_user.tenant_id
     try:
         with engine.connect() as conn:
-            conn.execute(
-                text("""INSERT INTO users (username, password_hash, must_change_password, email, whatsapp)
-                        VALUES (:u, :pw, TRUE, :email, :whatsapp)"""),
-                {
-                    "u": username,
-                    "pw": generate_password_hash(DEFAULT_PASSWORD),
-                    "email": email,
-                    "whatsapp": whatsapp,
-                },
+            repo.add_user(
+                conn, tid, username, email,
+                generate_password_hash(DEFAULT_PASSWORD),
+                role="member",
+                whatsapp=whatsapp,
+                must_change_password=True,
             )
             conn.commit()
         logger.info(f"Usuário '{username}' criado por '{current_user.username}'.")
@@ -1390,27 +1132,17 @@ def edit_usuario(id):
         flash("Email é obrigatório.", "danger")
         return redirect(url_for("admin_usuarios"))
 
+    tid = current_user.tenant_id
+    with engine.connect() as conn:
+        user = repo.get_user_by_id(conn, tid, id)
+    if not user:
+        abort(404)
+
     try:
         with engine.connect() as conn:
-            user = (
-                conn.execute(
-                    text("SELECT username FROM users WHERE id=:id"), {"id": id}
-                )
-                .mappings()
-                .fetchone()
-            )
-            if not user:
-                abort(404)
-            conn.execute(
-                text(
-                    "UPDATE users SET username=:u, email=:email, whatsapp=:whatsapp WHERE id=:id"
-                ),
-                {
-                    "u": new_username,
-                    "email": new_email,
-                    "whatsapp": new_whatsapp,
-                    "id": id,
-                },
+            repo.update_user(
+                conn, tid, id,
+                username=new_username, email=new_email, whatsapp=new_whatsapp,
             )
             conn.commit()
         logger.info(f"Usuário id={id} atualizado por '{current_user.username}'.")
@@ -1442,19 +1174,15 @@ def reset_senha_usuario(id):
       404:
         description: Usuário não encontrado
     """
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        user = (
-            conn.execute(text("SELECT username FROM users WHERE id=:id"), {"id": id})
-            .mappings()
-            .fetchone()
-        )
+        user = repo.get_user_by_id(conn, tid, id)
         if not user:
             abort(404)
-        conn.execute(
-            text(
-                "UPDATE users SET password_hash=:pw, must_change_password=TRUE WHERE id=:id"
-            ),
-            {"pw": generate_password_hash(DEFAULT_PASSWORD), "id": id},
+        repo.update_user(
+            conn, tid, id,
+            password_hash=generate_password_hash(DEFAULT_PASSWORD),
+            must_change_password=True,
         )
         conn.commit()
     logger.info(
@@ -1504,11 +1232,10 @@ def change_password():
             return render_template("change_password.html")
 
         with engine.connect() as conn:
-            conn.execute(
-                text(
-                    "UPDATE users SET password_hash=:pw, must_change_password=FALSE WHERE id=:id"
-                ),
-                {"pw": generate_password_hash(new_password), "id": current_user.db_id},
+            repo.update_user(
+                conn, current_user.tenant_id, current_user.db_id,
+                password_hash=generate_password_hash(new_password),
+                must_change_password=False,
             )
             conn.commit()
 
@@ -1541,22 +1268,19 @@ def delete_usuario(id):
       404:
         description: Usuário não encontrado
     """
+    tid = current_user.tenant_id
     with engine.connect() as conn:
-        user = (
-            conn.execute(text("SELECT username FROM users WHERE id=:id"), {"id": id})
-            .mappings()
-            .fetchone()
-        )
+        user = repo.get_user_by_id(conn, tid, id)
         if not user:
             abort(404)
-        conn.execute(text("DELETE FROM users WHERE id=:id"), {"id": id})
+        repo.delete_user(conn, tid, id)
         conn.commit()
 
     logger.info(
         f"Usuário '{user['username']}' (id={id}) excluído por '{current_user.username}'."
     )
     flash(
-        f'Usuário "{user["username"]}" excluído. Seus convidados ficaram sem dono (visíveis só ao admin).',
+        f'Usuário "{user["username"]}" excluído.',
         "warning",
     )
     return redirect(url_for("admin_usuarios"))

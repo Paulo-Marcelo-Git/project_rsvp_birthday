@@ -1,21 +1,13 @@
-from tests.conftest import qresult, setup_db, GUEST_ROW
+from tests.conftest import qresult, setup_db, GUEST_ROW, TEXTS_ROW
 
 TOKEN = GUEST_ROW['token']
 
-SETTINGS_ROWS = [
-    {'key': 'question_text', 'value': 'Você vai comparecer?'},
-    {'key': 'yes_text',      'value': 'Sim'},
-    {'key': 'no_text',       'value': 'Não'},
-    {'key': 'post_yes_text', 'value': 'Obrigado!'},
-    {'key': 'post_no_text',  'value': 'Sentiremos sua falta!'},
-]
-
 
 def test_convite_token_valido_exibe_pagina(client, db):
-    # GET: 1 SELECT invitee + 1 SELECT settings
+    # GET: repo.get_invitee_by_token + repo.get_event_texts
     setup_db(db,
              qresult(fetchone=GUEST_ROW),
-             qresult(all_rows=SETTINGS_ROWS))
+             qresult(fetchone=TEXTS_ROW))
 
     resp = client.get(f'/invite/{TOKEN}')
 
@@ -32,7 +24,7 @@ def test_convite_token_invalido_retorna_404(client, db):
 
 
 def test_convite_post_sim_registra_resposta(client, db):
-    # POST: 1 SELECT invitee + 1 UPDATE
+    # POST: repo.get_invitee_by_token (pending) + repo.update_invitee
     conn = setup_db(db,
                     qresult(fetchone=GUEST_ROW),
                     qresult())

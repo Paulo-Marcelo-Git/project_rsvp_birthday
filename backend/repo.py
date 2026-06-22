@@ -285,7 +285,11 @@ def add_invitee(
 
 
 def get_invitee(conn, tenant_id: int, invitee_id: int) -> dict | None:
-    """Busca convidado por id. SEMPRE filtra tenant_id."""
+    """
+    Busca convidado por id. SEMPRE filtra tenant_id.
+    Inclui event_owner_user_id para que as rotas verifiquem permissão de edição
+    sem query adicional.
+    """
     row = conn.execute(
         text("""
             SELECT i.id, i.name, i.token, i.response,
@@ -293,7 +297,8 @@ def get_invitee(conn, tenant_id: int, invitee_id: int) -> dict | None:
                    i.responded_at AS response_date,
                    i.media_url,
                    i.phone, i.email,
-                   i.event_id, i.tenant_id
+                   i.event_id, i.tenant_id,
+                   e.owner_user_id AS event_owner_user_id
             FROM invitees i
             JOIN events e ON i.event_id = e.id
             WHERE i.id = :iid AND i.tenant_id = :tid
@@ -309,7 +314,7 @@ def update_invitee(conn, tenant_id: int, invitee_id: int, **fields) -> bool:
     Chaves válidas: name, phone, email, observation, response, media_url.
     SEMPRE filtra tenant_id no WHERE. Retorna True se atualizou.
     """
-    allowed = {"name", "phone", "email", "observation", "response", "media_url"}
+    allowed = {"name", "phone", "email", "observation", "response", "media_url", "responded_at"}
     to_set = {k: v for k, v in fields.items() if k in allowed}
     if not to_set:
         return False

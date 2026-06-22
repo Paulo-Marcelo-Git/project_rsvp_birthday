@@ -50,20 +50,6 @@ def test_send_reset_email_com_config_chama_smtp(monkeypatch):
     assert 'tok123' in full_content
 
 
-def test_init_db_cria_tabela_tokens(db, monkeypatch):
-    """init_db() deve interagir com o engine ao criar/migrar tabelas."""
-    import app as _app
-    monkeypatch.setattr(_app, 'engine', db)
-    conn = MagicMock()
-    conn.execute.return_value = MagicMock()
-    db.connect.return_value.__enter__.return_value = conn
-
-    _app.init_db()
-
-    assert db.connect.called
-    assert conn.execute.called
-
-
 def test_forgot_password_page_carrega(client):
     resp = client.get('/forgot_password')
     assert resp.status_code == 200
@@ -218,20 +204,6 @@ def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
                        follow_redirects=True)
     assert resp.status_code == 200
     assert 'padrão' in resp.data.decode() or 'diferente' in resp.data.decode().lower()
-
-
-def test_index_exists_retorna_true_quando_indice_existe():
-    """_index_exists deve retornar True quando o índice existe no information_schema."""
-    conn = MagicMock()
-    conn.execute.return_value.scalar.return_value = 1
-    assert _app._index_exists(conn, 'users', 'idx_users_email_unique') is True
-
-
-def test_index_exists_retorna_false_quando_indice_nao_existe():
-    """_index_exists deve retornar False quando o índice não existe."""
-    conn = MagicMock()
-    conn.execute.return_value.scalar.return_value = 0
-    assert _app._index_exists(conn, 'users', 'idx_users_email_unique') is False
 
 
 def test_forgot_password_post_com_email_valido_envia_reset(client, db):

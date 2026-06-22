@@ -53,9 +53,10 @@ def admin_client(client):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def qresult(fetchone=None, all_rows=None):
+def qresult(fetchone=None, all_rows=None, rowcount=1):
     """Cria um mock para o retorno de conn.execute()."""
     result = MagicMock()
+    result.rowcount = rowcount
     m = MagicMock()
     m.fetchone.return_value = fetchone
     m.all.return_value = all_rows if all_rows is not None else []
@@ -77,11 +78,16 @@ def setup_db(db_mock, *query_results):
 
 # ── dados de teste reutilizáveis ──────────────────────────────────────────────
 
-EMPTY_SETTINGS = []
+STATS_ROW = {'total': 0, 'total_sim': 0, 'total_nao': 0, 'total_aguardando': 0}
 
-STATS_ROW = {'total_sim': 0, 'total_nao': 0, 'total_aguardando': 0}
+DEFAULT_EVENT_ROW = {'id': 1}
 
-COUNT_ROW = {'total': 0}
+TEXTS_ROW = {
+    'question_text': 'Você vai comparecer?',
+    'yes_text': 'Sim',
+    'no_text': 'Não',
+    'extra_texts': '{"post_yes_text": "Obrigado!", "post_no_text": "Sentiremos sua falta!"}',
+}
 
 GUEST_ROW = {
     'id': 1,
@@ -89,12 +95,14 @@ GUEST_ROW = {
     'email': 'maria@email.com',
     'phone': None,
     'token': 'abc123token',
-    'response': None,
+    'response': 'pending',
     'response_date': None,
     'custom_message': None,
-    'media_file': None,
+    'media_url': None,
     'owner_username': '(admin)',
-    'user_id': None,
+    'tenant_id': 1,
+    'event_id': 1,
+    'event_owner_user_id': None,
 }
 
 USER_ROW_FULL = {
@@ -105,4 +113,7 @@ USER_ROW_FULL = {
     'email': 'operador@test.com',
     'whatsapp': '11999990000',
     'created_at': None,
+    'tenant_id': 1,
+    'role': 'member',
+    'is_active': 1,
 }

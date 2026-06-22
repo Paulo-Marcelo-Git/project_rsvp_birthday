@@ -46,19 +46,11 @@ def test_edit_usuario_sem_email_retorna_erro(admin_client, db):
 
 
 def test_listagem_usuarios_exibe_email(admin_client, db):
-    users_rows = [USER_ROW_FULL]
-    counts_rows = []
-    conn = MagicMock()
-    result1 = MagicMock()
-    m1 = MagicMock()
-    m1.all.return_value = users_rows
-    result1.mappings.return_value = m1
-    result2 = MagicMock()
-    m2 = MagicMock()
-    m2.all.return_value = counts_rows
-    result2.mappings.return_value = m2
-    conn.execute.side_effect = [result1, result2]
-    db.connect.return_value.__enter__.return_value = conn
+    from tests.conftest import qresult, setup_db
+    # repo.get_users → all_rows; repo.count_invitees_for_user → fetchone per user
+    setup_db(db,
+             qresult(all_rows=[USER_ROW_FULL]),   # get_users
+             qresult(fetchone={'total': 0}))        # count_invitees_for_user (1 user)
 
     resp = admin_client.get('/admin/usuarios')
     assert resp.status_code == 200

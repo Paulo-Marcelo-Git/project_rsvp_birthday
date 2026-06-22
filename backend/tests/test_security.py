@@ -1,6 +1,6 @@
 from tests.conftest import (
     qresult, setup_db,
-    GUEST_ROW, COUNT_ROW, STATS_ROW, EMPTY_SETTINGS,
+    GUEST_ROW, STATS_ROW, DEFAULT_EVENT_ROW, TEXTS_ROW,
 )
 
 
@@ -8,9 +8,9 @@ def _respostas_db(db, guests=None):
     return setup_db(
         db,
         qresult(all_rows=guests or []),
-        qresult(fetchone=COUNT_ROW),
         qresult(fetchone=STATS_ROW),
-        qresult(all_rows=EMPTY_SETTINGS),
+        qresult(fetchone=DEFAULT_EVENT_ROW),
+        qresult(fetchone=TEXTS_ROW),
     )
 
 

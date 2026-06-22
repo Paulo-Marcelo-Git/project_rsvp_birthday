@@ -1,17 +1,17 @@
 from tests.conftest import (
     qresult, setup_db,
-    GUEST_ROW, COUNT_ROW, STATS_ROW, EMPTY_SETTINGS,
+    GUEST_ROW, STATS_ROW, DEFAULT_EVENT_ROW, TEXTS_ROW,
 )
 
 
 def _respostas_db(db, guests=None):
-    """Configura as 4 queries que respostas() sempre executa."""
+    """Configura as 4 queries que respostas() executa via repo."""
     return setup_db(
         db,
-        qresult(all_rows=guests or []),   # SELECT convidados
-        qresult(fetchone=COUNT_ROW),       # SELECT COUNT(*)
-        qresult(fetchone=STATS_ROW),       # SELECT SUM(...)
-        qresult(all_rows=EMPTY_SETTINGS),  # SELECT settings
+        qresult(all_rows=guests or []),        # repo.get_invitees
+        qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
+        qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id
+        qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
     )
 
 
@@ -51,7 +51,9 @@ def test_respostas_busca_por_nome(admin_client, db):
 # ── adicionar convidado ───────────────────────────────────────────────────────
 
 def test_add_convidado_cria_registro(admin_client, db):
-    conn = setup_db(db, qresult())
+    conn = setup_db(db,
+                    qresult(fetchone=DEFAULT_EVENT_ROW),  # get_default_event_id
+                    qresult())                             # add_invitee
 
     resp = admin_client.post('/admin/convidados/add', data={
         'name': 'Pedro Oliveira',
@@ -60,7 +62,7 @@ def test_add_convidado_cria_registro(admin_client, db):
     })
 
     assert resp.status_code == 302
-    conn.execute.assert_called_once()
+    assert conn.execute.call_count == 2
     conn.commit.assert_called_once()
 
 
@@ -75,10 +77,10 @@ def test_add_convidado_sem_nome_nao_salva(admin_client, db):
 # ── excluir convidado ─────────────────────────────────────────────────────────
 
 def test_delete_convidado_remove_registro(admin_client, db):
-    guest = {'name': 'Ana', 'media_file': None, 'user_id': None}
+    guest = {'name': 'Ana', 'media_url': None, 'event_owner_user_id': None}
     setup_db(db,
-             qresult(fetchone=guest),  # SELECT (ownership check)
-             qresult())                 # DELETE
+             qresult(fetchone=guest),  # repo.get_invitee
+             qresult())                 # repo.delete_invitee
 
     resp = admin_client.post('/admin/convidados/1/delete')
 
@@ -96,10 +98,10 @@ def test_delete_convidado_inexistente_retorna_404(admin_client, db):
 # ── editar convidado ──────────────────────────────────────────────────────────
 
 def test_edit_convidado_atualiza_registro(admin_client, db):
-    guest = {'user_id': None}
+    guest = {'event_owner_user_id': None}
     conn = setup_db(db,
-                    qresult(fetchone=guest),  # SELECT (ownership check)
-                    qresult())                 # UPDATE
+                    qresult(fetchone=guest),  # repo.get_invitee
+                    qresult())                 # repo.update_invitee
 
     resp = admin_client.post('/admin/convidados/1/edit', data={
         'name': 'Maria Atualizada',

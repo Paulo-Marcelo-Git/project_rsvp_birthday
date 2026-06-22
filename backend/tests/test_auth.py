@@ -51,6 +51,9 @@ def test_login_usuario_db_com_troca_obrigatoria_redireciona(client, db):
         'username': 'operador',
         'password_hash': user_hash,
         'must_change_password': True,
+        'tenant_id': 1,
+        'role': 'member',
+        'is_active': 1,
     }
     setup_db(db, qresult(fetchone=user_row))
 

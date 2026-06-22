@@ -277,24 +277,32 @@ class TestTenantIsolation:
 
     def test_export_xlsx_tenant_a_nao_contem_dados_b(self, live_app):
         """GET /admin/exportar_xlsx como tenant A não deve incluir convidados de B."""
+        from io import BytesIO
+        import openpyxl
         client = _client_as(live_app, _UID_A)
         resp = client.get("/admin/exportar_xlsx")
         assert resp.status_code == 200
         assert "spreadsheetml" in resp.content_type
-        assert _NAME_B.encode() not in resp.data, (
+        wb = openpyxl.load_workbook(BytesIO(resp.data))
+        cells = [str(c.value or "") for row in wb.active.iter_rows() for c in row]
+        assert _NAME_A in cells, f"Tenant A deveria ver '{_NAME_A}' no xlsx"
+        assert _NAME_B not in cells, (
             f"VAZAMENTO: xlsx do tenant A contém '{_NAME_B}'"
         )
-        assert _NAME_A.encode() in resp.data
 
     def test_export_xlsx_tenant_b_nao_contem_dados_a(self, live_app):
         """GET /admin/exportar_xlsx como tenant B não deve incluir convidados de A."""
+        from io import BytesIO
+        import openpyxl
         client = _client_as(live_app, _UID_B)
         resp = client.get("/admin/exportar_xlsx")
         assert resp.status_code == 200
-        assert _NAME_A.encode() not in resp.data, (
+        wb = openpyxl.load_workbook(BytesIO(resp.data))
+        cells = [str(c.value or "") for row in wb.active.iter_rows() for c in row]
+        assert _NAME_B in cells, f"Tenant B deveria ver '{_NAME_B}' no xlsx"
+        assert _NAME_A not in cells, (
             f"VAZAMENTO: xlsx do tenant B contém '{_NAME_A}'"
         )
-        assert _NAME_B.encode() in resp.data
 
     def test_edit_convidado_cross_tenant_retorna_403(self, live_app):
         """POST /admin/convidados/<id_B>/edit como tenant A deve retornar 403 ou 404."""
@@ -315,10 +323,6 @@ class TestTenantIsolation:
         assert resp.status_code in (403, 404), (
             f"Esperado 403/404, obteve {resp.status_code}"
         )
-        # Convidado B ainda deve existir no banco
-        with live_app.extensions["sqlalchemy_engine"].connect() if False else \
-             (lambda: None)():
-            pass  # verificação via SQL omitida — o assert de status já prova
 
     def test_admin_usuarios_tenant_a_nao_ve_usuarios_b(self, live_app):
         """GET /admin/usuarios como tenant A não deve listar usuário de tenant B."""
