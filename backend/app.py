@@ -468,12 +468,13 @@ def logout():
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
     """
-    Solicitar redefinição de senha por email
+    Solicitar redefinição de senha por username ou email
     ---
     tags: [Auth]
     parameters:
       - in: formData
-        name: username
+        name: identifier
+        description: Nome de usuário ou endereço de email
         type: string
         required: true
     responses:
@@ -483,17 +484,19 @@ def forgot_password():
         description: Formulário de solicitação
     """
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        identifier = request.form.get("identifier", "").strip()
         email_to_send = None
         username_to_send = None
         token_to_send = None
 
         with engine.connect() as conn:
-            row = conn.execute(
-                text("""SELECT id, username, email
-                        FROM users WHERE username=:u"""),
-                {"u": username}
-            ).mappings().fetchone()
+            if "@" in identifier:
+                query = text("""SELECT id, username, email FROM users
+                                WHERE LOWER(email) = LOWER(:id)""")
+            else:
+                query = text("""SELECT id, username, email FROM users
+                                WHERE username = :id""")
+            row = conn.execute(query, {"id": identifier}).mappings().fetchone()
 
             if row and row['email']:
                 token = uuid.uuid4().hex
