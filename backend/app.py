@@ -404,7 +404,7 @@ def login():
         password = request.form.get("password", "")
         user = None
 
-        if username == os.getenv("ADMIN_USER"):
+        if username == os.getenv("ADMIN_USER", "admin"):
             candidate = AdminUser()
             if candidate.check_password(password):
                 user = candidate
