@@ -534,7 +534,7 @@ def forgot_password():
 
             if row and row.get("email"):
                 token = uuid.uuid4().hex
-                expires = datetime.utcnow() + timedelta(hours=1)
+                expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
                 conn.execute(
                     text("""INSERT INTO password_reset_tokens
                             (user_id, token, expires_at) VALUES (:uid, :tok, :exp)"""),
@@ -664,7 +664,7 @@ def invite(token):
                     conn, result["tenant_id"], result["id"],
                     response=response,
                     observation=observacao,
-                    responded_at=datetime.utcnow(),
+                    responded_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
                 conn.commit()
                 logger.info(

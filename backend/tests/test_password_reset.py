@@ -107,10 +107,10 @@ def test_reset_password_token_invalido_redireciona(client, db):
 
 
 def test_reset_password_token_valido_exibe_formulario(client, db):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     token_row = {
         'id': 1, 'user_id': 2, 'token': 'validtoken123',
-        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'expires_at': datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
         'used': False,
     }
     setup_db(db, qresult(fetchone=token_row))
@@ -136,10 +136,10 @@ def test_reset_password_post_senhas_diferentes_retorna_erro(client, db):
 
 
 def test_reset_password_post_sucesso_redireciona_login(client, db):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     token_row = {
         'id': 1, 'user_id': 2, 'token': 'tok3',
-        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'expires_at': datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
         'used': False,
     }
     conn = MagicMock()
@@ -169,10 +169,10 @@ def test_reset_password_post_token_expirado_redireciona(client, db):
 
 def test_reset_password_post_sucesso_marca_token_como_usado(client, db):
     """POST bem-sucedido deve marcar token como used=TRUE no banco."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     token_row = {
         'id': 5, 'user_id': 3, 'token': 'tok_used_check',
-        'expires_at': datetime.utcnow() + timedelta(hours=1),
+        'expires_at': datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
         'used': False,
     }
     conn = MagicMock()
