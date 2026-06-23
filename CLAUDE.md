@@ -69,7 +69,7 @@ project_rsvp_birthday/
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 134 testes
+│   └── tests/               # pytest — 148 unit tests + integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
 ├── schema_comemore_saas.sql # DDL de referência (fonte de verdade APLICÁVEL é o Alembic)
 ├── docs/superpowers/plans/  # Histórico de planos por sub-fase
@@ -166,4 +166,5 @@ BACKUP_RETENTION_DAYS=7
 | 2A–2D | App multi-tenant: isolamento, login, signup, limpeza de legado | ✅ |
 | 3A–3D | Backup + uploads em volume + fila Redis/RQ + guia email transacional | ✅ |
 | **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | ✅ |
-| **5** | **LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento** | 🔜 |
+| **5** | **Rate limiting (Flask-Limiter), LGPD (/termos + /privacidade + aceite), migration 0005, fixes técnicos** | ✅ |
+| **Deploy** | **Deploy na VPS Hostinger + beta fechado** (ver `DEPLOY_CHECKLIST.md`) | 🔜 |
