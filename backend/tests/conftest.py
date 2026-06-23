@@ -12,7 +12,6 @@ os.environ.update({
     'DB_HOST': 'localhost',
     'DB_NAME': 'test_db',
     'SECRET_KEY': 'test-secret-key-for-pytest-only!!',
-    'DEFAULT_PASSWORD': 'Default@1234',
 })
 
 # Patch do engine antes de importar o app (evita tentativa de conexão MySQL)

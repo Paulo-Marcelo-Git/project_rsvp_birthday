@@ -6,7 +6,7 @@ import secrets
 import smtplib
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
@@ -123,8 +123,6 @@ engine = create_engine(
     connect_args={"connect_timeout": 5},
     future=True,
 )
-
-DEFAULT_PASSWORD = os.getenv("DEFAULT_PASSWORD", "102030@")
 
 # Auth
 login_manager = LoginManager()
@@ -461,6 +459,117 @@ def send_verification_email(to_address: str, verify_url: str) -> bool:
         return False
 
 
+def send_member_invite_email(to_address: str, username: str, reset_url: str) -> bool:
+    """Envia email de convite a novo membro com link para definir senha. Retorna True se enviado."""
+    smtp_host = os.getenv("EMAIL_SMTP")
+    smtp_user = os.getenv("EMAIL_USER")
+    if not smtp_host or not smtp_user:
+        logger.warning(
+            "EMAIL_SMTP/EMAIL_USER não configurados — email de convite não enviado."
+        )
+        return False
+
+    smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
+    smtp_pass = os.getenv("EMAIL_PASS", "")
+    from_addr = f"Comemore+ <{smtp_user}>"
+    subject = "Você foi convidado para o Comemore+"
+
+    html_body = f"""<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;">
+    <tr>
+      <td align="center" style="padding:30px 10px;">
+        <table width="520" cellpadding="0" cellspacing="0"
+               style="background:#ffffff;border-radius:12px;overflow:hidden;
+                      box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:520px;">
+          <tr>
+            <td style="background:linear-gradient(to right,#fce4ec,#e3f2fd);
+                       padding:28px 40px;text-align:center;">
+              <span style="font-size:28px;font-weight:700;color:#2c3e50;">
+                &#127881; Comemore+
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:36px 40px;">
+              <p style="margin:0 0 16px;font-size:16px;color:#333;">
+                Olá, <strong>{username}</strong>!
+              </p>
+              <p style="margin:0 0 24px;font-size:15px;color:#555;line-height:1.6;">
+                Você foi adicionado ao <strong>Comemore+</strong>. Clique no botão
+                abaixo para definir sua senha e acessar o painel.
+              </p>
+              <table cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center" style="padding:8px 0 28px;">
+                    <a href="{reset_url}"
+                       style="display:inline-block;background:#1976d2;color:#ffffff;
+                              text-decoration:none;font-size:15px;font-weight:600;
+                              border-radius:8px;padding:14px 32px;">
+                      Definir minha senha
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 8px;font-size:13px;color:#888;">
+                Este link é válido por <strong>1 hora</strong>.
+              </p>
+              <hr style="border:none;border-top:1px solid #eee;margin:0 0 20px;">
+              <p style="margin:0;font-size:12px;color:#aaa;">
+                Caso o botão não funcione, copie e cole o link abaixo:<br>
+                <span style="color:#1976d2;word-break:break-all;">{reset_url}</span>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
+                       border-top:1px solid #eee;">
+              <p style="margin:0;font-size:12px;color:#888;">
+                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
+                Este é um email automático, não responda.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    text_body = (
+        f"Olá, {username}!\n\n"
+        f"Você foi adicionado ao Comemore+. Acesse o link abaixo para definir sua senha (válido por 1 hora):\n"
+        f"{reset_url}\n\n"
+        f"-- Equipe Comemore+"
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_address
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        server = smtplib.SMTP(smtp_host, smtp_port)
+        try:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_addr, to_address, msg.as_string())
+            logger.info(f"Email de convite enviado para '{to_address}'.")
+            return True
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Falha ao enviar email de convite para '{to_address}': {e}")
+        return False
+
+
 # Rotas
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -753,9 +862,6 @@ def reset_password(token):
 
         if len(new_password) < 8:
             flash("A senha deve ter pelo menos 8 caracteres.", "danger")
-            return render_template("reset_password.html", token=token)
-        if new_password == DEFAULT_PASSWORD:
-            flash("Escolha uma senha diferente da senha padrão.", "danger")
             return render_template("reset_password.html", token=token)
         if new_password != confirm:
             flash("As senhas não coincidem.", "danger")
@@ -1250,8 +1356,9 @@ def admin_usuarios():
             u | {"guest_count": repo.count_invitees_for_user(conn, tid, u["id"])}
             for u in users
         ]
+    smtp_configured = bool(os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"))
     return render_template(
-        "admin_users.html", users=users_list, default_password=DEFAULT_PASSWORD
+        "admin_users.html", users=users_list, smtp_configured=smtp_configured
     )
 
 
@@ -1293,20 +1400,39 @@ def add_usuario():
         return redirect(url_for("admin_usuarios"))
 
     tid = current_user.tenant_id
+    temp_pass = secrets.token_urlsafe(12)
     try:
         with engine.connect() as conn:
-            repo.add_user(
+            new_user_id = repo.add_user(
                 conn, tid, username, email,
-                generate_password_hash(DEFAULT_PASSWORD),
+                generate_password_hash(temp_pass),
                 role="member",
                 whatsapp=whatsapp,
                 must_change_password=True,
             )
             conn.commit()
         logger.info(f"Usuário '{username}' criado por '{current_user.username}'.")
-        flash(
-            f'Usuário "{username}" criado. Senha padrão: {DEFAULT_PASSWORD}', "success"
-        )
+
+        if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"):
+            with engine.connect() as conn:
+                token = uuid.uuid4().hex
+                expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+                conn.execute(
+                    text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
+                         "VALUES (:uid, :tok, :exp)"),
+                    {"uid": new_user_id, "tok": token, "exp": expires},
+                )
+                conn.commit()
+            base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+            reset_url = f"{base_url}/reset_password/{token}"
+            send_member_invite_email(email, username, reset_url)
+            flash(f'Usuário "{username}" criado. Email de convite enviado para {email}.', "success")
+        else:
+            flash(
+                f'Usuário "{username}" criado. Senha temporária: {temp_pass} '
+                f'(o usuário deve trocá-la no primeiro acesso).',
+                "success",
+            )
     except Exception:
         flash("Erro: nome de usuário ou email já existe.", "danger")
 
@@ -1403,16 +1529,38 @@ def reset_senha_usuario(id):
         user = repo.get_user_by_id(conn, tid, id)
         if not user:
             abort(404)
+        temp_pass = secrets.token_urlsafe(12)
         repo.update_user(
             conn, tid, id,
-            password_hash=generate_password_hash(DEFAULT_PASSWORD),
+            password_hash=generate_password_hash(temp_pass),
             must_change_password=True,
         )
         conn.commit()
     logger.info(
         f"Senha de '{user['username']}' (id={id}) resetada por '{current_user.username}'."
     )
-    flash(f'Senha de "{user["username"]}" resetada para a senha padrão.', "success")
+
+    if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER") and user.get("email"):
+        with engine.connect() as conn:
+            token = uuid.uuid4().hex
+            from datetime import timezone
+            expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            conn.execute(
+                text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
+                     "VALUES (:uid, :tok, :exp)"),
+                {"uid": id, "tok": token, "exp": expires},
+            )
+            conn.commit()
+        base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+        reset_url = f"{base_url}/reset_password/{token}"
+        send_member_invite_email(user["email"], user["username"], reset_url)
+        flash(f'Senha de "{user["username"]}" resetada. Email com link enviado para {user["email"]}.', "success")
+    else:
+        flash(
+            f'Senha de "{user["username"]}" resetada. Senha temporária: {temp_pass} '
+            f'(o usuário deve trocá-la no próximo acesso).',
+            "success",
+        )
     return redirect(url_for("admin_usuarios"))
 
 
@@ -1445,9 +1593,6 @@ def change_password():
         new_password = request.form.get("new_password", "")
         confirm = request.form.get("confirm_password", "")
 
-        if new_password == DEFAULT_PASSWORD:
-            flash("Escolha uma senha diferente da senha padrão.", "danger")
-            return render_template("change_password.html")
         if len(new_password) < 8:
             flash("A senha deve ter pelo menos 8 caracteres.", "danger")
             return render_template("change_password.html")

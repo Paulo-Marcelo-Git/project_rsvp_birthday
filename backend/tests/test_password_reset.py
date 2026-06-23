@@ -194,16 +194,6 @@ def test_reset_password_post_sucesso_marca_token_como_usado(client, db):
     assert 'used' in third_call_sql.lower() or 'password_reset_tokens' in third_call_sql.lower()
 
 
-def test_reset_password_post_senha_igual_padrao_retorna_erro(client, db):
-    import os
-    default_pw = os.environ.get('DEFAULT_PASSWORD', 'Default@1234')
-    resp = client.post('/reset_password/tok4',
-                       data={'new_password': default_pw, 'confirm_password': default_pw},
-                       follow_redirects=True)
-    assert resp.status_code == 200
-    assert 'padrão' in resp.data.decode() or 'diferente' in resp.data.decode().lower()
-
-
 def test_forgot_password_post_com_email_valido_envia_reset(client, db):
     """Enviar email existente no campo email → cria token e chama send_reset_email."""
     user_row = {'id': 3, 'username': 'ana', 'email': 'ana@test.com',
