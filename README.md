@@ -95,6 +95,7 @@ Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de con
 | `/reset_password/<token>` | Público | Redefinir senha via link de email |
 | `/resend-verification` | Público | Reenviar link de verificação de email |
 | `/invite/<token>` | Público | Página de confirmação do convidado |
+| `/uploads/<filename>` | Tenant autenticado ou convidado c/ session | Serve arquivo de upload com validação de posse |
 | `/admin/respostas` | Login | Lista de respostas com paginação e busca |
 | `/admin/exportar_xlsx` | Login | Download da lista em Excel |
 | `/admin/convidados/add` | Login | Adicionar convidado |
@@ -177,6 +178,45 @@ docker exec rsvp_backend env DB_NAME=rsvp_restore_test python -m alembic upgrade
 ```
 
 ---
+
+## Uploads de Mídia
+
+Os arquivos enviados (imagens/vídeos por convidado) são armazenados no volume Docker nomeado `uploads_data`, montado em `/app/uploads` no container.
+
+### Comportamento por ambiente
+
+| Ambiente | Onde ficam os arquivos |
+|----------|----------------------|
+| Produção / Docker | Volume nomeado `uploads_data` — persiste entre rebuilds |
+| Dev local (sem Docker) | `backend/static/uploads/` (fallback do default) |
+
+### Confirmar persistência após rebuild
+
+```bash
+# Sobe com rebuild — arquivos no volume são preservados
+docker compose up --build -d
+
+# Listar arquivos no volume (via container)
+docker compose exec backend ls -lh /app/uploads/
+```
+
+### Migração de arquivos existentes
+
+Se houver arquivos em `backend/static/uploads/` de um deploy anterior (antes da Fase 3B), copie-os para o volume:
+
+```bash
+docker compose exec backend mkdir -p /app/uploads
+docker cp backend/static/uploads/. rsvp_backend:/app/uploads/
+```
+
+Após a cópia, os arquivos em `static/uploads/` no host podem ser removidos — eles não são mais servidos pelo app.
+
+### Acesso protegido
+
+A rota `/uploads/<filename>` não é pública:
+- **Usuário logado:** o arquivo deve pertencer ao tenant do usuário autenticado
+- **Convidado sem login:** session do Flask valida o token de convite contra o `media_url` do registro (sem expor o token em query string)
+- Qualquer outro acesso → 404 (sem vazar existência do arquivo)
 
 ## Testes de integração
 
