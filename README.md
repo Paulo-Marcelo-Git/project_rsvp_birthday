@@ -128,6 +128,115 @@ Schema SaaS multi-tenant:
 
 ---
 
+## Configuração de Email Transacional
+
+O app usa `smtplib` puro — **nenhum SDK proprietário necessário**. Para mudar de provedor, altere apenas os valores de `EMAIL_*` no `.env`. Zero mudança de código.
+
+### Brevo × Resend — comparativo
+
+| | Brevo **(recomendado)** | Resend |
+|---|---|---|
+| Free tier | **300 emails/dia** | 3 000/mês (≈ 100/dia) |
+| SMTP puro (porta 587 + STARTTLS) | ✅ `smtp-relay.brevo.com` | ✅ `smtp.resend.com` |
+| Domínio próprio de envio | ✅ SPF + DKIM pelo dashboard | ✅ SPF + DKIM pelo dashboard |
+| SDK obrigatório | ✗ SMTP puro funciona | ✗ SMTP puro funciona |
+| No mercado desde | 2012 | 2023 |
+
+**Escolha: Brevo** — free tier 3× maior que o Resend e reputação de entrega mais consolidada. Ambos suportam SMTP puro sem SDK.
+
+---
+
+### Brevo — passo a passo
+
+1. Crie conta em **brevo.com**
+2. Vá em **Configurações → SMTP e API** → aba **SMTP** → crie uma chave SMTP
+3. Vá em **Senders & IPs → Domains** → adicione e verifique seu domínio de envio (SPF + DKIM são gerados aqui)
+
+Valores para o `.env`:
+
+```env
+EMAIL_SMTP=smtp-relay.brevo.com
+EMAIL_PORTA=587
+EMAIL_USER=seu-login@brevo.com   # e-mail com que se cadastrou na Brevo
+EMAIL_PASS=xSMTP-KEY-BREVO       # chave gerada no passo 2
+```
+
+---
+
+### Resend — passo a passo
+
+1. Crie conta em **resend.com**
+2. Vá em **API Keys** → crie uma chave com permissão *Sending access*
+3. Vá em **Domains** → adicione e verifique seu domínio (SPF + DKIM gerados aqui)
+
+Valores para o `.env`:
+
+```env
+EMAIL_SMTP=smtp.resend.com
+EMAIL_PORTA=587
+EMAIL_USER=resend                # literal "resend" — não é seu e-mail
+EMAIL_PASS=re_xxxxxxxxxxxx       # API key gerada no passo 2
+```
+
+---
+
+### Autenticação de domínio: SPF, DKIM e DMARC
+
+Sem esses registros DNS os emails quase certamente caem em spam, mesmo com provedor confiável.
+
+#### SPF — autoriza o provedor a enviar pelo seu domínio
+
+Adicione um registro **TXT** na raiz do domínio (`@`):
+
+| Provedor | Valor do registro TXT |
+|----------|-----------------------|
+| Brevo | `v=spf1 include:spf.brevo.com ~all` |
+| Resend | `v=spf1 include:spf.resend.com ~all` |
+
+> **Atenção:** se já existe um registro SPF, **não crie um segundo** — apenas adicione o `include:` ao existente.
+> Exemplo com Google Workspace também configurado: `v=spf1 include:spf.brevo.com include:_spf.google.com ~all`
+
+#### DKIM — assinatura criptográfica dos emails
+
+Cada provedor gera os registros DNS exatos na tela de verificação de domínio:
+
+- **Brevo:** Senders & IPs → Domains → botão "Autenticar" → copie o registro TXT fornecido (geralmente em `mail._domainkey.seu-dominio.com`)
+- **Resend:** Domains → seu domínio → copie os registros CNAME fornecidos
+
+Cole os registros exatamente como mostrados no dashboard — seletor e valor incluídos.
+
+#### DMARC — política de rejeição para emails não autenticados
+
+Adicione um registro **TXT** em `_dmarc.seu-dominio.com`:
+
+```
+v=DMARC1; p=none; rua=mailto:postmaster@seu-dominio.com
+```
+
+Comece com `p=none` (só monitora, não rejeita). Após confirmar que SPF e DKIM passam em todos os envios, avance:
+
+```
+p=none   → monitoramento
+p=quarantine → emails suspeitos vão para spam
+p=reject     → emails sem autenticação são rejeitados
+```
+
+#### Verificar a configuração via terminal
+
+```bash
+# SPF
+dig TXT seu-dominio.com +short
+
+# DKIM (substitua mail pelo seletor que seu provedor usou)
+dig TXT mail._domainkey.seu-dominio.com +short
+
+# DMARC
+dig TXT _dmarc.seu-dominio.com +short
+```
+
+Para verificação visual, busque por **MXToolbox SuperTool** e use os tipos "SPF Record Lookup", "DKIM Lookup" e "DMARC Lookup".
+
+
 ## Backup
 
 O container `backup` roda `mysqldump` automaticamente todo dia às **02:00 BRT / 05:00 UTC** e salva o dump comprimido em volume Docker nomeado (`backup_data`).
