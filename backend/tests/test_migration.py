@@ -337,3 +337,62 @@ class TestMigration0001:
         assert row["max_events"]   is None, "max_events business deve ser NULL"
         assert row["max_invitees"] is None, "max_invitees business deve ser NULL"
         assert row["max_members"]  is None, "max_members business deve ser NULL"
+
+
+@pytest.mark.integration
+class TestMigration0005:
+    """Migration 0005: coluna accepted_terms_at em users."""
+
+    def test_01_coluna_accepted_terms_at_existe(self, test_db):
+        """users.accepted_terms_at deve existir após upgrade head (migration 0005)."""
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode == 0, (
+            f"upgrade head falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        with test_db.connect() as conn:
+            count = conn.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = :db
+                      AND table_name = 'users'
+                      AND column_name = 'accepted_terms_at'
+                """),
+                {"db": TEST_DB},
+            ).scalar()
+        assert count == 1, "users.accepted_terms_at não encontrado após migration 0005"
+
+    def test_02_coluna_eh_nullable(self, test_db):
+        """accepted_terms_at deve ser nullable (usuários antigos não precisam reaceitar)."""
+        with test_db.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT IS_NULLABLE
+                    FROM information_schema.columns
+                    WHERE table_schema = :db
+                      AND table_name = 'users'
+                      AND column_name = 'accepted_terms_at'
+                """),
+                {"db": TEST_DB},
+            ).fetchone()
+        assert row is not None, "Coluna accepted_terms_at não encontrada"
+        assert row[0] == "YES", "accepted_terms_at deve ser nullable"
+
+    def test_03_downgrade_remove_coluna(self, test_db):
+        """downgrade base deve remover a coluna (via drop_column na 0005)."""
+        result = _run_alembic("downgrade", "base")
+        assert result.returncode == 0, (
+            f"downgrade base falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        with test_db.connect() as conn:
+            count = conn.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = :db
+                      AND table_name = 'users'
+                      AND column_name = 'accepted_terms_at'
+                """),
+                {"db": TEST_DB},
+            ).scalar()
+        assert count == 0, "accepted_terms_at ainda presente após downgrade"
