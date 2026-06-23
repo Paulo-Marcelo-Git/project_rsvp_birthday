@@ -133,6 +133,74 @@ def test_get_event_texts_filtra_tenant_id():
     assert params["eid"] == 1
 
 
+# ── plan_limits ───────────────────────────────────────────────────────────────
+
+def test_get_plan_limits_filtra_tenant_id():
+    c = _conn(fetchone={"max_events": 2, "max_invitees": 50, "max_members": 1})
+    repo.get_plan_limits(c, 99)
+    assert _last_params(c)["tid"] == 99
+
+
+def test_get_plan_limits_retorna_valores_corretos():
+    c = _conn(fetchone={"max_events": 2, "max_invitees": 50, "max_members": 1})
+    limits = repo.get_plan_limits(c, 1)
+    assert limits["max_events"] == 2
+    assert limits["max_invitees"] == 50
+    assert limits["max_members"] == 1
+
+
+def test_get_plan_limits_retorna_none_para_ilimitado():
+    c = _conn(fetchone={"max_events": None, "max_invitees": None, "max_members": None})
+    limits = repo.get_plan_limits(c, 1)
+    assert limits["max_events"] is None
+    assert limits["max_invitees"] is None
+    assert limits["max_members"] is None
+
+
+def test_get_plan_limits_tenant_inexistente_retorna_nulls():
+    c = _conn(fetchone=None)
+    limits = repo.get_plan_limits(c, 9999)
+    assert limits == {"max_events": None, "max_invitees": None, "max_members": None}
+
+
+def test_within_limit_abaixo_do_limite():
+    assert repo.within_limit(0, 1) is True
+    assert repo.within_limit(49, 50) is True
+
+
+def test_within_limit_no_limite():
+    assert repo.within_limit(1, 1) is False
+    assert repo.within_limit(50, 50) is False
+
+
+def test_within_limit_ilimitado():
+    assert repo.within_limit(0, None) is True
+    assert repo.within_limit(9999, None) is True
+
+
+def test_count_invitees_for_event_filtra_tenant_e_event():
+    c = _conn(fetchone={"n": 7})
+    result = repo.count_invitees_for_event(c, tenant_id=42, event_id=5)
+    params = _last_params(c)
+    assert params["tid"] == 42
+    assert params["eid"] == 5
+    assert result == 7
+
+
+def test_count_members_for_tenant_filtra_tenant():
+    c = _conn(fetchone={"n": 3})
+    result = repo.count_members_for_tenant(c, 77)
+    assert _last_params(c)["tid"] == 77
+    assert result == 3
+
+
+def test_count_events_for_tenant_filtra_tenant():
+    c = _conn(fetchone={"n": 2})
+    result = repo.count_events_for_tenant(c, 55)
+    assert _last_params(c)["tid"] == 55
+    assert result == 2
+
+
 def test_get_event_texts_extrai_post_texts_do_json():
     c = _conn(fetchone={
         "question_text": "Vai?", "yes_text": "Sim", "no_text": "Não",

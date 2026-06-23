@@ -560,3 +560,101 @@ def get_media_tenant(conn, filename: str) -> int | None:
         {"fn": filename},
     ).mappings().fetchone()
     return row["tenant_id"] if row else None
+
+
+# ── planos e limites (4A/4B) ──────────────────────────────────────────────────
+
+def get_plan_limits(conn, tenant_id: int) -> dict:
+    """Retorna {max_events, max_invitees, max_members} do plano do tenant. NULL = ilimitado."""
+    row = conn.execute(
+        text("""
+            SELECT pl.max_events, pl.max_invitees, pl.max_members
+            FROM tenants t
+            JOIN plan_limits pl ON t.plan = pl.plan
+            WHERE t.id = :tid
+        """),
+        {"tid": tenant_id},
+    ).mappings().fetchone()
+    if not row:
+        return {"max_events": None, "max_invitees": None, "max_members": None}
+    return {
+        "max_events":   row["max_events"],
+        "max_invitees": row["max_invitees"],
+        "max_members":  row["max_members"],
+    }
+
+
+def within_limit(current: int, maximum: int | None) -> bool:
+    """True se ainda cabe mais um recurso. maximum=None significa ilimitado."""
+    return maximum is None or current < maximum
+
+
+def count_events_for_tenant(conn, tenant_id: int) -> int:
+    """Total de eventos do tenant (qualquer status)."""
+    row = conn.execute(
+        text("SELECT COUNT(*) AS n FROM events WHERE tenant_id = :tid"),
+        {"tid": tenant_id},
+    ).mappings().fetchone()
+    return int(row["n"] or 0)
+
+
+def count_invitees_for_event(conn, tenant_id: int, event_id: int) -> int:
+    """Total de convidados no evento. Filtra tenant_id para garantir isolamento."""
+    row = conn.execute(
+        text("""
+            SELECT COUNT(*) AS n FROM invitees
+            WHERE tenant_id = :tid AND event_id = :eid
+        """),
+        {"tid": tenant_id, "eid": event_id},
+    ).mappings().fetchone()
+    return int(row["n"] or 0)
+
+
+def count_members_for_tenant(conn, tenant_id: int) -> int:
+    """Total de usuários do tenant (todos os roles)."""
+    row = conn.execute(
+        text("SELECT COUNT(*) AS n FROM users WHERE tenant_id = :tid"),
+        {"tid": tenant_id},
+    ).mappings().fetchone()
+    return int(row["n"] or 0)
+
+
+def get_tenant_status(conn, tenant_id: int) -> str | None:
+    """Retorna o status do tenant ('trial', 'active', 'suspended', 'canceled') ou None."""
+    row = conn.execute(
+        text("SELECT status FROM tenants WHERE id = :tid"),
+        {"tid": tenant_id},
+    ).mappings().fetchone()
+    return row["status"] if row else None
+
+
+def set_tenant_plan(conn, tenant_id: int, plan: str) -> None:
+    """Altera o plano do tenant. Valores válidos: 'free', 'pro', 'business'."""
+    conn.execute(
+        text("UPDATE tenants SET plan = :plan WHERE id = :tid"),
+        {"plan": plan, "tid": tenant_id},
+    )
+
+
+def set_tenant_status(conn, tenant_id: int, status: str) -> None:
+    """Altera o status do tenant. Valores válidos: 'trial', 'active', 'suspended', 'canceled'."""
+    conn.execute(
+        text("UPDATE tenants SET status = :status WHERE id = :tid"),
+        {"status": status, "tid": tenant_id},
+    )
+
+
+def list_all_tenants(conn) -> list[dict]:
+    """Lista todos os tenants com contagens de uso. Sem filtro de tenant_id — super-admin only."""
+    rows = conn.execute(text("""
+        SELECT
+            t.id, t.name, t.plan, t.status, t.created_at,
+            pl.max_events, pl.max_invitees, pl.max_members,
+            (SELECT COUNT(*) FROM events   WHERE tenant_id = t.id) AS event_count,
+            (SELECT COUNT(*) FROM invitees WHERE tenant_id = t.id) AS invitee_count,
+            (SELECT COUNT(*) FROM users    WHERE tenant_id = t.id) AS member_count
+        FROM tenants t
+        JOIN plan_limits pl ON t.plan = pl.plan
+        ORDER BY t.created_at DESC
+    """)).mappings().fetchall()
+    return [dict(r) for r in rows]
