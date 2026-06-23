@@ -16,10 +16,17 @@
 <div class="container py-3">
 
   <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="mb-0">Gerenciar Usuários</h2>
+    <div class="d-flex align-items-center gap-2">
+      <h2 class="mb-0">Gerenciar Usuários</h2>
+      {% if max_members is not none %}
+        <span class="badge bg-secondary">{{ member_count }} de {{ max_members }}</span>
+      {% endif %}
+    </div>
+    {% if can_add_member %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddUser">
       + Novo Usuário
     </button>
+    {% endif %}
   </div>
 
   {% if users %}
@@ -138,9 +145,11 @@
   <div class="text-center py-5 text-muted">
     <i class="bi bi-people fs-1 d-block mb-3"></i>
     <p>Nenhum usuário cadastrado ainda.</p>
+    {% if can_add_member %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddUser">
       Criar primeiro usuário
     </button>
+    {% endif %}
   </div>
   {% endif %}
 

@@ -8,7 +8,7 @@
   <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+</h3>
   <div class="d-flex align-items-center gap-3">
     <span class="text-muted small">Olá, {{ current_user.username }}</span>
-    {% if is_tenant_admin %}
+    {% if is_tenant_admin and can_manage_members %}
       <a href="{{ url_for('admin_usuarios') }}" class="btn btn-sm btn-outline-primary">Usuários</a>
     {% endif %}
     <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>

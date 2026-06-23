@@ -699,6 +699,11 @@ def respostas():
             flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
             return redirect(url_for("admin_usuarios"))
         texts = repo.get_event_texts(conn, tid, event_id)
+        limits = repo.get_plan_limits(conn, tid)
+
+    can_manage_members = (
+        limits["max_members"] is None or limits["max_members"] > 1
+    )
 
     tz_offset = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
     convidados = []
@@ -737,6 +742,7 @@ def respostas():
         total_pages=total_pages,
         search=search,
         is_tenant_admin=is_admin,
+        can_manage_members=can_manage_members,
     )
 
 
@@ -1064,14 +1070,23 @@ def admin_usuarios():
     """
     tid = current_user.tenant_id
     with engine.connect() as conn:
+        limits = repo.get_plan_limits(conn, tid)
+        member_count = repo.count_members_for_tenant(conn, tid)
         users = repo.get_users(conn, tid)
         users_list = [
             u | {"guest_count": repo.count_invitees_for_user(conn, tid, u["id"])}
             for u in users
         ]
+    max_members = limits["max_members"]
+    can_add_member = repo.within_limit(member_count, max_members)
     smtp_configured = bool(os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"))
     return render_template(
-        "admin_users.html", users=users_list, smtp_configured=smtp_configured
+        "admin_users.html",
+        users=users_list,
+        smtp_configured=smtp_configured,
+        member_count=member_count,
+        max_members=max_members,
+        can_add_member=can_add_member,
     )
 
 

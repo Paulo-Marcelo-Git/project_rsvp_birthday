@@ -11,14 +11,15 @@ _COUNT_50    = {'n': 50}   # at max_invitees for free plan
 _COUNT_ONE   = {'n': 1}    # at max_members for free plan
 
 
-def _respostas_db(db, guests=None):
-    """Configura as 4 queries que respostas() executa via repo."""
+def _respostas_db(db, guests=None, limits=None):
+    """Configura as 5 queries que respostas() executa via repo."""
     return setup_db(
         db,
-        qresult(all_rows=guests or []),        # repo.get_invitees
-        qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
-        qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id
-        qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
+        qresult(all_rows=guests or []),                    # repo.get_invitees
+        qresult(fetchone=STATS_ROW),                        # repo.count_invitees_by_response
+        qresult(fetchone=DEFAULT_EVENT_ROW),                # repo.get_default_event_id
+        qresult(fetchone=TEXTS_ROW),                        # repo.get_event_texts
+        qresult(fetchone=limits or _LIMITS_NONE),           # repo.get_plan_limits
     )
 
 
@@ -53,6 +54,22 @@ def test_respostas_busca_por_nome(admin_client, db):
     resp = admin_client.get('/admin/respostas?search=maria')
 
     assert resp.status_code == 200
+
+
+def test_respostas_esconde_botao_usuarios_free(admin_client, db):
+    """Free plan (max_members=1): botão Usuários NÃO aparece no painel principal."""
+    _respostas_db(db, limits=_LIMITS_FREE)
+    resp = admin_client.get('/admin/respostas')
+    assert resp.status_code == 200
+    assert b'/admin/usuarios' not in resp.data
+
+
+def test_respostas_mostra_botao_usuarios_ilimitado(admin_client, db):
+    """Business plan (max_members=None): botão Usuários aparece no painel principal."""
+    _respostas_db(db, limits=_LIMITS_NONE)
+    resp = admin_client.get('/admin/respostas')
+    assert resp.status_code == 200
+    assert b'/admin/usuarios' in resp.data
 
 
 # ── adicionar convidado ───────────────────────────────────────────────────────

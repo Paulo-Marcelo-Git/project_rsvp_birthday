@@ -4,6 +4,9 @@ from tests.conftest import (
 )
 
 
+_LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
+
+
 def _respostas_db(db, guests=None):
     return setup_db(
         db,
@@ -11,6 +14,7 @@ def _respostas_db(db, guests=None):
         qresult(fetchone=STATS_ROW),
         qresult(fetchone=DEFAULT_EVENT_ROW),
         qresult(fetchone=TEXTS_ROW),
+        qresult(fetchone=_LIMITS_NONE),     # repo.get_plan_limits
     )
 
 
