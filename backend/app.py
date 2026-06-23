@@ -472,6 +472,16 @@ def resend_verification():
     return render_template("resend_verification.html")
 
 
+@app.route("/termos")
+def termos():
+    return render_template("termos.html")
+
+
+@app.route("/privacidade")
+def privacidade():
+    return render_template("privacidade.html")
+
+
 @app.route("/logout")
 @login_required
 def logout():

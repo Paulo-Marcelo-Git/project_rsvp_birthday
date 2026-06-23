@@ -40,6 +40,14 @@
 
   {% block content %}{% endblock %}
 
+  <footer class="text-center py-3 text-muted small border-top mt-5">
+    <a href="{{ url_for('termos') }}" class="text-muted me-2">Termos de Uso</a>
+    ·
+    <a href="{{ url_for('privacidade') }}" class="text-muted mx-2">Privacidade</a>
+    ·
+    <a href="mailto:flowetl.bot@gmail.com" class="text-muted ms-2">Fale Conosco</a>
+  </footer>
+
   <!-- Bootstrap 5 JS Bundle -->
   <script 
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" 

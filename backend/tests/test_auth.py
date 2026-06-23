@@ -164,3 +164,17 @@ def test_login_tenant_trial_permite(client, db):
 
     assert resp.status_code == 302
     assert '/admin/respostas' in resp.headers['Location']
+
+
+# ── 5B-2: páginas públicas de termos e privacidade ────────────────────────────
+
+def test_termos_retorna_200(client):
+    """GET /termos deve retornar 200 sem autenticação."""
+    resp = client.get('/termos')
+    assert resp.status_code == 200
+
+
+def test_privacidade_retorna_200(client):
+    """GET /privacidade deve retornar 200 sem autenticação."""
+    resp = client.get('/privacidade')
+    assert resp.status_code == 200

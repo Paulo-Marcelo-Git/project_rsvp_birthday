@@ -1,0 +1,97 @@
+<!-- backend/templates/privacidade.html -->
+{% extends "base.html" %}
+{% block title %}Comemore+ — Política de Privacidade{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 800px;">
+  <h1 class="mb-4">Política de Privacidade</h1>
+  <p class="text-muted small mb-4">Última atualização: junho de 2026</p>
+
+  <h2 class="h5 mt-4">1. Controlador dos Dados</h2>
+  <p>
+    O Comemore+ é operado por <strong>Marcelo Silva</strong>, pessoa física, responsável
+    pelo tratamento dos seus dados pessoais conforme a Lei Geral de Proteção de Dados
+    (LGPD — Lei nº 13.709/2018).
+  </p>
+
+  <h2 class="h5 mt-4">2. Dados Coletados</h2>
+  <p>Coletamos os seguintes dados pessoais:</p>
+  <ul>
+    <li><strong>Cadastro:</strong> nome do anfitrião, endereço de e-mail e senha (armazenada de forma criptografada);</li>
+    <li><strong>Uso:</strong> dados dos eventos criados e informações dos convidados (nome, e-mail, WhatsApp — se fornecidos pelo anfitrião);</li>
+    <li><strong>Técnicos:</strong> endereço IP para fins de segurança e prevenção de abusos.</li>
+  </ul>
+
+  <h2 class="h5 mt-4">3. Finalidade do Tratamento</h2>
+  <p>Os dados são utilizados para:</p>
+  <ul>
+    <li>Prestação do serviço de RSVP online;</li>
+    <li>Envio de e-mails transacionais (verificação de conta, convites, redefinição de senha);</li>
+    <li>Segurança e prevenção de fraudes;</li>
+    <li>Cumprimento de obrigações legais.</li>
+  </ul>
+
+  <h2 class="h5 mt-4">4. Base Legal</h2>
+  <p>
+    O tratamento é fundamentado no <strong>consentimento</strong> (art. 7º, I da LGPD),
+    na <strong>execução do contrato</strong> (art. 7º, V) e no
+    <strong>legítimo interesse</strong> para fins de segurança (art. 7º, IX).
+  </p>
+
+  <h2 class="h5 mt-4">5. Compartilhamento de Dados</h2>
+  <p>
+    Os dados não são vendidos a terceiros. Podem ser compartilhados somente com:
+  </p>
+  <ul>
+    <li>Provedores de e-mail transacional (Brevo/Resend) para entrega de mensagens;</li>
+    <li>Autoridades, quando exigido por lei.</li>
+  </ul>
+
+  <h2 class="h5 mt-4">6. Retenção de Dados</h2>
+  <p>
+    Os dados são mantidos enquanto a conta estiver ativa. Após a exclusão da conta,
+    os dados são removidos em até 15 dias úteis, exceto quando a retenção for exigida
+    por obrigação legal.
+  </p>
+
+  <h2 class="h5 mt-4">7. Seus Direitos (LGPD)</h2>
+  <p>Você tem direito a:</p>
+  <ul>
+    <li>Confirmar a existência de tratamento dos seus dados;</li>
+    <li>Acessar, corrigir ou atualizar seus dados;</li>
+    <li>Solicitar a portabilidade ou a exclusão dos seus dados;</li>
+    <li>Revogar o consentimento a qualquer momento;</li>
+    <li>Obter informações sobre o compartilhamento dos seus dados.</li>
+  </ul>
+  <p>
+    Para exercer seus direitos, utilize o link <strong>Fale Conosco</strong> no rodapé
+    desta página. Responderemos em até 15 dias úteis.
+  </p>
+
+  <h2 class="h5 mt-4">8. Segurança</h2>
+  <p>
+    Adotamos medidas técnicas e organizacionais para proteger seus dados contra acesso
+    não autorizado, incluindo criptografia de senhas, HTTPS e controle de acesso por
+    tenant isolado.
+  </p>
+
+  <h2 class="h5 mt-4">9. Cookies</h2>
+  <p>
+    Utilizamos apenas cookies de sessão essenciais para o funcionamento da plataforma.
+    Não utilizamos cookies de rastreamento ou publicidade.
+  </p>
+
+  <h2 class="h5 mt-4">10. Alterações</h2>
+  <p>
+    Esta política pode ser atualizada. Alterações relevantes serão comunicadas por e-mail.
+  </p>
+
+  <hr class="my-4">
+  <p class="text-center">
+    <a href="{{ url_for('termos') }}" class="text-muted small">Termos de Uso</a>
+    &nbsp;·&nbsp;
+    <a href="{{ url_for('signup') }}" class="btn btn-outline-primary btn-sm">Criar conta</a>
+  </p>
+</div>
+<div class="text-center mt-3 mb-3 text-muted small">{{ app_version }}</div>
+{% endblock %}

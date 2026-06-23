@@ -1,0 +1,80 @@
+<!-- backend/templates/termos.html -->
+{% extends "base.html" %}
+{% block title %}Comemore+ — Termos de Uso{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 800px;">
+  <h1 class="mb-4">Termos de Uso</h1>
+  <p class="text-muted small mb-4">Última atualização: junho de 2026</p>
+
+  <h2 class="h5 mt-4">1. Aceitação dos Termos</h2>
+  <p>
+    Ao criar uma conta no <strong>Comemore+</strong>, você concorda com estes Termos de Uso.
+    Caso não concorde, não utilize o serviço.
+  </p>
+
+  <h2 class="h5 mt-4">2. Descrição do Serviço</h2>
+  <p>
+    O Comemore+ é uma plataforma de RSVP online que permite a anfitriões criar eventos,
+    enviar convites digitais personalizados e acompanhar as confirmações de presença dos
+    convidados.
+  </p>
+
+  <h2 class="h5 mt-4">3. Cadastro e Conta</h2>
+  <p>
+    Para utilizar o serviço, você deve fornecer um endereço de e-mail válido e criar uma
+    senha. Você é responsável por manter a confidencialidade de suas credenciais de acesso
+    e por todas as atividades realizadas em sua conta.
+  </p>
+
+  <h2 class="h5 mt-4">4. Uso Permitido</h2>
+  <p>Ao usar o Comemore+, você se compromete a:</p>
+  <ul>
+    <li>Fornecer informações verdadeiras no cadastro;</li>
+    <li>Utilizar o serviço apenas para fins legítimos e pessoais;</li>
+    <li>Não enviar conteúdo ofensivo, ilegal ou que viole direitos de terceiros;</li>
+    <li>Não tentar acessar dados de outros usuários ou tenants.</li>
+  </ul>
+
+  <h2 class="h5 mt-4">5. Dados e Privacidade</h2>
+  <p>
+    O tratamento dos seus dados pessoais é regido pela nossa
+    <a href="{{ url_for('privacidade') }}">Política de Privacidade</a>,
+    em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).
+  </p>
+
+  <h2 class="h5 mt-4">6. Exclusão de Conta</h2>
+  <p>
+    Você pode solicitar a exclusão da sua conta e de todos os dados associados a qualquer
+    momento entrando em contato conosco. A exclusão será processada em até 15 dias úteis.
+  </p>
+
+  <h2 class="h5 mt-4">7. Limitação de Responsabilidade</h2>
+  <p>
+    O Comemore+ não se responsabiliza por falhas de entrega de convites causadas por
+    endereços de e-mail incorretos fornecidos pelo usuário, bloqueios por filtros de spam
+    ou problemas de conectividade do destinatário.
+  </p>
+
+  <h2 class="h5 mt-4">8. Alterações</h2>
+  <p>
+    Podemos atualizar estes termos periodicamente. Notificaremos os usuários por e-mail
+    sobre alterações relevantes. O uso continuado do serviço após a notificação constitui
+    aceite das alterações.
+  </p>
+
+  <h2 class="h5 mt-4">9. Contato</h2>
+  <p>
+    Dúvidas sobre estes termos? Utilize o link <strong>Fale Conosco</strong> no
+    rodapé desta página.
+  </p>
+
+  <hr class="my-4">
+  <p class="text-center">
+    <a href="{{ url_for('signup') }}" class="btn btn-outline-primary btn-sm">Criar conta</a>
+    &nbsp;
+    <a href="{{ url_for('privacidade') }}" class="text-muted small">Política de Privacidade</a>
+  </p>
+</div>
+<div class="text-center mt-3 mb-3 text-muted small">{{ app_version }}</div>
+{% endblock %}
