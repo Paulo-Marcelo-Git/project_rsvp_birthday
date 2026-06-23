@@ -1,6 +1,8 @@
+import logging
 import os
 from tests.conftest import setup_db, qresult
 from unittest.mock import MagicMock, patch
+import tasks
 import app as _app
 
 
@@ -9,9 +11,8 @@ def test_send_reset_email_sem_config_loga_warning(caplog):
     env_sem_smtp = {k: v for k, v in os.environ.items()
                     if k not in ('EMAIL_SMTP', 'EMAIL_USER')}
     with patch.dict(os.environ, env_sem_smtp, clear=True):
-        import logging
-        with caplog.at_level(logging.WARNING, logger='app'):
-            _app.send_reset_email('user@test.com', 'testuser', 'http://x/reset/abc')
+        with caplog.at_level(logging.WARNING, logger='tasks'):
+            tasks.send_reset_email('user@test.com', 'testuser', 'http://x/reset/abc')
     assert any('EMAIL_SMTP' in r.message or 'email' in r.message.lower()
                 for r in caplog.records)
 
@@ -25,7 +26,7 @@ def test_send_reset_email_com_config_chama_smtp(monkeypatch):
 
     mock_smtp_instance = MagicMock()
     with patch('smtplib.SMTP', return_value=mock_smtp_instance) as mock_smtp:
-        _app.send_reset_email('dest@test.com', 'joao', 'http://x/reset/tok123')
+        tasks.send_reset_email('dest@test.com', 'joao', 'http://x/reset/tok123')
 
     mock_smtp.assert_called_once_with('smtp.gmail.com', 587)
     mock_smtp_instance.starttls.assert_called_once()
@@ -85,16 +86,17 @@ def test_forgot_password_post_usuario_valido_envia_email(client, db):
     ]
     db.connect.return_value.__enter__.return_value = conn
 
-    with patch('app.send_reset_email') as mock_email:
+    with patch('app.enqueue_email') as mock_enqueue:
         resp = client.post('/forgot_password', data={'email': 'joao@test.com'})
 
     assert resp.status_code == 302
     assert '/login' in resp.headers['Location']
-    mock_email.assert_called_once()
-    args = mock_email.call_args[0]
-    assert args[0] == 'joao@test.com'
-    assert args[1] == 'joao'
-    assert '/reset_password/' in args[2]
+    mock_enqueue.assert_called_once()
+    args = mock_enqueue.call_args[0]
+    assert args[0] is tasks.send_reset_email
+    assert args[1] == 'joao@test.com'
+    assert args[2] == 'joao'
+    assert '/reset_password/' in args[3]
 
 
 def test_reset_password_token_invalido_redireciona(client, db):
@@ -205,16 +207,17 @@ def test_forgot_password_post_com_email_valido_envia_reset(client, db):
     ]
     db.connect.return_value.__enter__.return_value = conn
 
-    with patch('app.send_reset_email') as mock_email:
+    with patch('app.enqueue_email') as mock_enqueue:
         resp = client.post('/forgot_password', data={'email': 'ana@test.com'})
 
     assert resp.status_code == 302
     assert '/login' in resp.headers['Location']
-    mock_email.assert_called_once()
-    args = mock_email.call_args[0]
-    assert args[0] == 'ana@test.com'
-    assert args[1] == 'ana'
-    assert '/reset_password/' in args[2]
+    mock_enqueue.assert_called_once()
+    args = mock_enqueue.call_args[0]
+    assert args[0] is tasks.send_reset_email
+    assert args[1] == 'ana@test.com'
+    assert args[2] == 'ana'
+    assert '/reset_password/' in args[3]
 
 
 def test_forgot_password_post_com_email_case_insensitive(client, db):
@@ -228,11 +231,11 @@ def test_forgot_password_post_com_email_case_insensitive(client, db):
     ]
     db.connect.return_value.__enter__.return_value = conn
 
-    with patch('app.send_reset_email') as mock_email:
+    with patch('app.enqueue_email') as mock_enqueue:
         resp = client.post('/forgot_password', data={'email': 'Carlos@Gmail.com'})
 
     assert resp.status_code == 302
-    mock_email.assert_called_once()
+    mock_enqueue.assert_called_once()
     first_call_sql = str(conn.execute.call_args_list[0][0][0])
     assert 'lower' in first_call_sql.lower()
 

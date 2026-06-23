@@ -160,3 +160,86 @@ def test_on_email_failure_loga_erro(caplog):
         "job-abc-123" in r.message and "definitivamente" in r.message
         for r in caplog.records
     )
+
+
+# ── app.py wiring ─────────────────────────────────────────────────────────────
+
+def test_forgot_password_enfileira_reset_email(client, db):
+    """POST /forgot_password deve chamar enqueue_email com tasks.send_reset_email."""
+    from tests.conftest import qresult
+    import tasks
+
+    user_row = {
+        "id": 2, "username": "joao", "password_hash": "x",
+        "must_change_password": False, "email": "joao@test.com",
+        "tenant_id": 1, "role": "member", "is_active": 1,
+    }
+    conn = MagicMock()
+    conn.execute.side_effect = [qresult(fetchone=user_row), MagicMock()]
+    db.connect.return_value.__enter__.return_value = conn
+
+    with patch("app.enqueue_email") as mock_enqueue:
+        resp = client.post("/forgot_password", data={"email": "joao@test.com"})
+
+    assert resp.status_code == 302
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0] is tasks.send_reset_email
+    assert mock_enqueue.call_args[0][1] == "joao@test.com"
+    assert mock_enqueue.call_args[0][2] == "joao"
+    assert "/reset_password/" in mock_enqueue.call_args[0][3]
+
+
+def test_resend_verification_enfileira_email(client, db):
+    """POST /resend-verification deve chamar enqueue_email com tasks.send_verification_email."""
+    from tests.conftest import qresult
+    import tasks
+
+    user_row = {
+        "id": 3, "username": "ana", "email": "ana@test.com",
+        "is_active": 0, "tenant_id": 1, "role": "tenant_admin",
+        "password_hash": "x", "must_change_password": False,
+    }
+    conn = MagicMock()
+    conn.execute.side_effect = [
+        qresult(fetchone=user_row),
+        MagicMock(),
+        qresult(fetchone={"token": "newtok123"}),
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    with patch("app.enqueue_email") as mock_enqueue:
+        client.post("/resend-verification", data={"email": "ana@test.com"})
+
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0] is tasks.send_verification_email
+
+
+def test_skip_verification_nao_chama_enqueue_email(client, db, monkeypatch):
+    """SKIP_EMAIL_VERIFICATION=1 → signup não deve chamar enqueue_email."""
+    from tests.conftest import qresult
+    monkeypatch.setenv("SKIP_EMAIL_VERIFICATION", "1")
+
+    conn = MagicMock()
+    # get_user_by_email_global → None (usuário novo)
+    # create_tenant retorna id via LAST_INSERT_ID
+    # create_tenant_admin_user
+    # create_default_event
+    # UPDATE is_active=1
+    conn.execute.side_effect = [
+        qresult(fetchone=None),
+        qresult(fetchone={"id": 99}),
+        qresult(fetchone={"id": 10}),
+        MagicMock(),
+        MagicMock(),
+    ]
+    db.connect.return_value.__enter__.return_value = conn
+
+    with patch("app.enqueue_email") as mock_enqueue:
+        client.post("/signup", data={
+            "nome_anfitriao": "Joao Teste",
+            "email": "novo@test.com",
+            "password": "Test@1234",
+            "confirm_password": "Test@1234",
+        })
+
+    assert not mock_enqueue.called, "SKIP_EMAIL_VERIFICATION não deve enfileirar email"
