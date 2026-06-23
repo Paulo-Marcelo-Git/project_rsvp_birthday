@@ -19,10 +19,23 @@ def test_login_credenciais_invalidas_exibe_erro(client, db):
     assert 'inválidos' in resp.data.decode()
 
 
-def test_login_admin_valido_redireciona_para_respostas(client):
+def test_login_dbuser_tenant_admin_redireciona_para_respostas(client, db):
+    """DbUser com role='tenant_admin' e is_active=1 autentica e redireciona para respostas."""
+    from werkzeug.security import generate_password_hash
+    admin_pw = 'SenhaAdminFort@99'
+    user_row = {
+        'id': 1, 'username': 'landlord',
+        'email': 'landlord@test.com',
+        'password_hash': generate_password_hash(admin_pw),
+        'must_change_password': False,
+        'tenant_id': 1, 'role': 'tenant_admin',
+        'is_active': 1,
+    }
+    setup_db(db, qresult(fetchone=user_row))
+
     resp = client.post('/login', data={
-        'email': 'testadmin@test.com',
-        'password': ADMIN_PASSWORD,
+        'email': 'landlord@test.com',
+        'password': admin_pw,
     })
 
     assert resp.status_code == 302

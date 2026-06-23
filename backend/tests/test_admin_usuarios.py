@@ -55,3 +55,14 @@ def test_listagem_usuarios_exibe_email(admin_client, db):
     resp = admin_client.get('/admin/usuarios')
     assert resp.status_code == 200
     assert 'operador@test.com' in resp.data.decode()
+
+
+def test_add_usuario_nao_exibe_senha_padrao_hardcoded(admin_client, db):
+    """Página de usuários não deve exibir senhas hardcoded ('102030@' ou 'Default@1234')."""
+    setup_db(db, qresult(all_rows=[]))  # get_users retorna lista vazia
+
+    resp = admin_client.get('/admin/usuarios')
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert '102030@' not in body
+    assert 'Default@1234' not in body

@@ -134,7 +134,7 @@ login_manager.init_app(app)
 
 class AdminUser(UserMixin):
     id = "admin"
-    is_super_admin = True
+    is_tenant_admin = True
     db_id = None
     tenant_id = 1       # default tenant até signup substituir env-var auth (2D)
     role = "tenant_admin"
@@ -166,7 +166,7 @@ class DbUser(UserMixin):
         self.role = role
 
     @property
-    def is_super_admin(self):
+    def is_tenant_admin(self):
         return self.role == "tenant_admin"
 
     def check_password(self, password):
@@ -207,10 +207,10 @@ def load_user(user_id):
     return None
 
 
-def super_admin_required(f):
+def tenant_admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_super_admin:
+        if not current_user.is_authenticated or not current_user.is_tenant_admin:
             abort(403)
         return f(*args, **kwargs)
 
@@ -224,7 +224,7 @@ def protect_swagger():
         or request.path.startswith("/apispec")
         or request.path.startswith("/flasgger_static")
     ):
-        if not current_user.is_authenticated or not current_user.is_super_admin:
+        if not current_user.is_authenticated or not current_user.is_tenant_admin:
             return redirect(url_for("login"))
 
 
@@ -232,7 +232,7 @@ def protect_swagger():
 def force_password_change():
     if (
         current_user.is_authenticated
-        and not current_user.is_super_admin
+        and not current_user.is_tenant_admin
         and getattr(current_user, "must_change_password", False)
         and request.endpoint not in ("change_password", "logout", "static")
     ):
@@ -903,7 +903,7 @@ def respostas():
     offset = (page - 1) * per_page
 
     tid = current_user.tenant_id
-    is_admin = current_user.is_super_admin
+    is_admin = current_user.is_tenant_admin
     owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
@@ -956,7 +956,7 @@ def respostas():
         page=page,
         total_pages=total_pages,
         search=search,
-        is_super_admin=is_admin,
+        is_tenant_admin=is_admin,
     )
 
 
@@ -975,7 +975,7 @@ def exportar_convidados_xlsx():
     """
     search = request.args.get("search", "").strip()
     tid = current_user.tenant_id
-    is_admin = current_user.is_super_admin
+    is_admin = current_user.is_tenant_admin
     owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
@@ -1119,7 +1119,7 @@ def edit_convidado(id):
 
     if not guest:
         abort(404)
-    if not current_user.is_super_admin and guest["event_owner_user_id"] != current_user.db_id:
+    if not current_user.is_tenant_admin and guest["event_owner_user_id"] != current_user.db_id:
         abort(403)
 
     name = request.form.get("name", "").strip()
@@ -1183,7 +1183,7 @@ def delete_convidado(id):
 
     if not res:
         abort(404)
-    if not current_user.is_super_admin and res["event_owner_user_id"] != current_user.db_id:
+    if not current_user.is_tenant_admin and res["event_owner_user_id"] != current_user.db_id:
         abort(403)
 
     with engine.connect() as conn:
@@ -1205,7 +1205,7 @@ def delete_convidado(id):
 
 @app.route("/admin/textos", methods=["POST"])
 @login_required
-@super_admin_required
+@tenant_admin_required
 def update_textos():
     """
     Atualizar textos do convite
@@ -1255,7 +1255,7 @@ def update_textos():
 
 @app.route("/admin/usuarios")
 @login_required
-@super_admin_required
+@tenant_admin_required
 def admin_usuarios():
     """
     Listar todos os sub-usuários
@@ -1281,7 +1281,7 @@ def admin_usuarios():
 
 @app.route("/admin/usuarios/add", methods=["POST"])
 @login_required
-@super_admin_required
+@tenant_admin_required
 def add_usuario():
     """
     Criar novo sub-usuário
@@ -1339,7 +1339,7 @@ def add_usuario():
 
 @app.route("/admin/usuarios/<int:id>/edit", methods=["POST"])
 @login_required
-@super_admin_required
+@tenant_admin_required
 def edit_usuario(id):
     """
     Editar sub-usuário
@@ -1403,7 +1403,7 @@ def edit_usuario(id):
 
 @app.route("/admin/usuarios/<int:id>/reset_senha", methods=["POST"])
 @login_required
-@super_admin_required
+@tenant_admin_required
 def reset_senha_usuario(id):
     """
     Resetar senha de sub-usuário para a senha padrão (admin)
@@ -1462,7 +1462,7 @@ def change_password():
       200:
         description: Formulário de troca de senha
     """
-    if current_user.is_super_admin:
+    if current_user.is_tenant_admin:
         return redirect(url_for("respostas"))
 
     if request.method == "POST":
@@ -1497,7 +1497,7 @@ def change_password():
 
 @app.route("/admin/usuarios/<int:id>/delete", methods=["POST"])
 @login_required
-@super_admin_required
+@tenant_admin_required
 def delete_usuario(id):
     """
     Excluir sub-usuário
