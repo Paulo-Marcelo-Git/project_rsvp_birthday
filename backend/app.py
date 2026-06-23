@@ -695,6 +695,9 @@ def respostas():
             conn, tid, owner_user_id=owner_uid, search=search
         )
         event_id = repo.get_default_event_id(conn, tid)
+        if event_id is None:
+            flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
+            return redirect(url_for("admin_usuarios"))
         texts = repo.get_event_texts(conn, tid, event_id)
 
     tz_offset = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
@@ -850,6 +853,9 @@ def add_convidado():
     token = secrets.token_urlsafe(16)[:22]
     with engine.connect() as conn:
         event_id = repo.get_default_event_id(conn, tid)
+        if event_id is None:
+            flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
+            return redirect(url_for("respostas"))
         repo.add_invitee(
             conn, tid, event_id, name, token,
             phone=phone, email=email, observation=msg, media_url=media_filename,
@@ -1020,6 +1026,9 @@ def update_textos():
     tid = current_user.tenant_id
     with engine.connect() as conn:
         event_id = repo.get_default_event_id(conn, tid)
+        if event_id is None:
+            flash("Nenhum evento encontrado. Não é possível salvar os textos.", "danger")
+            return redirect(url_for("respostas"))
         repo.update_event_texts(conn, tid, event_id, **textos)
         conn.commit()
     logger.info(f"Textos do convite atualizados por '{current_user.username}'.")

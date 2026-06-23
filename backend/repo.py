@@ -82,19 +82,17 @@ def create_tenant(conn, name: str) -> int:
 
 # ── eventos ───────────────────────────────────────────────────────────────────
 
-def get_default_event_id(conn, tenant_id: int) -> int:
-    """Retorna o id do primeiro evento publicado do tenant."""
+def get_default_event_id(conn, tenant_id: int) -> int | None:
+    """Retorna o id do evento mais recente do tenant (qualquer status), ou None."""
     row = conn.execute(
         text("""
             SELECT id FROM events
-            WHERE tenant_id = :tid AND status = 'published'
-            ORDER BY id LIMIT 1
+            WHERE tenant_id = :tid
+            ORDER BY id DESC LIMIT 1
         """),
         {"tid": tenant_id},
     ).mappings().fetchone()
-    if not row:
-        raise RuntimeError(f"Tenant {tenant_id} não tem evento publicado.")
-    return int(row["id"])
+    return int(row["id"]) if row else None
 
 
 def get_event_texts(conn, tenant_id: int, event_id: int) -> dict:
