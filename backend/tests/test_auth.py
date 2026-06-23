@@ -178,3 +178,72 @@ def test_privacidade_retorna_200(client):
     """GET /privacidade deve retornar 200 sem autenticação."""
     resp = client.get('/privacidade')
     assert resp.status_code == 200
+
+
+# ── 5B-3: checkbox de aceite dos termos no signup ─────────────────────────────
+
+def test_signup_checkbox_presente_no_template(client):
+    """GET /signup deve conter campo accept_terms no HTML."""
+    resp = client.get('/signup')
+    assert resp.status_code == 200
+    assert b'accept_terms' in resp.data, "Campo accept_terms ausente no formulário de signup"
+
+
+def test_signup_sem_aceite_retorna_erro(client, db):
+    """POST /signup sem accept_terms deve exibir flash de erro sobre os termos."""
+    from tests.conftest import setup_db, qresult
+    setup_db(db, qresult(fetchone=None))
+
+    resp = client.post('/signup', data={
+        'nome_anfitriao': 'Host Teste',
+        'email': 'host@test.com',
+        'password': 'Senha@1234',
+        'confirm_password': 'Senha@1234',
+        # 'accept_terms' ausente propositalmente
+    }, follow_redirects=True)
+
+    assert resp.status_code == 200
+    # Verifica flash de erro específico sobre aceite dos termos
+    assert b'aceitar os Termos de Uso' in resp.data, (
+        "Flash de erro específico sobre aceite dos termos deve aparecer"
+    )
+
+
+def test_signup_com_aceite_grava_accepted_terms_at(client, db, monkeypatch):
+    """POST /signup com accept_terms deve passar accepted_terms_at não-None para create_tenant_admin_user."""
+    import app as app_module
+    from unittest.mock import patch, MagicMock
+    from tests.conftest import setup_db, qresult
+
+    # Simula: email não existe, criação bem-sucedida
+    setup_db(db, qresult(fetchone=None))
+
+    captured = {}
+
+    original_create = app_module.repo.create_tenant_admin_user
+
+    def mock_create(conn, tenant_id, email, password_hash, accepted_terms_at=None):
+        captured['accepted_terms_at'] = accepted_terms_at
+        return 42  # user_id fake
+
+    monkeypatch.setenv('SKIP_EMAIL_VERIFICATION', 'true')
+    monkeypatch.setattr(app_module.repo, 'create_tenant_admin_user', mock_create)
+    # Também patch create_tenant e create_default_event para não precisar de DB real
+    monkeypatch.setattr(app_module.repo, 'create_tenant', lambda conn, nome: 1)
+    monkeypatch.setattr(app_module.repo, 'create_default_event',
+                        lambda conn, tid, nome, owner_user_id: None)
+    monkeypatch.setattr(app_module, 'enqueue_email', lambda *a, **k: None)
+
+    resp = client.post('/signup', data={
+        'nome_anfitriao': 'Host Teste',
+        'email': 'novo@test.com',
+        'password': 'Senha@1234',
+        'confirm_password': 'Senha@1234',
+        'accept_terms': '1',
+    }, follow_redirects=True)
+
+    assert resp.status_code == 200
+    assert 'accepted_terms_at' in captured, "create_tenant_admin_user não foi chamado"
+    assert captured['accepted_terms_at'] is not None, (
+        "accepted_terms_at deve ser um datetime quando accept_terms está presente"
+    )

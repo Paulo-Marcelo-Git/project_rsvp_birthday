@@ -52,6 +52,16 @@
                minlength="8" placeholder="Repita a senha">
       </div>
 
+      <div class="mb-3 form-check">
+        <input type="checkbox" class="form-check-input" name="accept_terms" id="accept_terms" required>
+        <label class="form-check-label small" for="accept_terms">
+          Li e aceito os
+          <a href="{{ url_for('termos') }}" target="_blank">Termos de Uso</a>
+          e a
+          <a href="{{ url_for('privacidade') }}" target="_blank">Política de Privacidade</a>.
+        </label>
+      </div>
+
       <div class="d-grid mb-3">
         <button type="submit" class="btn btn-primary-custom">Criar conta</button>
       </div>

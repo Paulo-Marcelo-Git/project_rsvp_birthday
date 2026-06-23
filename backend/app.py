@@ -367,6 +367,8 @@ def signup():
             errors.append("Senha deve ter pelo menos 8 caracteres.")
         if password != confirm:
             errors.append("Senhas não conferem.")
+        if not request.form.get("accept_terms"):
+            errors.append("Você deve aceitar os Termos de Uso para continuar.")
 
         if errors:
             for err in errors:
@@ -406,9 +408,13 @@ def signup():
                 return render_template("verify_email_sent.html", email=email)
 
             password_hash = generate_password_hash(password)
+            accepted_terms_at = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 tenant_id = repo.create_tenant(conn, nome)
-                user_id = repo.create_tenant_admin_user(conn, tenant_id, email, password_hash)
+                user_id = repo.create_tenant_admin_user(
+                    conn, tenant_id, email, password_hash,
+                    accepted_terms_at=accepted_terms_at,
+                )
                 repo.create_default_event(conn, tenant_id, nome, owner_user_id=user_id)
                 if skip_verification:
                     conn.execute(

@@ -476,7 +476,8 @@ def count_invitees_for_user(conn, tenant_id: int, user_id: int) -> int:
 
 
 def create_tenant_admin_user(
-    conn, tenant_id: int, email: str, password_hash: str
+    conn, tenant_id: int, email: str, password_hash: str,
+    *, accepted_terms_at=None,
 ) -> int:
     """
     Cria usuário tenant_admin com is_active=0 (aguarda verificação de email).
@@ -488,11 +489,12 @@ def create_tenant_admin_user(
         text("""
             INSERT INTO users
                 (tenant_id, username, email, password_hash,
-                 role, is_active, must_change_password)
+                 role, is_active, must_change_password, accepted_terms_at)
             VALUES
-                (:tid, :u, :email, :pw, 'tenant_admin', 0, 0)
+                (:tid, :u, :email, :pw, 'tenant_admin', 0, 0, :ata)
         """),
-        {"tid": tenant_id, "u": username, "email": email, "pw": password_hash},
+        {"tid": tenant_id, "u": username, "email": email, "pw": password_hash,
+         "ata": accepted_terms_at},
     )
     row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
     return int(row["id"])
