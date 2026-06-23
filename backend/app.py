@@ -281,6 +281,15 @@ def login():
                     row["must_change_password"], row["tenant_id"], row["role"],
                 )
                 if candidate.check_password(password):
+                    status = repo.get_tenant_status(conn, row["tenant_id"])
+                    if status == "suspended":
+                        logger.warning(f"Login bloqueado (tenant suspenso): '{email}'.")
+                        flash(
+                            "Sua conta está suspensa. "
+                            "Entre em contato com o suporte.",
+                            "danger",
+                        )
+                        return render_template("login.html")
                     user = candidate
 
         if user:

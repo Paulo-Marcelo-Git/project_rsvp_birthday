@@ -1,6 +1,16 @@
 from werkzeug.security import generate_password_hash
 from tests.conftest import qresult, setup_db
 
+_ACTIVE_ROW = {
+    'id': 1, 'username': 'landlord',
+    'email': 'landlord@test.com',
+    'password_hash': generate_password_hash('SenhaAdminFort@99'),
+    'must_change_password': False,
+    'tenant_id': 1, 'role': 'tenant_admin',
+    'is_active': 1,
+}
+_PW = 'SenhaAdminFort@99'
+
 
 def test_login_page_loads(client):
     resp = client.get('/login')
@@ -21,20 +31,13 @@ def test_login_credenciais_invalidas_exibe_erro(client, db):
 
 def test_login_dbuser_tenant_admin_redireciona_para_respostas(client, db):
     """DbUser com role='tenant_admin' e is_active=1 autentica e redireciona para respostas."""
-    admin_pw = 'SenhaAdminFort@99'
-    user_row = {
-        'id': 1, 'username': 'landlord',
-        'email': 'landlord@test.com',
-        'password_hash': generate_password_hash(admin_pw),
-        'must_change_password': False,
-        'tenant_id': 1, 'role': 'tenant_admin',
-        'is_active': 1,
-    }
-    setup_db(db, qresult(fetchone=user_row))
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),           # get_user_by_email_global
+             qresult(fetchone={'status': 'active'}))   # get_tenant_status
 
     resp = client.post('/login', data={
         'email': 'landlord@test.com',
-        'password': admin_pw,
+        'password': _PW,
     })
 
     assert resp.status_code == 302
@@ -67,7 +70,9 @@ def test_login_usuario_db_com_troca_obrigatoria_redireciona(client, db):
         'role': 'member',
         'is_active': 1,
     }
-    setup_db(db, qresult(fetchone=user_row))
+    setup_db(db,
+             qresult(fetchone=user_row),
+             qresult(fetchone={'status': 'active'}))  # get_tenant_status
 
     resp = client.post('/login', data={
         'email': 'operador@test.com',
@@ -111,3 +116,51 @@ def test_login_usuario_nao_verificado_exibe_mensagem_especifica(client, db):
     body = resp.data.decode()
     assert 'Confirme seu email' in body
     assert 'inválidos' not in body
+
+
+# ── 4D-1: login bloqueado para tenants suspensos ──────────────────────────────
+
+def test_login_tenant_suspenso_bloqueia(client, db):
+    """Tenant suspenso: login com credenciais válidas deve ser bloqueado."""
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),                 # get_user_by_email_global
+             qresult(fetchone={'status': 'suspended'}))      # get_tenant_status
+
+    resp = client.post('/login', data={
+        'email': 'landlord@test.com',
+        'password': _PW,
+    }, follow_redirects=True)
+
+    assert resp.status_code == 200
+    assert 'suspensa' in resp.data.decode().lower()
+    assert '/admin/respostas' not in resp.headers.get('Location', '')
+
+
+def test_login_tenant_ativo_permite(client, db):
+    """Tenant com status='active': login normal deve funcionar."""
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),
+             qresult(fetchone={'status': 'active'}))
+
+    resp = client.post('/login', data={
+        'email': 'landlord@test.com',
+        'password': _PW,
+    })
+
+    assert resp.status_code == 302
+    assert '/admin/respostas' in resp.headers['Location']
+
+
+def test_login_tenant_trial_permite(client, db):
+    """Tenant com status='trial': login deve funcionar (trial não está suspenso)."""
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),
+             qresult(fetchone={'status': 'trial'}))
+
+    resp = client.post('/login', data={
+        'email': 'landlord@test.com',
+        'password': _PW,
+    })
+
+    assert resp.status_code == 302
+    assert '/admin/respostas' in resp.headers['Location']
