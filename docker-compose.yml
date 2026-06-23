@@ -67,9 +67,28 @@ services:
     profiles:
       - test
 
+  backup:
+    build:
+      context: ./backup
+    container_name: rsvp_backup
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - backup_data:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - rsvp_net
+
 networks:
   rsvp_net:
     driver: bridge
 
 volumes:
   db_data:
+  backup_data:
