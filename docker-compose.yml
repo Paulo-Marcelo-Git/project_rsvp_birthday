@@ -20,6 +20,15 @@ services:
     networks:
       - rsvp_net
 
+  redis:
+    image: redis:7-alpine
+    container_name: rsvp_redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - rsvp_net
+
   backend:
     build: ./backend
     container_name: rsvp_backend
@@ -27,15 +36,41 @@ services:
     user: "1002:1002"
     env_file:
       - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     ports:
       - "127.0.0.1:3000:8000"
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ./backend:/app
       - uploads_data:/app/uploads
       - ./logs:/app/logs
+      - ./VERSION:/VERSION:ro
+    working_dir: /app
+    networks:
+      - rsvp_net
+
+  worker:
+    build: ./backend
+    container_name: rsvp_worker
+    restart: always
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: rq worker default
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
       - ./VERSION:/VERSION:ro
     working_dir: /app
     networks:
@@ -95,3 +130,4 @@ volumes:
   db_data:
   backup_data:
   uploads_data:
+  redis_data:
