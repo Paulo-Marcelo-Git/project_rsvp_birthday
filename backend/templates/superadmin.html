@@ -1,0 +1,91 @@
+<!-- backend/templates/superadmin.html -->
+
+{% extends "base.html" %}
+{% block title %}Comemore+ — Super Admin{% endblock %}
+
+{% block content %}
+<div class="container py-3 d-flex justify-content-between align-items-center border-bottom mb-4">
+  <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+ <span class="badge bg-danger">SUPER ADMIN</span></h3>
+  <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>
+</div>
+
+<div class="container py-3">
+  <h2 class="mb-4">Tenants</h2>
+
+  {% if tenants %}
+  <div class="table-responsive">
+    <table class="table table-striped table-bordered align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>#</th>
+          <th>Nome</th>
+          <th>Plano</th>
+          <th>Status</th>
+          <th>Criado em</th>
+          <th>Eventos</th>
+          <th>Convidados</th>
+          <th>Membros</th>
+          <th class="text-center">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tenants %}
+        <tr>
+          <td class="text-muted small">{{ t.id }}</td>
+          <td><strong>{{ t.name }}</strong></td>
+          <td>
+            <form action="{{ url_for('superadmin_set_plan', tenant_id=t.id) }}" method="post" class="d-flex gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="plan" class="form-select form-select-sm" style="width:auto">
+                <option value="free" {% if t.plan == 'free' %}selected{% endif %}>Free</option>
+                <option value="pro" {% if t.plan == 'pro' %}selected{% endif %}>Pro</option>
+                <option value="business" {% if t.plan == 'business' %}selected{% endif %}>Business</option>
+              </select>
+              <button type="submit" class="btn btn-sm btn-outline-primary">Salvar</button>
+            </form>
+          </td>
+          <td>
+            {% if t.status == 'active' %}
+              <span class="badge bg-success">Ativo</span>
+            {% elif t.status == 'suspended' %}
+              <span class="badge bg-danger">Suspenso</span>
+            {% elif t.status == 'trial' %}
+              <span class="badge bg-warning text-dark">Trial</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ t.status }}</span>
+            {% endif %}
+          </td>
+          <td class="small">{{ t.created_at.strftime("%d/%m/%Y") if t.created_at else '-' }}</td>
+          <td><span class="badge bg-secondary">{{ t.event_count }} / {{ t.max_events or '∞' }}</span></td>
+          <td><span class="badge bg-secondary">{{ t.invitee_count }} / {{ t.max_invitees or '∞' }}</span></td>
+          <td><span class="badge bg-secondary">{{ t.member_count }} / {{ t.max_members or '∞' }}</span></td>
+          <td class="text-center">
+            {% if t.status != 'suspended' %}
+            <form action="{{ url_for('superadmin_suspend', tenant_id=t.id) }}" method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger"
+                      onclick="return confirm('Suspender tenant {{ t.name }}?')">
+                Suspender
+              </button>
+            </form>
+            {% else %}
+            <form action="{{ url_for('superadmin_reactivate', tenant_id=t.id) }}" method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-success">Reativar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <p>Nenhum tenant cadastrado.</p>
+  </div>
+  {% endif %}
+</div>
+
+<div class="text-center mt-5 mb-3 text-muted small">{{ app_version }}</div>
+{% endblock %}

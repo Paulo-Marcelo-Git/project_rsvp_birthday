@@ -19,7 +19,8 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | Fase 3B | ✅ Concluída | Volume `uploads_data` em `/app/uploads`, rota `/uploads/<filename>` com isolamento de tenant, session-token para convidados (sem query string) |
 | Fase 3C | ✅ Concluída | `tasks.py` + `queue_utils.py`, RQ em 6 call sites, `redis` + `worker` no Compose, fallback síncrono só quando `REDIS_URL` ausente |
 | Fase 3D | ✅ Concluída | Guia Brevo × Resend, SPF/DKIM/DMARC, valores exatos no `.env.example` |
-| **Fase 4** | 🔜 Próxima | Enforcement de limites por plano + painel super-admin do SaaS |
+| **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` com check de config inválida |
+| **Fase 5** | 🔜 Próxima | LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento |
 
 ---
 
@@ -131,6 +132,9 @@ REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); present
 
 # Backup
 BACKUP_RETENTION_DAYS=7
+
+# Super-admin do SaaS — email NÃO deve existir como tenant no banco
+# SUPERADMIN_EMAIL=admin@seudominio.com
 ```
 
 ---
@@ -154,5 +158,5 @@ BACKUP_RETENTION_DAYS=7
 | 1 | Alembic + schema multi-tenant | ✅ |
 | 2A–2D | App multi-tenant: isolamento, login, signup, limpeza de legado | ✅ |
 | 3A–3D | Backup + uploads em volume + fila Redis/RQ + guia email transacional | ✅ |
-| **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | 🔜 |
-| 5 | LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento | ⏳ |
+| **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | ✅ |
+| **5** | **LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento** | 🔜 |

@@ -27,12 +27,28 @@ _ADMIN_DBUSER = _app_module.DbUser(
     1, 'testadmin', generate_password_hash(ADMIN_PASSWORD), False, 1, 'tenant_admin'
 )
 
+SUPERADMIN_EMAIL = 'superadmin@test.com'
+
+_SUPERADMIN_DBUSER = _app_module.DbUser(
+    999, 'superadmin', generate_password_hash('Superpass@1'), False, 99, 'member',
+    email=SUPERADMIN_EMAIL,
+)
+
+_MISCONFIG_DBUSER = _app_module.DbUser(
+    998, 'misconfigadmin', generate_password_hash('Superpass@1'), False, 1, 'tenant_admin',
+    email=SUPERADMIN_EMAIL,
+)
+
 
 @_app_module.login_manager.user_loader
 def _test_user_loader(user_id):
-    """Loader de teste: 'user_1' retorna _ADMIN_DBUSER sem DB; outros consultam o mock."""
+    """Loader de teste: IDs fixos retornam usuários pré-construídos; outros consultam o mock."""
     if user_id == 'user_1':
         return _ADMIN_DBUSER
+    if user_id == 'user_999':
+        return _SUPERADMIN_DBUSER
+    if user_id == 'user_998':
+        return _MISCONFIG_DBUSER
     if user_id and user_id.startswith('user_'):
         try:
             db_id = int(user_id[5:])
@@ -80,6 +96,26 @@ def admin_client(client):
     """Client com sessão de tenant_admin pré-configurada (não requer DB)."""
     with client.session_transaction() as sess:
         sess['_user_id'] = 'user_1'
+        sess['_fresh'] = True
+    return client
+
+
+@pytest.fixture
+def superadmin_client(client, monkeypatch):
+    """Client autenticado como superadmin (member, email == SUPERADMIN_EMAIL)."""
+    monkeypatch.setenv('SUPERADMIN_EMAIL', SUPERADMIN_EMAIL)
+    with client.session_transaction() as sess:
+        sess['_user_id'] = 'user_999'
+        sess['_fresh'] = True
+    return client
+
+
+@pytest.fixture
+def misconfig_client(client, monkeypatch):
+    """Client onde SUPERADMIN_EMAIL coincide com um tenant_admin (config inválida)."""
+    monkeypatch.setenv('SUPERADMIN_EMAIL', SUPERADMIN_EMAIL)
+    with client.session_transaction() as sess:
+        sess['_user_id'] = 'user_998'
         sess['_fresh'] = True
     return client
 

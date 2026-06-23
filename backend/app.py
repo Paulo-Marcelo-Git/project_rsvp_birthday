@@ -143,6 +143,7 @@ class DbUser(UserMixin):
         must_change_password=False,
         tenant_id=1,
         role="member",
+        email=None,
     ):
         self.id = f"user_{db_id}"
         self.db_id = db_id
@@ -151,6 +152,7 @@ class DbUser(UserMixin):
         self.must_change_password = bool(must_change_password)
         self.tenant_id = tenant_id
         self.role = role
+        self.email = email
 
     @property
     def is_tenant_admin(self):
@@ -172,7 +174,7 @@ def load_user(user_id):
                 conn.execute(
                     text(
                         "SELECT id, tenant_id, username, password_hash, "
-                        "must_change_password, role "
+                        "must_change_password, role, email "
                         "FROM users WHERE id=:id AND is_active=1"
                     ),
                     {"id": db_id},
@@ -188,6 +190,7 @@ def load_user(user_id):
                     row["must_change_password"],
                     row["tenant_id"],
                     row["role"],
+                    email=row.get("email"),
                 )
     return None
 
@@ -196,6 +199,27 @@ def tenant_admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or not current_user.is_tenant_admin:
+            abort(403)
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def superadmin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for("login"))
+        superadmin_email = os.getenv("SUPERADMIN_EMAIL", "")
+        if not superadmin_email:
+            abort(403)
+        if current_user.role == "tenant_admin" and current_user.email == superadmin_email:
+            logger.warning(
+                f"SUPERADMIN_EMAIL '{superadmin_email}' pertence a um tenant_admin "
+                "— configuração inválida. Acesse /superadmin com uma conta sem tenant."
+            )
+            abort(403)
+        if current_user.email != superadmin_email:
             abort(403)
         return f(*args, **kwargs)
 
@@ -1401,6 +1425,51 @@ def delete_usuario(id):
         "warning",
     )
     return redirect(url_for("admin_usuarios"))
+
+
+# ── Super-admin ───────────────────────────────────────────────────────────────
+
+@app.route("/superadmin")
+@superadmin_required
+def superadmin():
+    """Painel super-admin: lista todos os tenants com plano e uso."""
+    with engine.connect() as conn:
+        tenants = repo.list_all_tenants(conn)
+    return render_template("superadmin.html", tenants=tenants)
+
+
+@app.route("/superadmin/tenant/<int:tenant_id>/set_plan", methods=["POST"])
+@superadmin_required
+def superadmin_set_plan(tenant_id):
+    plan = request.form.get("plan", "").strip()
+    if plan not in ("free", "pro", "business"):
+        flash("Plano inválido.", "danger")
+        return redirect(url_for("superadmin"))
+    with engine.connect() as conn:
+        repo.set_tenant_plan(conn, tenant_id, plan)
+        conn.commit()
+    flash(f"Plano do tenant {tenant_id} alterado para '{plan}'.", "success")
+    return redirect(url_for("superadmin"))
+
+
+@app.route("/superadmin/tenant/<int:tenant_id>/suspend", methods=["POST"])
+@superadmin_required
+def superadmin_suspend(tenant_id):
+    with engine.connect() as conn:
+        repo.set_tenant_status(conn, tenant_id, "suspended")
+        conn.commit()
+    flash(f"Tenant {tenant_id} suspenso.", "warning")
+    return redirect(url_for("superadmin"))
+
+
+@app.route("/superadmin/tenant/<int:tenant_id>/reactivate", methods=["POST"])
+@superadmin_required
+def superadmin_reactivate(tenant_id):
+    with engine.connect() as conn:
+        repo.set_tenant_status(conn, tenant_id, "active")
+        conn.commit()
+    flash(f"Tenant {tenant_id} reativado.", "success")
+    return redirect(url_for("superadmin"))
 
 
 if __name__ == "__main__":

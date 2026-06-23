@@ -656,5 +656,5 @@ def list_all_tenants(conn) -> list[dict]:
         FROM tenants t
         JOIN plan_limits pl ON t.plan = pl.plan
         ORDER BY t.created_at DESC
-    """)).mappings().fetchall()
+    """)).mappings().all()
     return [dict(r) for r in rows]
