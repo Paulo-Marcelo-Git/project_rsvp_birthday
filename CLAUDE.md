@@ -20,7 +20,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | Fase 3C | ✅ Concluída | `tasks.py` + `queue_utils.py`, RQ em 6 call sites, `redis` + `worker` no Compose, fallback síncrono só quando `REDIS_URL` ausente |
 | Fase 3D | ✅ Concluída | Guia Brevo × Resend, SPF/DKIM/DMARC, valores exatos no `.env.example` |
 | **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` com check de config inválida |
-| **Fase 5** | 🔜 Próxima | LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento |
+| **Fase 5** | ✅ Concluída | Flask-Limiter (Redis/memory storage), rate limiting em 5 rotas (login/signup/forgot/invite), /termos + /privacidade (LGPD), aceite obrigatório no signup + `accepted_terms_at`, migration 0005, fix `datetime.utcnow()`, supressão warning RQ serializer, integration test fluxo completo |
 
 ---
 
@@ -41,9 +41,10 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - MySQL 8 (QueuePool), Alembic 1.13.3
 - Flask-Login + Flask-WTF (CSRF)
 - Redis 7-alpine + RQ 1.16.2 + redis-py 5.0.7 — fila de email assíncrono (`tasks.py` + `queue_utils.py`)
+- Flask-Limiter 3.8.0 — rate limiting com Redis storage + fallback memory://
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
-- pytest (134 testes: unit + repo + isolamento + migration + integração + uploads + queue + superadmin)
+- pytest (148 unit tests + 33 integration tests deselected sem MySQL real)
 
 ---
 
@@ -61,7 +62,8 @@ project_rsvp_birthday/
 │   │       ├── 0001_initial_saas_schema.py
 │   │       ├── 0002_seed_default_tenant.py
 │   │       ├── 0003_email_verification_tokens.py
-│   │       └── 0004_plan_limits.py
+│   │       ├── 0004_plan_limits.py
+│   │       └── 0005_accepted_terms_at.py
 │   ├── Dockerfile
 │   ├── entrypoint.sh        # Roda `alembic upgrade head` antes do gunicorn (*.sh text eol=lf via .gitattributes)
 │   ├── requirements.txt
@@ -91,6 +93,7 @@ project_rsvp_birthday/
 - **`password_reset_tokens`** — TTL 1h, flag `used`.
 - **`email_verification_tokens`** — TTL 24h, flag `used`. Usuário nasce `is_active=0`, ativa via link.
 - **`plan_limits`** — PK `plan` ENUM(free/pro/business); limites `max_events`, `max_invitees`, `max_members` (NULL = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(NULL).
+- **`users.accepted_terms_at`** — nullable DateTime; gravado no signup com timestamp UTC do aceite dos termos (migration 0005).
 
 ---
 
