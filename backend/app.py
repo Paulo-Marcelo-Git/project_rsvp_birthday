@@ -366,6 +366,118 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
         logger.error(f"Falha ao enviar email de reset para '{to_address}': {e}")
 
 
+def send_verification_email(to_address: str, verify_url: str) -> bool:
+    """Envia email de verificação de conta. Retorna True se enviado, False em falha."""
+    smtp_host = os.getenv("EMAIL_SMTP")
+    smtp_user = os.getenv("EMAIL_USER")
+    if not smtp_host or not smtp_user:
+        logger.warning(
+            "EMAIL_SMTP/EMAIL_USER não configurados — email de verificação não enviado."
+        )
+        return False
+
+    smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
+    smtp_pass = os.getenv("EMAIL_PASS", "")
+    from_addr = f"Comemore+ <{smtp_user}>"
+    subject = "Confirme seu email — Comemore+"
+
+    html_body = f"""<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;">
+    <tr>
+      <td align="center" style="padding:30px 10px;">
+        <table width="520" cellpadding="0" cellspacing="0"
+               style="background:#ffffff;border-radius:12px;overflow:hidden;
+                      box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:520px;">
+          <tr>
+            <td style="background:linear-gradient(to right,#fce4ec,#e3f2fd);
+                       padding:28px 40px;text-align:center;">
+              <span style="font-size:28px;font-weight:700;color:#2c3e50;">
+                &#127881; Comemore+
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:36px 40px;">
+              <p style="margin:0 0 24px;font-size:15px;color:#555;line-height:1.6;">
+                Obrigado por criar sua conta no <strong>Comemore+</strong>!
+                Clique no botão abaixo para confirmar seu email e ativar sua conta.
+              </p>
+              <table cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center" style="padding:8px 0 28px;">
+                    <a href="{verify_url}"
+                       style="display:inline-block;background:#2e7d32;color:#ffffff;
+                              text-decoration:none;font-size:15px;font-weight:600;
+                              border-radius:8px;padding:14px 32px;">
+                      Confirmar meu email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 8px;font-size:13px;color:#888;">
+                Este link é válido por <strong>24 horas</strong>.
+              </p>
+              <p style="margin:0 0 24px;font-size:13px;color:#888;">
+                Se você não criou uma conta no Comemore+, ignore este email.
+              </p>
+              <hr style="border:none;border-top:1px solid #eee;margin:0 0 20px;">
+              <p style="margin:0;font-size:12px;color:#aaa;">
+                Caso o botão não funcione, copie e cole o link abaixo:<br>
+                <span style="color:#2e7d32;word-break:break-all;">{verify_url}</span>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
+                       border-top:1px solid #eee;">
+              <p style="margin:0;font-size:12px;color:#888;">
+                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
+                Este é um email automático, não responda.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    text_body = (
+        f"Obrigado por criar sua conta no Comemore+!\n\n"
+        f"Confirme seu email acessando o link abaixo (válido por 24 horas):\n"
+        f"{verify_url}\n\n"
+        f"Se você não criou uma conta, ignore este email.\n\n"
+        f"-- Equipe Comemore+"
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_address
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        server = smtplib.SMTP(smtp_host, smtp_port)
+        try:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_addr, to_address, msg.as_string())
+            logger.info(f"Email de verificação enviado para '{to_address}'.")
+            return True
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Falha ao enviar email de verificação para '{to_address}': {e}")
+        return False
+
+
 # Rotas
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -419,6 +531,99 @@ def login():
         logger.warning(f"Tentativa de login inválida: '{email}'.")
         flash("Email ou senha inválidos.", "danger")
     return render_template("login.html")
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    """Cadastro self-service: cria tenant + admin + evento padrão atomicamente."""
+    skip_verification = os.getenv("SKIP_EMAIL_VERIFICATION", "").lower() in (
+        "1", "true", "yes"
+    )
+
+    if request.method == "POST":
+        nome = request.form.get("nome_anfitriao", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+
+        errors = []
+        if len(nome) < 2:
+            errors.append("Nome do anfitrião é obrigatório (mínimo 2 caracteres).")
+        if "@" not in email or "." not in email:
+            errors.append("Email inválido.")
+        if len(password) < 8:
+            errors.append("Senha deve ter pelo menos 8 caracteres.")
+        if password != confirm:
+            errors.append("Senhas não conferem.")
+
+        if errors:
+            for err in errors:
+                flash(err, "danger")
+            return render_template("signup.html")
+
+        if not skip_verification:
+            if not os.getenv("EMAIL_SMTP") or not os.getenv("EMAIL_USER"):
+                logger.error("Signup bloqueado: EMAIL_SMTP/EMAIL_USER não configurados.")
+                flash(
+                    "Servidor de email não configurado. Contate o administrador.",
+                    "danger",
+                )
+                return render_template("signup.html"), 500
+
+        with engine.connect() as conn:
+            existing = repo.get_user_by_email_global(conn, email)
+
+            if existing:
+                if existing.get("is_active"):
+                    flash("Este email já está cadastrado. Faça login.", "info")
+                    return redirect(url_for("login"))
+                # Conta existe mas não verificada: reenviar token
+                repo.invalidate_verification_tokens(conn, existing["id"])
+                if skip_verification:
+                    conn.execute(
+                        text("UPDATE users SET is_active = 1 WHERE id = :uid"),
+                        {"uid": existing["id"]},
+                    )
+                    conn.commit()
+                    flash("Conta ativada com sucesso. Faça login.", "success")
+                    return redirect(url_for("login"))
+                token = repo.create_email_verification_token(conn, existing["id"])
+                conn.commit()
+                base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+                send_verification_email(email, f"{base_url}/verify-email/{token}")
+                return render_template("verify_email_sent.html", email=email)
+
+            password_hash = generate_password_hash(password)
+            try:
+                tenant_id = repo.create_tenant(conn, nome)
+                user_id = repo.create_tenant_admin_user(conn, tenant_id, email, password_hash)
+                repo.create_default_event(conn, tenant_id, nome, owner_user_id=user_id)
+                if skip_verification:
+                    conn.execute(
+                        text("UPDATE users SET is_active = 1 WHERE id = :uid"),
+                        {"uid": user_id},
+                    )
+                    conn.commit()
+                    flash("Conta criada com sucesso! Faça login.", "success")
+                    return redirect(url_for("login"))
+                token = repo.create_email_verification_token(conn, user_id)
+                conn.commit()
+            except Exception as e:
+                logger.error(f"Erro ao criar conta para '{email}': {e}")
+                flash("Erro ao criar conta. Tente novamente mais tarde.", "danger")
+                return render_template("signup.html")
+
+        base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+        sent = send_verification_email(email, f"{base_url}/verify-email/{token}")
+        if not sent:
+            flash(
+                "Conta criada, mas não conseguimos enviar o email de verificação. "
+                "Use 'Reenviar verificação' para tentar novamente.",
+                "warning",
+            )
+        return render_template("verify_email_sent.html", email=email)
+
+    return render_template("signup.html")
 
 
 @app.route("/logout")

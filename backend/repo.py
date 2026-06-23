@@ -160,7 +160,9 @@ def update_event_texts(conn, tenant_id: int, event_id: int, **texts) -> None:
         )
 
 
-def create_default_event(conn, tenant_id: int, tenant_name: str) -> int:
+def create_default_event(
+    conn, tenant_id: int, tenant_name: str, *, owner_user_id: int | None = None
+) -> int:
     """Cria o evento padrão para um novo tenant (usado no signup). Retorna event_id."""
     import secrets as _sec
     slug = _sec.token_urlsafe(16)[:22]
@@ -174,10 +176,13 @@ def create_default_event(conn, tenant_id: int, tenant_name: str) -> int:
                 (tenant_id, owner_user_id, title, event_type, slug, status,
                  question_text, yes_text, no_text, extra_texts)
             VALUES
-                (:tid, NULL, :title, 'aniversario', :slug, 'published',
+                (:tid, :owner, :title, 'aniversario', :slug, 'draft',
                  'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
         """),
-        {"tid": tenant_id, "title": f"Evento de {tenant_name}", "slug": slug, "extra": extra},
+        {
+            "tid": tenant_id, "owner": owner_user_id,
+            "title": f"Festa de {tenant_name}", "slug": slug, "extra": extra,
+        },
     )
     row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
     return int(row["id"])
@@ -467,3 +472,84 @@ def count_invitees_for_user(conn, tenant_id: int, user_id: int) -> int:
         {"tid": tenant_id, "uid": user_id},
     ).mappings().fetchone()
     return int(row["total"] or 0)
+
+
+# ── signup self-service (2C) ──────────────────────────────────────────────────
+
+
+def create_tenant_admin_user(
+    conn, tenant_id: int, email: str, password_hash: str
+) -> int:
+    """
+    Cria usuário tenant_admin com is_active=0 (aguarda verificação de email).
+    username deriva do local-part do email (único por tenant — tenant é novo).
+    Retorna o user_id gerado.
+    """
+    username = email.split("@")[0][:60]
+    conn.execute(
+        text("""
+            INSERT INTO users
+                (tenant_id, username, email, password_hash,
+                 role, is_active, must_change_password)
+            VALUES
+                (:tid, :u, :email, :pw, 'tenant_admin', 0, 0)
+        """),
+        {"tid": tenant_id, "u": username, "email": email, "pw": password_hash},
+    )
+    row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
+    return int(row["id"])
+
+
+def create_email_verification_token(conn, user_id: int, *, ttl_hours: int = 24) -> str:
+    """Gera e persiste token de verificação de email. Retorna o token string."""
+    import secrets as _sec
+    from datetime import datetime, timedelta
+    token = _sec.token_urlsafe(32)
+    expires = datetime.utcnow() + timedelta(hours=ttl_hours)
+    conn.execute(
+        text("""
+            INSERT INTO email_verification_tokens (user_id, token, expires_at)
+            VALUES (:uid, :tok, :exp)
+        """),
+        {"uid": user_id, "tok": token, "exp": expires},
+    )
+    return token
+
+
+def get_valid_verification_token(conn, token: str) -> dict | None:
+    """Retorna token de verificação se válido (não usado e não expirado)."""
+    row = conn.execute(
+        text("""
+            SELECT id, user_id
+            FROM email_verification_tokens
+            WHERE token = :tok
+              AND used = 0
+              AND expires_at > UTC_TIMESTAMP()
+        """),
+        {"tok": token},
+    ).mappings().fetchone()
+    return dict(row) if row else None
+
+
+def use_verification_token(conn, token_id: int, user_id: int) -> None:
+    """Marca token como usado e ativa a conta do usuário (is_active = 1)."""
+    conn.execute(
+        text("UPDATE email_verification_tokens SET used = 1 WHERE id = :tid"),
+        {"tid": token_id},
+    )
+    conn.execute(
+        text("UPDATE users SET is_active = 1 WHERE id = :uid"),
+        {"uid": user_id},
+    )
+
+
+def invalidate_verification_tokens(conn, user_id: int) -> None:
+    """Invalida todos os tokens de verificação pendentes do usuário (para reenvio)."""
+    conn.execute(
+        text("""
+            UPDATE email_verification_tokens
+            SET used = 1
+            WHERE user_id = :uid AND used = 0
+        """),
+        {"uid": user_id},
+    )
