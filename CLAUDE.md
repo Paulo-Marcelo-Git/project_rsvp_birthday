@@ -100,19 +100,25 @@ Fonte de verdade do DDL: **`schema_comemore_saas.sql`** (raiz do projeto). Tabel
 - `role`: `tenant_admin` (gerencia o tenant, vê tudo do tenant) e `member` (vê só os eventos que criou — `events.owner_user_id`).
 - Novos membros: convite por email + link de senha (sem senha padrão hardcoded).
 - Mantém: bcrypt (Werkzeug), CSRF (Flask-WTF), `must_change_password`.
-- **`ADMIN_EMAIL`** (env var, **TRANSITÓRIA — sai na Fase 2D**): email do `AdminUser` para login enquanto o signup (2C) não existir. Após o signup criar um `DbUser` com `role=tenant_admin`, este bloco e as vars `ADMIN_USER`/`ADMIN_PASS`/`ADMIN_EMAIL` são removidos. Login é **exclusivamente por email** (UNIQUE global) — username não autentica.
+- Login é **exclusivamente por email** (UNIQUE global) — username não autentica.
+- `AdminUser` e as vars `ADMIN_USER`/`ADMIN_PASS`/`ADMIN_EMAIL`/`DEFAULT_PASSWORD` foram removidos na Fase 2D. O primeiro `tenant_admin` vem do signup self-service (2C).
+- **Pré-condição de remoção do bloco AdminUser (2D-3):** antes de aplicar em produção, verificar que existe ao menos um `DbUser` com `role='tenant_admin' AND is_active=1` no banco: `SELECT COUNT(*) FROM users WHERE role='tenant_admin' AND is_active=1`. Se o resultado for 0, o sistema ficaria sem forma de login — não aplicar.
 
 ---
 
 ## Roadmap faseado
 
 1. **✅ Fase 1 — Fundação de schema (concluída):** Alembic 1.13.3 instalado; migration `0001` cria `tenants`, `users` (com `tenant_id`+`role`), `events`, `invitees` (com `tenant_id` desnormalizado e dois caminhos de FK cascade), `password_reset_tokens`. Testes de integração (9) validam schema, índices de isolamento e FKs. `app.py` intacto.
-2. **🔜 Fase 2 — App multi-tenant (próxima):**
+2. **✅ Fase 2A–2D — App multi-tenant (concluída):**
+   - 2A: login email-only (sem username).
+   - 2B: normalização de email p/ lowercase em forgot_password.
+   - 2C: signup self-service com verificação de email (atômico: tenant + user + evento).
+   - 2D: remoção de `AdminUser`/env-var auth, renomeação `super_admin_required→tenant_admin_required`, remoção de `DEFAULT_PASSWORD` hardcoded; novos membros recebem senha temporária aleatória + email (ou flash em dev).
+   - **Pró:** `init_db()` e `init.sql` ainda presentes — remoção fica para 2E junto com startup Alembic.
+3. **🔜 Fase 2E — Startup Alembic + limpeza de legacy:**
    - Remover `init_db()`, `_col_exists()`, `_index_exists()` e `init.sql` do compose.
    - Startup do container roda `alembic upgrade head` antes do gunicorn.
-   - Adaptar `AdminUser`/`DbUser` → `TenantAdmin`/`Member` com `tenant_id`.
-   - Reescrever queries para filtrar `tenant_id` em toda leitura/escrita.
-   - Rota `/signup`: cria `tenant` + primeiro usuário `role=tenant_admin`.
+   - Reescrever queries que ainda não filtram `tenant_id`.
    - Testes de isolamento: prova que tenant A nunca vê dados de tenant B.
 3. **Fase 3 — Escala:** email transacional (Brevo/Resend) + fila (Redis/RQ) + uploads em volume nomeado.
 4. **Fase 4 — Produto:** enforcement de limites por plano + painel super-admin do SaaS (dono).

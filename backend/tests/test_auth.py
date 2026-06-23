@@ -1,5 +1,5 @@
 from werkzeug.security import generate_password_hash
-from tests.conftest import ADMIN_PASSWORD, qresult, setup_db
+from tests.conftest import qresult, setup_db
 
 
 def test_login_page_loads(client):
@@ -21,7 +21,6 @@ def test_login_credenciais_invalidas_exibe_erro(client, db):
 
 def test_login_dbuser_tenant_admin_redireciona_para_respostas(client, db):
     """DbUser com role='tenant_admin' e is_active=1 autentica e redireciona para respostas."""
-    from werkzeug.security import generate_password_hash
     admin_pw = 'SenhaAdminFort@99'
     user_row = {
         'id': 1, 'username': 'landlord',

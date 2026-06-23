@@ -132,21 +132,6 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 
-class AdminUser(UserMixin):
-    id = "admin"
-    is_tenant_admin = True
-    db_id = None
-    tenant_id = 1       # default tenant até signup substituir env-var auth (2D)
-    role = "tenant_admin"
-
-    @property
-    def username(self):
-        return os.getenv("ADMIN_USER", "admin")
-
-    def check_password(self, password):
-        return check_password_hash(os.getenv("ADMIN_PASS"), password)
-
-
 class DbUser(UserMixin):
     def __init__(
         self,
@@ -175,8 +160,6 @@ class DbUser(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    if user_id == "admin":
-        return AdminUser()
     if user_id and user_id.startswith("user_"):
         try:
             db_id = int(user_id[5:])
@@ -505,30 +488,23 @@ def login():
         password = request.form.get("password", "")
         user = None
 
-        # TRANSITÓRIO (2D): bloco ADMIN_EMAIL sai quando signup criar DbUser tenant_admin
-        admin_email = os.getenv("ADMIN_EMAIL", "").lower()
-        if admin_email and email == admin_email:
-            candidate = AdminUser()
-            if candidate.check_password(password):
-                user = candidate
-        else:
-            with engine.connect() as conn:
-                row = repo.get_user_by_email_global(conn, email)
-                if row and not row.get("is_active"):
-                    logger.warning(f"Login bloqueado (email não verificado): '{email}'.")
-                    flash(
-                        "Confirme seu email antes de fazer login. "
-                        "Verifique sua caixa de entrada ou solicite novo link.",
-                        "warning",
-                    )
-                    return render_template("login.html")
-                if row and row.get("is_active"):
-                    candidate = DbUser(
-                        row["id"], row["username"], row["password_hash"],
-                        row["must_change_password"], row["tenant_id"], row["role"],
-                    )
-                    if candidate.check_password(password):
-                        user = candidate
+        with engine.connect() as conn:
+            row = repo.get_user_by_email_global(conn, email)
+            if row and not row.get("is_active"):
+                logger.warning(f"Login bloqueado (email não verificado): '{email}'.")
+                flash(
+                    "Confirme seu email antes de fazer login. "
+                    "Verifique sua caixa de entrada ou solicite novo link.",
+                    "warning",
+                )
+                return render_template("login.html")
+            if row and row.get("is_active"):
+                candidate = DbUser(
+                    row["id"], row["username"], row["password_hash"],
+                    row["must_change_password"], row["tenant_id"], row["role"],
+                )
+                if candidate.check_password(password):
+                    user = candidate
 
         if user:
             login_user(user)

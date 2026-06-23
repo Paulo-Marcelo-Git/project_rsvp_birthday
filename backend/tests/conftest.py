@@ -12,9 +12,6 @@ os.environ.update({
     'DB_HOST': 'localhost',
     'DB_NAME': 'test_db',
     'SECRET_KEY': 'test-secret-key-for-pytest-only!!',
-    'ADMIN_USER': 'testadmin',
-    'ADMIN_EMAIL': 'testadmin@test.com',
-    'ADMIN_PASS': generate_password_hash(ADMIN_PASSWORD),
     'DEFAULT_PASSWORD': 'Default@1234',
 })
 
@@ -25,6 +22,42 @@ with patch('sqlalchemy.create_engine', return_value=_mock_engine):
 
 flask_app = _app_module.app
 flask_app.config.update({'TESTING': True, 'WTF_CSRF_ENABLED': False})
+
+# DbUser pré-construído para admin_client — retornado sem tocar no DB
+_ADMIN_DBUSER = _app_module.DbUser(
+    1, 'testadmin', generate_password_hash(ADMIN_PASSWORD), False, 1, 'tenant_admin'
+)
+
+
+@_app_module.login_manager.user_loader
+def _test_user_loader(user_id):
+    """Loader de teste: 'user_1' retorna _ADMIN_DBUSER sem DB; outros consultam o mock."""
+    if user_id == 'user_1':
+        return _ADMIN_DBUSER
+    if user_id and user_id.startswith('user_'):
+        try:
+            db_id = int(user_id[5:])
+        except ValueError:
+            return None
+        with _app_module.engine.connect() as conn:
+            row = (
+                conn.execute(
+                    _app_module.text(
+                        "SELECT id, tenant_id, username, password_hash, "
+                        "must_change_password, role "
+                        "FROM users WHERE id=:id AND is_active=1"
+                    ),
+                    {"id": db_id},
+                )
+                .mappings()
+                .fetchone()
+            )
+            if row:
+                return _app_module.DbUser(
+                    row["id"], row["username"], row["password_hash"],
+                    row["must_change_password"], row["tenant_id"], row["role"],
+                )
+    return None
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
@@ -45,9 +78,9 @@ def db(monkeypatch):
 
 @pytest.fixture
 def admin_client(client):
-    """Client com sessão de super admin pré-configurada (não requer DB)."""
+    """Client com sessão de tenant_admin pré-configurada (não requer DB)."""
     with client.session_transaction() as sess:
-        sess['_user_id'] = 'admin'
+        sess['_user_id'] = 'user_1'
         sess['_fresh'] = True
     return client
 
