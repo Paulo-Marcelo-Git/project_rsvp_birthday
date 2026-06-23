@@ -146,13 +146,14 @@ class TestMigration0001:
         )
 
     def test_02_all_tables_exist(self, test_db):
-        """As 5 tabelas do schema SaaS devem existir após upgrade."""
+        """As 6 tabelas do schema SaaS devem existir após upgrade."""
         expected = {
             "tenants",
             "users",
             "events",
             "invitees",
             "password_reset_tokens",
+            "plan_limits",
         }
         with test_db.connect() as conn:
             rows = conn.execute(text("SHOW TABLES")).fetchall()
@@ -270,13 +271,14 @@ class TestMigration0001:
         assert count >= 1, "UNIQUE KEY uq_users_email não encontrado em users"
 
     def test_08_downgrade_removes_saas_tables(self, test_db):
-        """alembic downgrade base deve remover as 5 tabelas do schema SaaS."""
+        """alembic downgrade base deve remover todas as tabelas do schema SaaS."""
         result = _run_alembic("downgrade", "base")
         assert result.returncode == 0, (
             f"downgrade base falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
         saas_tables = {
-            "tenants", "users", "events", "invitees", "password_reset_tokens"
+            "tenants", "users", "events", "invitees",
+            "password_reset_tokens", "plan_limits",
         }
         with test_db.connect() as conn:
             rows = conn.execute(text("SHOW TABLES")).fetchall()
@@ -290,7 +292,8 @@ class TestMigration0001:
             f"re-upgrade falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
         expected = {
-            "tenants", "users", "events", "invitees", "password_reset_tokens"
+            "tenants", "users", "events", "invitees",
+            "password_reset_tokens", "plan_limits",
         }
         with test_db.connect() as conn:
             rows = conn.execute(text("SHOW TABLES")).fetchall()
@@ -298,3 +301,39 @@ class TestMigration0001:
         assert expected.issubset(tables), (
             f"Tabelas ausentes após re-upgrade: {expected - tables}"
         )
+
+    def test_10_plan_limits_seed_free(self, test_db):
+        """Plano free deve ter max_events=2, max_invitees=50, max_members=1."""
+        with test_db.connect() as conn:
+            row = conn.execute(text(
+                "SELECT max_events, max_invitees, max_members "
+                "FROM plan_limits WHERE plan = 'free'"
+            )).mappings().fetchone()
+        assert row is not None, "Linha 'free' ausente em plan_limits"
+        assert row["max_events"]   == 2,  f"max_events free esperado 2, obteve {row['max_events']}"
+        assert row["max_invitees"] == 50, f"max_invitees free esperado 50, obteve {row['max_invitees']}"
+        assert row["max_members"]  == 1,  f"max_members free esperado 1, obteve {row['max_members']}"
+
+    def test_11_plan_limits_seed_pro(self, test_db):
+        """Plano pro deve ter max_events=10, max_invitees=500, max_members=5."""
+        with test_db.connect() as conn:
+            row = conn.execute(text(
+                "SELECT max_events, max_invitees, max_members "
+                "FROM plan_limits WHERE plan = 'pro'"
+            )).mappings().fetchone()
+        assert row is not None, "Linha 'pro' ausente em plan_limits"
+        assert row["max_events"]   == 10,  f"max_events pro esperado 10, obteve {row['max_events']}"
+        assert row["max_invitees"] == 500, f"max_invitees pro esperado 500, obteve {row['max_invitees']}"
+        assert row["max_members"]  == 5,   f"max_members pro esperado 5, obteve {row['max_members']}"
+
+    def test_12_plan_limits_business_is_unlimited(self, test_db):
+        """Plano business deve ter todos os limites NULL (ilimitado)."""
+        with test_db.connect() as conn:
+            row = conn.execute(text(
+                "SELECT max_events, max_invitees, max_members "
+                "FROM plan_limits WHERE plan = 'business'"
+            )).mappings().fetchone()
+        assert row is not None, "Linha 'business' ausente em plan_limits"
+        assert row["max_events"]   is None, "max_events business deve ser NULL"
+        assert row["max_invitees"] is None, "max_invitees business deve ser NULL"
+        assert row["max_members"]  is None, "max_members business deve ser NULL"
