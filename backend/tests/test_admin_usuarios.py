@@ -1,6 +1,8 @@
 from tests.conftest import setup_db, qresult, USER_ROW_FULL
 from unittest.mock import MagicMock
 
+_LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
+
 
 def test_add_usuario_sem_email_retorna_erro(admin_client, db):
     resp = admin_client.post('/admin/usuarios/add',
@@ -11,16 +13,17 @@ def test_add_usuario_sem_email_retorna_erro(admin_client, db):
 
 
 def test_add_usuario_com_email_cria_com_sucesso(admin_client, db):
-    conn = MagicMock()
-    conn.execute.return_value = MagicMock()
-    db.connect.return_value.__enter__.return_value = conn
+    conn = setup_db(db,
+                    qresult(fetchone=_LIMITS_NONE),    # get_plan_limits (unlimited)
+                    qresult(fetchone={'n': 0}),          # count_members_for_tenant
+                    qresult(),                           # add_user INSERT
+                    qresult(fetchone={'id': 99}))        # LAST_INSERT_ID
 
     resp = admin_client.post('/admin/usuarios/add',
                              data={'username': 'novo', 'email': 'novo@test.com',
-                                   'whatsapp': ''},
-                             follow_redirects=True)
-    assert resp.status_code == 200
-    assert conn.execute.called
+                                   'whatsapp': ''})
+    assert resp.status_code == 302
+    conn.commit.assert_called()
 
 
 def test_edit_usuario_sem_email_retorna_erro(admin_client, db):

@@ -856,6 +856,15 @@ def add_convidado():
         if event_id is None:
             flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
             return redirect(url_for("respostas"))
+        limits = repo.get_plan_limits(conn, tid)
+        current_count = repo.count_invitees_for_event(conn, tid, event_id)
+        if not repo.within_limit(current_count, limits["max_invitees"]):
+            flash(
+                f"Limite de {limits['max_invitees']} convidados por evento atingido. "
+                "Faça upgrade do plano para adicionar mais.",
+                "danger",
+            )
+            return redirect(url_for("respostas"))
         repo.add_invitee(
             conn, tid, event_id, name, token,
             phone=phone, email=email, observation=msg, media_url=media_filename,
@@ -1104,6 +1113,17 @@ def add_usuario():
         return redirect(url_for("admin_usuarios"))
 
     tid = current_user.tenant_id
+    with engine.connect() as conn:
+        limits = repo.get_plan_limits(conn, tid)
+        current_count = repo.count_members_for_tenant(conn, tid)
+    if not repo.within_limit(current_count, limits["max_members"]):
+        flash(
+            f"Limite de {limits['max_members']} membro(s) atingido. "
+            "Faça upgrade do plano para adicionar mais.",
+            "danger",
+        )
+        return redirect(url_for("admin_usuarios"))
+
     temp_pass = secrets.token_urlsafe(12)
     try:
         with engine.connect() as conn:
