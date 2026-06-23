@@ -72,3 +72,91 @@ def test_send_member_invite_email_chama_smtp(monkeypatch):
 
     assert result is True
     mock_smtp.sendmail.assert_called_once()
+
+
+# ── queue_utils.py: helper de enfileiramento ──────────────────────────────────
+
+def test_enqueue_email_usa_queue_quando_disponivel(monkeypatch):
+    """enqueue_email chama q.enqueue() com func e args corretos."""
+    import queue_utils
+    import tasks
+    from rq import Retry
+
+    mock_queue = MagicMock()
+    monkeypatch.setattr(queue_utils, "_get_queue", lambda: mock_queue)
+
+    queue_utils.enqueue_email(tasks.send_reset_email, "to@t.com", "user", "http://x/r/tok")
+
+    mock_queue.enqueue.assert_called_once()
+    call_args = mock_queue.enqueue.call_args
+    assert call_args[0][0] is tasks.send_reset_email
+    assert call_args[0][1] == "to@t.com"
+    assert call_args[0][2] == "user"
+    assert call_args[0][3] == "http://x/r/tok"
+    retry_arg = call_args[1]["retry"]
+    assert isinstance(retry_arg, Retry)
+    assert retry_arg.max == 3
+    assert retry_arg.intervals == [10, 30, 60]
+    assert "on_failure" in call_args[1]
+
+
+def test_enqueue_email_sem_redis_url_executa_sincronamente(monkeypatch):
+    """REDIS_URL ausente → dev mode → executa sync com warning no log."""
+    import queue_utils
+
+    monkeypatch.setattr(queue_utils, "_get_queue", lambda: None)
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    called_with = []
+
+    def fake_func(a, b):
+        called_with.append((a, b))
+
+    queue_utils.enqueue_email(fake_func, "arg1", "arg2")
+    assert called_with == [("arg1", "arg2")]
+
+
+def test_enqueue_email_redis_url_presente_mas_indisponivel_nao_executa_sync(
+    monkeypatch, caplog
+):
+    """REDIS_URL presente mas Redis down → loga erro, NÃO executa sync.
+
+    Prod com Redis fora do ar não deve degradar para SMTP síncrono no request
+    — exatamente o problema que a 3C resolve.
+    """
+    import queue_utils
+    import logging
+
+    monkeypatch.setattr(queue_utils, "_get_queue", lambda: None)
+    monkeypatch.setenv("REDIS_URL", "redis://redis:6379/0")
+
+    called = []
+
+    def fake_func():
+        called.append(True)
+
+    with caplog.at_level(logging.ERROR, logger="queue_utils"):
+        queue_utils.enqueue_email(fake_func)
+
+    assert not called, "Não deve executar sync quando REDIS_URL está presente"
+    assert any("Redis" in r.message for r in caplog.records)
+
+
+def test_on_email_failure_loga_erro(caplog):
+    """_on_email_failure deve logar um erro com job id e nome da função."""
+    import queue_utils
+    import logging
+
+    mock_job = MagicMock()
+    mock_job.id = "job-abc-123"
+    mock_job.func_name = "tasks.send_reset_email"
+
+    with caplog.at_level(logging.ERROR, logger="queue_utils"):
+        queue_utils._on_email_failure(
+            mock_job, MagicMock(), Exception, ValueError("SMTP timeout"), None
+        )
+
+    assert any(
+        "job-abc-123" in r.message and "definitivamente" in r.message
+        for r in caplog.records
+    )
