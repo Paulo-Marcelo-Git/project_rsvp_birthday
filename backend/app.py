@@ -23,6 +23,8 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
+    session,
     url_for,
 )
 from flask_login import (
@@ -95,7 +97,7 @@ swagger = Swagger(
 )
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
-UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "static/uploads")
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/app/uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -943,6 +945,7 @@ def invite(token):
                 )
             return redirect(url_for("invite", token=token))
 
+        session["invite_token"] = token
         texts = repo.get_event_texts(conn, result["tenant_id"], result["event_id"])
         return render_template(
             "invite.html",
@@ -953,6 +956,41 @@ def invite(token):
             post_yes_text=texts.get("post_yes_text"),
             post_no_text=texts.get("post_no_text"),
         )
+
+
+@app.route("/uploads/<filename>")
+def serve_upload(filename):
+    """
+    Serve arquivo de upload com validação de posse.
+
+    Caminho 1 — usuário autenticado: verifica que o arquivo pertence ao
+    tenant do usuário logado.
+    Caminho 2 — convidado sem login: valida via session['invite_token'] que
+    o token corresponde a um invitee cujo media_url é este filename.
+    Sem query string: o token não aparece em logs de servidor.
+    """
+    safe = secure_filename(filename)
+    if not safe or safe != filename:
+        abort(404)
+
+    if not current_user.is_authenticated and not session.get("invite_token"):
+        abort(404)
+
+    with engine.connect() as conn:
+        if current_user.is_authenticated:
+            owner_tid = repo.get_media_tenant(conn, safe)
+            if owner_tid != current_user.tenant_id:
+                abort(404)
+        else:
+            invite_token = session.get("invite_token")
+            invitee = repo.get_invitee_by_token(conn, invite_token)
+            if not invitee or invitee.get("media_url") != safe:
+                abort(404)
+
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], safe)
+    if not os.path.isfile(filepath):
+        abort(404)
+    return send_file(filepath)
 
 
 @app.route("/admin/respostas")

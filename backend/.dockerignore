@@ -1,0 +1,6 @@
+# Arquivos de dev que não devem ir para a imagem
+static/uploads/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env

@@ -232,7 +232,7 @@
 
     {% if invitee.media_url %}
     {% set lower = invitee.media_url|lower %}
-    {% set media_src = url_for('static', filename='uploads/' ~ invitee.media_url) %}
+    {% set media_src = url_for('serve_upload', filename=invitee.media_url) %}
     <div class="media-box">
       {% if lower.endswith('.mp4') %}
       <video id="inviteVideo" class="media" src="{{ media_src }}" autoplay muted loop playsinline preload="metadata">

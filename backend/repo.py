@@ -553,3 +553,12 @@ def invalidate_verification_tokens(conn, user_id: int) -> None:
         """),
         {"uid": user_id},
     )
+
+
+def get_media_tenant(conn, filename: str) -> int | None:
+    """Retorna tenant_id do invitee que possui filename, ou None se não existir."""
+    row = conn.execute(
+        text("SELECT tenant_id FROM invitees WHERE media_url = :fn LIMIT 1"),
+        {"fn": filename},
+    ).mappings().fetchone()
+    return row["tenant_id"] if row else None
