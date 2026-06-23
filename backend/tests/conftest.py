@@ -20,7 +20,12 @@ with patch('sqlalchemy.create_engine', return_value=_mock_engine):
     import app as _app_module
 
 flask_app = _app_module.app
-flask_app.config.update({'TESTING': True, 'WTF_CSRF_ENABLED': False})
+flask_app.config.update({
+    'TESTING': True,
+    'WTF_CSRF_ENABLED': False,
+})
+# Flask-Limiter 3.x fixa self.enabled no init_app(); setar via config não basta.
+_app_module.limiter.enabled = False
 
 # DbUser pré-construído para admin_client — retornado sem tocar no DB
 _ADMIN_DBUSER = _app_module.DbUser(

@@ -35,6 +35,8 @@ from flask_login import (
     login_user,
     logout_user,
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
 from openpyxl import Workbook
 from sqlalchemy import create_engine, text
@@ -67,6 +69,20 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
 csrf = CSRFProtect(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri=os.getenv("REDIS_URL", "memory://"),
+    default_limits=[],
+)
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    retry = getattr(e, "retry_after", None)
+    return render_template("429.html", retry_after=retry), 429
+
 
 swagger = Swagger(
     app,
@@ -264,6 +280,7 @@ def save_uploaded_file(file):
 
 # Rotas
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def login():
     """
     Login de usuário
@@ -328,6 +345,7 @@ def login():
 
 
 @app.route("/signup", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def signup():
     """Cadastro self-service: cria tenant + admin + evento padrão atomicamente."""
     skip_verification = os.getenv("SKIP_EMAIL_VERIFICATION", "").lower() in (
@@ -471,6 +489,7 @@ def logout():
 
 
 @app.route("/forgot_password", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def forgot_password():
     """
     Solicitar redefinição de senha por email
@@ -589,6 +608,8 @@ def reset_password(token):
 
 
 @app.route("/invite/<token>", methods=["GET", "POST"])
+@limiter.limit("30 per minute", methods=["GET"])
+@limiter.limit("10 per minute", methods=["POST"])
 @csrf.exempt
 def invite(token):
     """
