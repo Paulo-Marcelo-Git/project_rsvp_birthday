@@ -43,7 +43,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Redis 7-alpine + RQ 1.16.2 + redis-py 5.0.7 — fila de email assíncrono (`tasks.py` + `queue_utils.py`)
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
-- pytest (102 testes: unit + repo + isolamento + migration + integração + uploads + queue)
+- pytest (134 testes: unit + repo + isolamento + migration + integração + uploads + queue + superadmin)
 
 ---
 
@@ -60,13 +60,14 @@ project_rsvp_birthday/
 │   │   └── versions/
 │   │       ├── 0001_initial_saas_schema.py
 │   │       ├── 0002_seed_default_tenant.py
-│   │       └── 0003_email_verification_tokens.py
+│   │       ├── 0003_email_verification_tokens.py
+│   │       └── 0004_plan_limits.py
 │   ├── Dockerfile
 │   ├── entrypoint.sh        # Roda `alembic upgrade head` antes do gunicorn (*.sh text eol=lf via .gitattributes)
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 102 testes
+│   └── tests/               # pytest — 134 testes
 ├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
 ├── schema_comemore_saas.sql # DDL de referência (fonte de verdade APLICÁVEL é o Alembic)
 ├── docs/superpowers/plans/  # Histórico de planos por sub-fase
@@ -89,6 +90,7 @@ project_rsvp_birthday/
 - **`invitees`** — FK para `events` + `tenant_id` desnormalizado (isolamento barato sem JOIN). `token` UNIQUE global.
 - **`password_reset_tokens`** — TTL 1h, flag `used`.
 - **`email_verification_tokens`** — TTL 24h, flag `used`. Usuário nasce `is_active=0`, ativa via link.
+- **`plan_limits`** — PK `plan` ENUM(free/pro/business); limites `max_events`, `max_invitees`, `max_members` (NULL = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(NULL).
 
 ---
 
@@ -133,7 +135,9 @@ REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); present
 # Backup
 BACKUP_RETENTION_DAYS=7
 
-# Super-admin do SaaS — email NÃO deve existir como tenant no banco
+# Super-admin do SaaS — acessa /superadmin para gerenciar tenants
+# ⚠ ATENÇÃO: este email NÃO deve existir como conta de tenant no banco.
+# Se o email pertencer a um tenant_admin, o acesso será bloqueado (config inválida).
 # SUPERADMIN_EMAIL=admin@seudominio.com
 ```
 
