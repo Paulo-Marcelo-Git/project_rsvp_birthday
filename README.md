@@ -1,12 +1,14 @@
-# Comemore+ 🎉
-Sistema de RSVP para convites de aniversário — v1.2.9
+# Comemore+
+Sistema de RSVP para convites — SaaS multi-tenant.
 
 Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o envio de convites personalizados com link único e o acompanhamento das respostas dos convidados em tempo real.
 
 ---
 
-## ✨ Funcionalidades
+## Funcionalidades
 
+- Signup self-service: cada cliente cria sua própria conta e tenant
+- Verificação de email obrigatória na criação de conta
 - Convites com link único por convidado
 - Página pública de confirmação (Sim / Não) com campo de observação
 - Upload de mídia personalizada por convidado (imagem ou vídeo)
@@ -16,45 +18,12 @@ Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o
 - Exportação da lista de convidados para Excel (.xlsx)
 - Textos do convite configuráveis pelo painel
 - Gerenciamento de sub-usuários (cada um vê apenas seus próprios convidados)
-- Troca de senha obrigatória para novos usuários
-- **Reset de senha self-service** por username ou email (link enviado por email)
-- Deploy automatizado via GitHub Actions
+- Reset de senha self-service por email (link com TTL de 1h)
+- Backup automático diário com retenção configurável
 
 ---
 
-## 📦 Estrutura do Projeto
-
-```
-project_rsvp_birthday/
-├── backend/
-│   ├── app.py               # Aplicação principal Flask
-│   ├── Dockerfile           # Imagem Python 3.12-slim
-│   ├── init.sql             # Criação das tabelas MySQL
-│   ├── requirements.txt     # Dependências Python
-│   ├── static/
-│   │   ├── admin.css        # Estilo do painel admin
-│   │   └── imagen.jpg       # Imagem da página de convite
-│   └── templates/
-│       ├── base.html
-│       ├── login.html
-│       ├── invite.html
-│       ├── admin_responses.html
-│       ├── admin_users.html
-│       ├── change_password.html
-│       ├── forgot_password.html
-│       └── reset_password.html
-├── .github/
-│   └── workflows/
-│       └── deploy.yml       # CI/CD: push em main → deploy SSH
-├── .env                     # Variáveis de ambiente (não versionado)
-├── .gitignore
-├── VERSION                  # Versão atual da aplicação
-└── docker-compose.yml       # Orquestração dos containers
-```
-
----
-
-## 🚀 Como Executar
+## Como Executar
 
 ### 1. Pré-requisitos
 
@@ -62,110 +31,154 @@ project_rsvp_birthday/
 
 ### 2. Configurar variáveis de ambiente
 
-Crie um arquivo `.env` na raiz:
+Copie `.env.example` para `.env` e preencha os valores:
 
 ```env
+# Banco
 DB_NAME=rsvp_db
 DB_USER=root
-DB_PASSWORD=sua_senha_mysql
+DB_PASSWORD=senha_mysql
 DB_HOST=db
 
-ADMIN_USER=admin
-ADMIN_PASS=hash_bcrypt_da_senha
+# Flask
+SECRET_KEY=chave_flask_aleatoria
 
-SECRET_KEY=chave_secreta_flask_aleatoria
-
-# Opcionais
-TZ_OFFSET_HOURS=-3
-LOG_FILE=logs/app.log
-UPLOAD_FOLDER=static/uploads
-DEFAULT_PASSWORD=102030@
-
-# Email SMTP — necessário para reset de senha self-service
+# Email SMTP — obrigatório em produção (signup falha com erro claro sem isso)
 EMAIL_SMTP=smtp.gmail.com
 EMAIL_PORTA=587
 EMAIL_USER=seu_email@gmail.com
 EMAIL_PASS=app_password_gmail
 
-# URL base usada nos links de email
+# URL base nos links de email (sem barra no final)
 APP_BASE_URL=https://seudominio.com.br
+
+# Dev only — jamais em produção
+# SKIP_EMAIL_VERIFICATION=1
+
+# Backup (opcional — default já aplicado no container)
+BACKUP_RETENTION_DAYS=7
 ```
 
-> `ADMIN_PASS` deve ser o hash gerado com `generate_password_hash()` do Werkzeug — nunca a senha em texto puro.
-
-> `EMAIL_PASS` deve ser um **App Password** do Google. Gere em: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
-
-> `APP_BASE_URL` sem barra no final.
+> `EMAIL_PASS` deve ser um **App Password** do Google: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
 
 ### 3. Subir os containers
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-- Painel admin: [http://localhost:3000/login](http://localhost:3000/login)
+- Painel: [http://localhost:3000/login](http://localhost:3000/login)
+- Criar conta: [http://localhost:3000/signup](http://localhost:3000/signup)
 - Convites: `http://localhost:3000/invite/<token>`
 
 ---
 
-## 🛠️ Acesso
+## Níveis de Acesso
 
-| Tipo | Usuário | Senha |
-|------|---------|-------|
-| Super admin | valor de `ADMIN_USER` no `.env` | valor de `ADMIN_PASS` (hash) |
-| Sub-usuário | criado no painel `/admin/usuarios` | `102030@` (padrão, troca obrigatória no primeiro login) |
+| Role | O que pode fazer |
+|------|-----------------|
+| `tenant_admin` | Acesso total ao tenant: vê todos os convidados, gerencia membros, edita textos |
+| `member` | Vê e gerencia apenas os convidados dos seus próprios eventos |
 
----
-
-## 👥 Níveis de Acesso
-
-- **Super admin** — acesso total: vê todos os convidados, gerencia sub-usuários, edita textos
-- **Sub-usuário** — vê e gerencia apenas os convidados que ele mesmo cadastrou
+O primeiro `tenant_admin` é criado pelo signup self-service (`/signup`).
+Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de convite com link para definir a senha (ou senha temporária em dev sem SMTP).
 
 ---
 
-## 🗂️ Rotas
+## Rotas
 
 | Rota | Acesso | Descrição |
 |------|--------|-----------|
+| `/signup` | Público | Criar conta (tenant + tenant_admin + evento padrão) |
 | `/login` | Público | Login |
-| `/forgot_password` | Público | Solicitar reset de senha (username ou email) |
-| `/reset_password/<token>` | Público | Redefinir senha via link enviado por email |
+| `/forgot_password` | Público | Solicitar reset de senha |
+| `/reset_password/<token>` | Público | Redefinir senha via link de email |
+| `/resend-verification` | Público | Reenviar link de verificação de email |
 | `/invite/<token>` | Público | Página de confirmação do convidado |
 | `/admin/respostas` | Login | Lista de respostas com paginação e busca |
 | `/admin/exportar_xlsx` | Login | Download da lista em Excel |
 | `/admin/convidados/add` | Login | Adicionar convidado |
-| `/admin/textos` | Super admin | Editar textos do convite |
-| `/admin/usuarios` | Super admin | Gerenciar sub-usuários |
-| `/change_password` | Login (DbUser) | Troca de senha obrigatória |
+| `/admin/textos` | tenant_admin | Editar textos do convite |
+| `/admin/usuarios` | tenant_admin | Gerenciar membros do tenant |
+| `/change_password` | Login (member) | Troca de senha obrigatória |
 
 ---
 
-## 🗃️ Banco de Dados
+## Banco de Dados
 
-As migrações são gerenciadas pelo **Alembic**. Para aplicar o schema num banco vazio:
+As migrações são gerenciadas pelo **Alembic** e rodam automaticamente no boot do container.
+
+Para aplicar manualmente:
 
 ```bash
-# Aplica todas as migrations (banco vazio → schema SaaS multi-tenant)
 docker compose exec backend alembic upgrade head
-
-# Reverte tudo (apenas para dev/teste)
-docker compose exec backend alembic downgrade base
 ```
 
-Schema SaaS multi-tenant (fonte de verdade: `schema_comemore_saas.sql`):
+Schema SaaS multi-tenant:
 
 | Tabela | Descrição |
 |--------|-----------|
-| `tenants` | Conta do cliente SaaS. Raiz da árvore de FK (apagar cascateia tudo). |
+| `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). |
 | `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`). Email UNIQUE global. |
-| `events` | Núcleo do produto — N eventos por tenant, com textos do convite por evento. |
+| `events` | N eventos por tenant, com textos do convite por evento. |
 | `invitees` | Convidados com `tenant_id` desnormalizado e `token` UNIQUE global. |
 | `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used`. |
+| `email_verification_tokens` | Tokens de verificação de email com TTL de 24h e flag `used`. |
 
-> **Nota:** `invitees` tem dois caminhos de FK cascade até `tenants` (direto e via `events`). MySQL/InnoDB aceita; SQL Server bloquearia com *multiple cascade paths*.
+---
 
-### Testes de integração
+## Backup
+
+O container `backup` roda `mysqldump` automaticamente todo dia às **02:00 BRT / 05:00 UTC** e salva o dump comprimido em volume Docker nomeado (`backup_data`).
+
+### Verificar se o backup rodou
+
+```bash
+docker logs rsvp_backup --tail 20
+```
+
+Saída esperada:
+```
+[2026-06-24 05:00:05] Iniciando backup de rsvp_db...
+[2026-06-24 05:00:06] Backup salvo: comemore_20260624_050005.sql.gz (48K)
+[2026-06-24 05:00:06] Retenção: 0 arquivo(s) removido(s) (>7 dias)
+```
+
+### Listar backups disponíveis
+
+```bash
+docker exec rsvp_backup ls -lh /backups/
+```
+
+### Executar backup manualmente
+
+```bash
+docker exec rsvp_backup /backup.sh
+```
+
+### Restore manual
+
+> **Atenção:** o restore cria um banco separado (`rsvp_restore_test` por padrão) e **não toca no banco de produção**.
+
+```bash
+# Restaura o arquivo mais recente (substitua pelo nome real)
+docker exec rsvp_backup sh /restore.sh /backups/comemore_YYYYMMDD_HHMMSS.sql.gz rsvp_restore_test
+```
+
+O script:
+1. Cria o banco `rsvp_restore_test` (se não existir)
+2. Descomprime e restaura o dump
+3. Imprime `SHOW TABLES` para confirmar
+
+Para verificar as migrations no banco restaurado:
+
+```bash
+docker exec rsvp_backend env DB_NAME=rsvp_restore_test python -m alembic upgrade head
+```
+
+---
+
+## Testes de integração
 
 ```bash
 # Valida schema, índices de tenant_id e FKs num banco rsvp_test dedicado
@@ -174,7 +187,7 @@ docker compose --profile test run --rm backend-test
 
 ---
 
-## 🔄 CI/CD
+## CI/CD
 
 Push na branch `main` dispara deploy automático via GitHub Actions:
 
@@ -183,10 +196,10 @@ Push na branch `main` dispara deploy automático via GitHub Actions:
 3. `docker compose up -d --build --remove-orphans`
 4. Remove imagens antigas
 
-Secrets necessários no repositório: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`, `VPS_PATH`.
+Secrets necessários: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`, `VPS_PATH`.
 
 ---
 
-## 📄 Licença
+## Licença
 
 Este projeto é open-source e pode ser utilizado livremente para fins pessoais ou educativos.
