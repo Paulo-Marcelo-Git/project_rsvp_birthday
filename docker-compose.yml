@@ -62,6 +62,8 @@ services:
       - .env
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Bug no rq 1.16.2: --serializer declarado duas vezes no Click (cli.py + helpers.py)
+      PYTHONWARNINGS: "ignore::UserWarning:click.core"
     command: rq worker default
     depends_on:
       db:
