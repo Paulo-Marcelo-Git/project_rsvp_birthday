@@ -34,6 +34,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - uploads_data:/app/uploads
       - ./logs:/app/logs
       - ./VERSION:/VERSION:ro
     working_dir: /app
@@ -58,6 +59,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - uploads_data:/app/uploads
       - ./VERSION:/VERSION:ro
     working_dir: /app
     command: >
@@ -92,3 +94,4 @@ networks:
 volumes:
   db_data:
   backup_data:
+  uploads_data:
