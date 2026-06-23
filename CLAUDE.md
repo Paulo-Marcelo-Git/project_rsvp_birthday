@@ -2,39 +2,47 @@
 
 Sistema de RSVP para convites. Flask + MySQL + Docker.
 
-**Objetivo:** evoluir de **single-tenant** (um aniversário, hoje) para **SaaS multi-tenant**, onde N clientes se cadastram sozinhos, criam vários eventos/convites e enviam links personalizados aos convidados.
+**Objetivo:** SaaS multi-tenant onde N clientes se cadastram sozinhos, criam eventos/convites personalizados e enviam links para convidados.
 
 ---
 
-## ⚠️ Estado atual vs. Alvo — LEIA ANTES DE EDITAR
+## Estado atual
 
-O `app.py` ainda é **single-tenant** (Fase 1 concluída; Fase 2 adapta a lógica).
+| Fase | Status | O que entregou |
+|------|--------|----------------|
+| Fase 1 | ✅ Concluída | Alembic + schema multi-tenant (migrations 0001–0003) |
+| Fase 2A | ✅ Concluída | `repo.py` com `tenant_id` obrigatório, isolamento provado em MySQL real (8 testes), boot via Alembic |
+| Fase 2B | ✅ Concluída | Login email-only, regime único, sem fallback de username |
+| Fase 2C | ✅ Concluída | Signup self-service, verificação de email, transação atômica, reenvio de token |
+| Fase 2D | ✅ Concluída | `AdminUser`/`ADMIN_EMAIL`/`DEFAULT_PASSWORD`/`super_admin_required` removidos. Grep limpo. 82/82 verdes |
+| Fase 3A | ✅ Concluída | `mysqldump` diário via cron, volume `backup_data`, `restore.sh` documentado no README |
+| Fase 3B | ✅ Concluída | Volume `uploads_data` em `/app/uploads`, rota `/uploads/<filename>` com isolamento de tenant, session-token para convidados (sem query string) |
+| Fase 3C | ✅ Concluída | `tasks.py` + `queue_utils.py`, RQ em 6 call sites, `redis` + `worker` no Compose, fallback síncrono só quando `REDIS_URL` ausente |
+| Fase 3D | ✅ Concluída | Guia Brevo × Resend, SPF/DKIM/DMARC, valores exatos no `.env.example` |
+| **Fase 4** | 🔜 Próxima | Enforcement de limites por plano + painel super-admin do SaaS |
 
-| Tema | Hoje (no código) | Alvo (SaaS) |
-|------|------------------|-------------|
-| Conta de cliente | Não existe | Tabela `tenants` — **schema criado (Fase 1 ✅)** |
-| Textos do convite | Tabela **global** `settings` | Por evento, dentro de `events` — **schema criado (Fase 1 ✅)** |
-| Evento/convite | Não existe entidade própria | Tabela `events` — **schema criado (Fase 1 ✅)** |
-| Convidado | `invitees` com FK direta p/ `users` | `invitees` com FK p/ `events` + `tenant_id` — **schema criado (Fase 1 ✅)** |
-| Admin | `AdminUser` via env var + `DbUser` (sub-usuários) | Signup self-service cria `tenant` + `tenant_admin` — Fase 2 |
-| Senha nova | `DEFAULT_PASSWORD=102030@` hardcoded | Convite por email + link de definição — Fase 2 |
-| Migrações | `init_db()` manual (`_col_exists`/`_index_exists`) | **Alembic — operacional (Fase 1 ✅)** |
+---
+
+## ⚠️ Regras inegociáveis — leia antes de editar
+
+1. **TODA query filtra `tenant_id`.** É o ponto onde vaza dado entre clientes. Centralize no `repo.py` — nenhuma rota monta SQL de `events`/`invitees`/`users` direto.
+2. **Schema só via Alembic.** Nunca altere tabelas na mão. Toda mudança de schema = nova migration versionada.
+3. **Nada com custo fixo.** Só free tier / open source. Não introduza dependência paga.
+4. **Plano antes de código.** Apresente plano faseado, pare para aprovação, implemente sub-fase por sub-fase.
+5. **App funcional a cada commit.** Nenhum commit deixa o sistema sem forma de login ou com rota quebrada.
 
 ---
 
 ## Stack
 
-**Atual:** Python 3.12, Flask 3.0, SQLAlchemy 2.0 (SQL via `text()`), Gunicorn (gthread), MySQL 8 (QueuePool), Flask-Login + Flask-WTF (CSRF), Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH.
-
-**Adições planejadas (todas grátis / open source — sem custo fixo):**
-- **Alembic** — migrações versionadas (substitui `init_db()` manual).
-- **Redis + RQ** — fila para envio de email/convites em massa (hoje é síncrono no request → trava o worker).
-- **Flask-Limiter** — rate limit em login, signup, reset e `/invite/<token>`.
-- **Email transacional:** Brevo (300/dia grátis) ou Resend (3.000/mês grátis), com domínio próprio + SPF/DKIM. Sair do Gmail App Password.
-- **Uploads:** mover de `static/uploads` (disco) para **volume Docker nomeado**; depois Cloudflare R2 (free tier).
-- **Sentry** (free tier) + `mysqldump` por cron (backup).
-
-> **Billing fica adiado.** Lançamento em beta grátis. Stripe/Mercado Pago entram quando for cobrar — não têm custo fixo, só % por venda.
+**Atual:**
+- Python 3.12, Flask 3.0, SQLAlchemy 2.0 (`text()` com parâmetros nomeados — sem concatenação), Gunicorn (gthread)
+- MySQL 8 (QueuePool), Alembic 1.13.3
+- Flask-Login + Flask-WTF (CSRF)
+- Redis 7-alpine + RQ 1.16.2 + redis-py 5.0.7 — fila de email assíncrono (`tasks.py` + `queue_utils.py`)
+- Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
+- Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
+- pytest (102 testes: unit + repo + isolamento + migration + integração + uploads + queue)
 
 ---
 
@@ -43,102 +51,108 @@ O `app.py` ainda é **single-tenant** (Fase 1 concluída; Fase 2 adapta a lógic
 ```
 project_rsvp_birthday/
 ├── backend/
-│   ├── app.py                    # Toda a app Flask (rotas, modelos, auth) — monolito
-│   ├── alembic.ini               # Config do Alembic (URL vem de env vars)
-│   ├── alembic/
-│   │   ├── env.py                # Lê DB_* do ambiente; suporta TEST_DB_* p/ testes
+│   ├── app.py               # Rotas Flask — usa repo.py para todo acesso a dados
+│   ├── repo.py              # TODA query com tenant_id obrigatório
+│   ├── tasks.py             # Funções de email (send_*) — sem Flask/SQLAlchemy, pickle-safe para RQ
+│   ├── queue_utils.py       # enqueue_email(): fallback síncrono se REDIS_URL ausente
+│   ├── alembic/             # Migrations versionadas (fonte de verdade do schema)
 │   │   └── versions/
-│   │       └── 0001_initial_saas_schema.py  # Migration inicial multi-tenant ✅
+│   │       ├── 0001_initial_saas_schema.py
+│   │       ├── 0002_seed_default_tenant.py
+│   │       └── 0003_email_verification_tokens.py
 │   ├── Dockerfile
-│   ├── init.sql                  # Schema single-tenant legado (ainda usado em dev)
-│   ├── requirements.txt          # Inclui alembic==1.13.3
+│   ├── entrypoint.sh        # Roda `alembic upgrade head` antes do gunicorn (*.sh text eol=lf via .gitattributes)
+│   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   ├── tests/
-│   │   └── test_migration.py     # Testes de integração (pytest -m integration)
-│   └── logs/
-├── docs/
-├── schema_comemore_saas.sql      # DDL-alvo (fonte de verdade do schema SaaS)
+│   └── tests/               # pytest — 102 testes
+├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
+├── schema_comemore_saas.sql # DDL de referência (fonte de verdade APLICÁVEL é o Alembic)
+├── docs/superpowers/plans/  # Histórico de planos por sub-fase
 ├── .github/workflows/deploy.yml
-├── .superpowers/
-├── docker-compose.yml            # inclui service backend-test (profile=test)
-├── pytest.ini                    # Raiz: addopts exclui integration por default
-├── backend/pytest.ini            # Registra marker integration no container
-├── requirements-dev.txt
-├── VERSION                       # Lido em runtime como APP_VERSION
+├── .gitattributes           # *.sh text eol=lf — LF forçado em scripts de boot
+├── docker-compose.yml       # Serviços: db, redis, backend, worker, backup, backend-test
+├── pytest.ini
+├── VERSION
 ├── .env.example
-└── .env                          # Nunca versionado
+└── .env                     # Nunca versionado
 ```
 
 ---
 
-## Schema-alvo (multi-tenant)
+## Schema (fonte de verdade: Alembic)
 
-Fonte de verdade do DDL: **`schema_comemore_saas.sql`** (raiz do projeto). Tabelas:
-
-- **`tenants`** — conta do cliente. Raiz da árvore: apagar tenant cascateia e remove tudo dele (LGPD).
-- **`users`** — agora com `tenant_id` e `role` (`tenant_admin`/`member`). `email` UNIQUE **global** (login resolve o tenant); `username` UNIQUE **por tenant**.
-- **`events`** — **núcleo do produto**. Cada cliente cria N eventos. Os textos que estavam em `settings` migram para cá. `slug` público não-sequencial.
-- **`invitees`** — FK para `events`. Carrega **`tenant_id` desnormalizado** de propósito (isolamento barato sem JOIN). `token` UNIQUE global (vai na URL pública).
-- **`password_reset_tokens`** — inalterado; `user_id` já carrega o tenant.
-
-**IDs:** PKs `BIGINT AUTO_INCREMENT` (rápidas p/ FK). `slug`/`token` públicos são aleatórios via `secrets.token_urlsafe()` — nada de URL enumerável.
-
-> **Nota p/ quem vem do SQL Server:** `invitees` tem dois caminhos de cascade até `tenants` (direto e via `events`). No SQL Server isso dá erro (*multiple cascade paths*); no **MySQL/InnoDB é permitido e correto** — não "conserte".
+- **`tenants`** — conta do cliente. Raiz da árvore (apagar cascateia tudo = LGPD).
+- **`users`** — `tenant_id` + `role` (`tenant_admin`/`member`). `email` UNIQUE global; `username` UNIQUE por tenant.
+- **`events`** — núcleo do produto. N eventos por tenant. Textos do convite por evento. `slug` aleatório.
+- **`invitees`** — FK para `events` + `tenant_id` desnormalizado (isolamento barato sem JOIN). `token` UNIQUE global.
+- **`password_reset_tokens`** — TTL 1h, flag `used`.
+- **`email_verification_tokens`** — TTL 24h, flag `used`. Usuário nasce `is_active=0`, ativa via link.
 
 ---
 
-## 🔒 Regra de ouro — isolamento por tenant
+## Auth
 
-**TODA query filtra por `tenant_id`. Sem exceção.** É o ponto onde vaza dado de um cliente para outro — o pior bug possível num SaaS. Centralize isso (helper/escopo de sessão) e cubra com teste que prove que tenant A nunca enxerga dado de B.
-
----
-
-## Auth e Níveis (alvo)
-
-- Signup público cria `tenant` + primeiro usuário `tenant_admin` (sai `ADMIN_USER`/`ADMIN_PASS` por env).
-- `role`: `tenant_admin` (gerencia o tenant, vê tudo do tenant) e `member` (vê só os eventos que criou — `events.owner_user_id`).
-- Novos membros: convite por email + link de senha (sem senha padrão hardcoded).
-- Mantém: bcrypt (Werkzeug), CSRF (Flask-WTF), `must_change_password`.
-- Login é **exclusivamente por email** (UNIQUE global) — username não autentica.
-- `AdminUser` e as vars `ADMIN_USER`/`ADMIN_PASS`/`ADMIN_EMAIL`/`DEFAULT_PASSWORD` foram removidos na Fase 2D. O primeiro `tenant_admin` vem do signup self-service (2C).
-- **Pré-condição de remoção do bloco AdminUser (2D-3):** antes de aplicar em produção, verificar que existe ao menos um `DbUser` com `role='tenant_admin' AND is_active=1` no banco: `SELECT COUNT(*) FROM users WHERE role='tenant_admin' AND is_active=1`. Se o resultado for 0, o sistema ficaria sem forma de login — não aplicar.
+- Login por **email-only** (UNIQUE global resolve o tenant). Sem fallback de username.
+- Roles: `tenant_admin` (gerencia o tenant) e `member` (vê só os eventos que criou).
+- Signup cria `tenant` + `tenant_admin` + evento default numa **transação atômica** (rollback total se falhar).
+- Novos membros: senha temporária aleatória (`secrets.token_urlsafe(12)`) + email de convite (TTL 72h).
+- `SKIP_EMAIL_VERIFICATION=true` (dev only, default OFF) — ausência da var = verificação obrigatória.
+- Sem `AdminUser` por env var, sem `DEFAULT_PASSWORD` hardcoded.
 
 ---
 
-## Roadmap faseado
+## Variáveis de ambiente (.env)
 
-1. **✅ Fase 1 — Fundação de schema (concluída):** Alembic 1.13.3 instalado; migration `0001` cria `tenants`, `users` (com `tenant_id`+`role`), `events`, `invitees` (com `tenant_id` desnormalizado e dois caminhos de FK cascade), `password_reset_tokens`. Testes de integração (9) validam schema, índices de isolamento e FKs. `app.py` intacto.
-2. **✅ Fase 2A–2D — App multi-tenant (concluída):**
-   - 2A: login email-only (sem username).
-   - 2B: normalização de email p/ lowercase em forgot_password.
-   - 2C: signup self-service com verificação de email (atômico: tenant + user + evento).
-   - 2D: remoção de `AdminUser`/env-var auth, renomeação `super_admin_required→tenant_admin_required`, remoção de `DEFAULT_PASSWORD` hardcoded; novos membros recebem senha temporária aleatória + email (ou flash em dev).
-   - **Pró:** `init_db()` e `init.sql` ainda presentes — remoção fica para 2E junto com startup Alembic.
-3. **🔜 Fase 2E — Startup Alembic + limpeza de legacy:**
-   - Remover `init_db()`, `_col_exists()`, `_index_exists()` e `init.sql` do compose.
-   - Startup do container roda `alembic upgrade head` antes do gunicorn.
-   - Reescrever queries que ainda não filtram `tenant_id`.
-   - Testes de isolamento: prova que tenant A nunca vê dados de tenant B.
-3. **Fase 3 — Escala:** email transacional (Brevo/Resend) + fila (Redis/RQ) + uploads em volume nomeado.
-4. **Fase 4 — Produto:** enforcement de limites por plano + painel super-admin do SaaS (dono).
-5. **Fase 5 — Conformidade:** LGPD (termos, exclusão real, rate limiting) + Sentry + backup automático testado.
+```env
+# Banco
+DB_NAME=rsvp_db
+DB_USER=root
+DB_PASSWORD=senha_mysql
+DB_HOST=db
 
----
+# Flask
+SECRET_KEY=chave_flask_aleatoria
 
-## Restrições do projeto
+# Email SMTP — use Brevo (300/dia grátis) ou Resend (3000/mês grátis); ver README
+EMAIL_SMTP=smtp-relay.brevo.com
+EMAIL_PORTA=587
+EMAIL_USER=seu-login@brevo.com
+EMAIL_PASS=xSMTP-KEY-BREVO
 
-- **Nada com custo fixo agora.** Só free tier / open source.
-- Manter **Docker Compose**. Toda mudança de schema via **Alembic** (nunca alterar schema na mão com cliente em produção).
-- Não quebrar o que já roda sem avisar e propor plano antes.
+# URL base nos links de email
+APP_BASE_URL=https://seudominio.com.br
+
+# Dev only — jamais em produção
+SKIP_EMAIL_VERIFICATION=          # true ativa bypass (default OFF = verificação obrigatória)
+
+# Fila de email assíncrono (RQ)
+REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); presente → só via fila
+
+# Backup
+BACKUP_RETENTION_DAYS=7
+```
 
 ---
 
 ## Convenções
 
-- SQL via `text()` do SQLAlchemy com parâmetros nomeados — sem concatenação (mantém).
-- **Todo acesso a dados filtra `tenant_id`.**
-- Uploads: UUID (`uuid4().hex`) + `secure_filename`; extensões `jpg/jpeg/png/mp4` (máx 50MB). Mover p/ volume nomeado → object storage.
+- SQL via `text()` com parâmetros nomeados — sem concatenação.
+- **Todo acesso a `events`/`invitees`/`users` passa pelo `repo.py` com `tenant_id` obrigatório.**
+- Uploads: UUID (`uuid4().hex`) + `secure_filename`; extensões `jpg/jpeg/png/mp4` (máx 50MB).
 - `slug`/`token` públicos via `secrets.token_urlsafe()`; PKs internas sequenciais.
 - Charset `utf8mb4` (acentos PT-BR e emojis).
-- Versão lida de `VERSION` e injetada nos templates via `context_processor`.
+- Versão lida de `VERSION` e injetada via `context_processor`.
+- `*.sh text eol=lf` no `.gitattributes` — LF forçado, CRLF quebra container Linux.
+
+---
+
+## Roadmap
+
+| Fase | Escopo | Status |
+|------|--------|--------|
+| 1 | Alembic + schema multi-tenant | ✅ |
+| 2A–2D | App multi-tenant: isolamento, login, signup, limpeza de legado | ✅ |
+| 3A–3D | Backup + uploads em volume + fila Redis/RQ + guia email transacional | ✅ |
+| **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | 🔜 |
+| 5 | LGPD (termos, exclusão real, rate limiting) + Sentry + monitoramento | ⏳ |
