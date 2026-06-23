@@ -503,9 +503,9 @@ def create_tenant_admin_user(
 def create_email_verification_token(conn, user_id: int, *, ttl_hours: int = 24) -> str:
     """Gera e persiste token de verificação de email. Retorna o token string."""
     import secrets as _sec
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     token = _sec.token_urlsafe(32)
-    expires = datetime.utcnow() + timedelta(hours=ttl_hours)
+    expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=ttl_hours)
     conn.execute(
         text("""
             INSERT INTO email_verification_tokens (user_id, token, expires_at)

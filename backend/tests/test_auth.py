@@ -76,3 +76,26 @@ def test_login_por_username_falha_limpo(client, db):
 
     assert resp.status_code == 200
     assert 'inválidos' in resp.data.decode()
+
+
+def test_login_usuario_nao_verificado_exibe_mensagem_especifica(client, db):
+    """Usuário com is_active=0 vê mensagem 'Confirme seu email', não a genérica de senha inválida."""
+    user_row = {
+        'id': 99, 'username': 'noverified',
+        'email': 'noverified@test.com',
+        'password_hash': generate_password_hash('senha123'),
+        'must_change_password': False,
+        'tenant_id': 1, 'role': 'member',
+        'is_active': 0,
+    }
+    setup_db(db, qresult(fetchone=user_row))
+
+    resp = client.post('/login', data={
+        'email': 'noverified@test.com',
+        'password': 'senha123',
+    }, follow_redirects=True)
+
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'Confirme seu email' in body
+    assert 'inválidos' not in body
