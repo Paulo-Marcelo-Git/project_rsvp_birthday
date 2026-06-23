@@ -514,6 +514,14 @@ def login():
         else:
             with engine.connect() as conn:
                 row = repo.get_user_by_email_global(conn, email)
+                if row and not row.get("is_active"):
+                    logger.warning(f"Login bloqueado (email não verificado): '{email}'.")
+                    flash(
+                        "Confirme seu email antes de fazer login. "
+                        "Verifique sua caixa de entrada ou solicite novo link.",
+                        "warning",
+                    )
+                    return render_template("login.html")
                 if row and row.get("is_active"):
                     candidate = DbUser(
                         row["id"], row["username"], row["password_hash"],
@@ -624,6 +632,46 @@ def signup():
         return render_template("verify_email_sent.html", email=email)
 
     return render_template("signup.html")
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    """Ativa conta via token de verificação de email."""
+    with engine.connect() as conn:
+        row = repo.get_valid_verification_token(conn, token)
+        if not row:
+            flash(
+                "Link de verificação inválido ou expirado. Solicite um novo.",
+                "danger",
+            )
+            return redirect(url_for("resend_verification"))
+        repo.use_verification_token(conn, row["id"], row["user_id"])
+        conn.commit()
+
+    flash("Email confirmado! Faça login.", "success")
+    return redirect(url_for("login"))
+
+
+@app.route("/resend-verification", methods=["GET", "POST"])
+def resend_verification():
+    """Reenvia link de verificação de email para conta pendente."""
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        with engine.connect() as conn:
+            row = repo.get_user_by_email_global(conn, email)
+            if row and not row.get("is_active"):
+                repo.invalidate_verification_tokens(conn, row["id"])
+                token = repo.create_email_verification_token(conn, row["id"])
+                conn.commit()
+                base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+                send_verification_email(email, f"{base_url}/verify-email/{token}")
+        flash(
+            "Se o email estiver cadastrado e pendente de verificação, "
+            "você receberá um novo link em breve.",
+            "info",
+        )
+        return redirect(url_for("login"))
+    return render_template("resend_verification.html")
 
 
 @app.route("/logout")
