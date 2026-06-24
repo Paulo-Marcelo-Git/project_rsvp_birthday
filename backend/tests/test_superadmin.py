@@ -29,12 +29,6 @@ def test_superadmin_tenant_admin_normal_retorna_403(admin_client, monkeypatch):
     assert resp.status_code == 403
 
 
-def test_superadmin_config_invalida_retorna_403(misconfig_client):
-    """Se SUPERADMIN_EMAIL == email de tenant_admin → config inválida → 403."""
-    resp = misconfig_client.get('/superadmin')
-    assert resp.status_code == 403
-
-
 # ── acesso permitido ──────────────────────────────────────────────────────────
 
 def test_superadmin_get_exibe_lista_tenants(superadmin_client, db):

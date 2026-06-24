@@ -225,12 +225,6 @@ def superadmin_required(f):
         superadmin_email = os.getenv("SUPERADMIN_EMAIL", "")
         if not superadmin_email:
             abort(403)
-        if current_user.role == "tenant_admin" and current_user.email == superadmin_email:
-            logger.warning(
-                f"SUPERADMIN_EMAIL '{superadmin_email}' pertence a um tenant_admin "
-                "— configuração inválida. Acesse /superadmin com uma conta sem tenant."
-            )
-            abort(403)
         if current_user.email != superadmin_email:
             abort(403)
         return f(*args, **kwargs)

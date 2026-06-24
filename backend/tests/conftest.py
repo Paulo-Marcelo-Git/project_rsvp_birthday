@@ -39,11 +39,6 @@ _SUPERADMIN_DBUSER = _app_module.DbUser(
     email=SUPERADMIN_EMAIL,
 )
 
-_MISCONFIG_DBUSER = _app_module.DbUser(
-    998, 'misconfigadmin', generate_password_hash('Superpass@1'), False, 1, 'tenant_admin',
-    email=SUPERADMIN_EMAIL,
-)
-
 
 @_app_module.login_manager.user_loader
 def _test_user_loader(user_id):
@@ -52,8 +47,6 @@ def _test_user_loader(user_id):
         return _ADMIN_DBUSER
     if user_id == 'user_999':
         return _SUPERADMIN_DBUSER
-    if user_id == 'user_998':
-        return _MISCONFIG_DBUSER
     if user_id and user_id.startswith('user_'):
         try:
             db_id = int(user_id[5:])
@@ -114,15 +107,6 @@ def superadmin_client(client, monkeypatch):
         sess['_fresh'] = True
     return client
 
-
-@pytest.fixture
-def misconfig_client(client, monkeypatch):
-    """Client onde SUPERADMIN_EMAIL coincide com um tenant_admin (config inválida)."""
-    monkeypatch.setenv('SUPERADMIN_EMAIL', SUPERADMIN_EMAIL)
-    with client.session_transaction() as sess:
-        sess['_user_id'] = 'user_998'
-        sess['_fresh'] = True
-    return client
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
