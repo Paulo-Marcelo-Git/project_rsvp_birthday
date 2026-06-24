@@ -3,12 +3,8 @@
 import logging
 import os
 import secrets
-import smtplib
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from functools import wraps
 from io import BytesIO
 from urllib.parse import quote_plus

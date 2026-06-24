@@ -71,7 +71,6 @@ project_rsvp_birthday/
 │   ├── templates/
 │   └── tests/               # pytest — 148 unit tests + integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
-├── schema_comemore_saas.sql # DDL de referência (fonte de verdade APLICÁVEL é o Alembic)
 ├── docs/superpowers/plans/  # Histórico de planos por sub-fase
 ├── .github/workflows/deploy.yml
 ├── .gitattributes           # *.sh text eol=lf — LF forçado em scripts de boot

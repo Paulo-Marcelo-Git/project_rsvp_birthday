@@ -2,9 +2,8 @@
 # Entrypoint do container backend.
 # Aguarda MySQL, aplica migrations Alembic e inicia gunicorn.
 #
-# IMPORTANTE (dev/staging): se você ainda tem o schema antigo (init.sql) no
-# volume Docker, faça `docker compose down -v` ANTES de `docker compose up`.
-# Senão as tabelas antigas coexistem com as do Alembic e o boot pode falhar.
+# IMPORTANTE (dev/staging): se você tinha schema legado pré-Alembic no volume
+# Docker, faça `docker compose down -v` ANTES de `docker compose up`.
 set -e
 
 echo "[entrypoint] Aguardando MySQL..."
