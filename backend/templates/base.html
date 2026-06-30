@@ -22,7 +22,7 @@
   <!-- CSS do admin -->
   <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
 </head>
-<body>
+<body class="{{ 'theme-' + event_theme if event_theme is defined and event_theme != 'default' else '' }}">
 
   <!-- Flash messages -->
   <div class="container pt-3">

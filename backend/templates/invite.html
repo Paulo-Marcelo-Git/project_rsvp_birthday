@@ -25,6 +25,17 @@
       --danger-hover: #c62828;
     }
 
+    body.theme-boy {
+      --bg-main: #e3f2fd;
+      --bg-soft: #bbdefb;
+      background: linear-gradient(to right, #e3f2fd, #bbdefb);
+    }
+    body.theme-girl {
+      --bg-main: #fce4ec;
+      --bg-soft: #f8bbd0;
+      background: linear-gradient(to right, #fce4ec, #f8bbd0);
+    }
+
     html,
     body {
       height: 100%;
@@ -227,7 +238,7 @@
   </style>
 </head>
 
-<body>
+<body class="{{ 'theme-' + event_theme if event_theme is defined and event_theme != 'default' else '' }}">
   <div class="invite-container">
 
     {% if invitee.media_url %}

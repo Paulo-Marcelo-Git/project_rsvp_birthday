@@ -33,6 +33,29 @@
         </a>
       </div>
     </div>
+    {% if is_tenant_admin and event_id %}
+    <form action="{{ url_for('set_tema') }}" method="post" class="d-inline theme-btn-group">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="event_id" value="{{ event_id }}">
+      <button name="theme" value="girl"
+              class="btn btn-sm {% if event_theme == 'girl' %}active-theme{% endif %}"
+              style="background:#fce4ec;color:#880e4f;border-color:#f48fb1;"
+              title="Tema Menina">
+        🎀 Menina
+      </button>
+      <button name="theme" value="boy"
+              class="btn btn-sm {% if event_theme == 'boy' %}active-theme{% endif %}"
+              style="background:#e3f2fd;color:#0d47a1;border-color:#90caf9;"
+              title="Tema Menino">
+        💙 Menino
+      </button>
+      {% if event_theme != 'default' %}
+      <button name="theme" value="default" class="btn btn-sm btn-outline-secondary btn-xs" title="Remover tema">
+        <i class="bi bi-x"></i>
+      </button>
+      {% endif %}
+    </form>
+    {% endif %}
     <div class="d-flex gap-2">
       {% if is_tenant_admin %}
         <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>

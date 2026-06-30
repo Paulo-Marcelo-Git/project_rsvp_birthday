@@ -68,3 +68,20 @@ h2 {
   font-size: .8rem;
   color: #475569;
 }
+
+/* ===== TEMAS ===== */
+body.theme-girl {
+  background: linear-gradient(to right, #fce4ec, #f8bbd0);
+  background-attachment: fixed;
+}
+body.theme-boy {
+  background: linear-gradient(to right, #e3f2fd, #bbdefb);
+  background-attachment: fixed;
+}
+.theme-btn-group {
+  display: flex;
+  gap: .4rem;
+}
+.theme-btn-group .btn.active-theme {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+}
