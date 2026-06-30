@@ -15,6 +15,7 @@ def _respostas_db(db, guests=None):
         qresult(fetchone=DEFAULT_EVENT_ROW),
         qresult(fetchone=TEXTS_ROW),
         qresult(fetchone=_LIMITS_NONE),     # repo.get_plan_limits
+        qresult(all_rows=[]),               # repo.list_events
     )
 
 

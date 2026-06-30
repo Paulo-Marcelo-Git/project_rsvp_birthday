@@ -737,6 +737,10 @@ def respostas():
         page = 1
     per_page = 50
     search = request.args.get("search", "").strip()
+    try:
+        event_id_param = int(request.args.get("event_id", 0)) or None
+    except (ValueError, TypeError):
+        event_id_param = None
     offset = (page - 1) * per_page
 
     tid = current_user.tenant_id
@@ -744,22 +748,31 @@ def respostas():
     owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
+        if event_id_param:
+            valid = conn.execute(
+                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
+                {"eid": event_id_param, "tid": tid},
+            ).mappings().fetchone()
+            if not valid:
+                event_id_param = None
         convidados_raw = repo.get_invitees(
             conn, tid,
             owner_user_id=owner_uid,
             search=search,
+            event_id=event_id_param,
             limit=per_page,
             offset=offset,
         )
         counts = repo.count_invitees_by_response(
-            conn, tid, owner_user_id=owner_uid, search=search
+            conn, tid, owner_user_id=owner_uid, search=search, event_id=event_id_param
         )
-        event_id = repo.get_default_event_id(conn, tid)
+        event_id = event_id_param or repo.get_default_event_id(conn, tid)
         if event_id is None:
             flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
             return redirect(url_for("admin_usuarios"))
         texts = repo.get_event_texts(conn, tid, event_id)
         limits = repo.get_plan_limits(conn, tid)
+        eventos = repo.list_events(conn, tid)
 
     can_manage_members = (
         limits["max_members"] is None or limits["max_members"] > 1
@@ -803,6 +816,8 @@ def respostas():
         search=search,
         is_tenant_admin=is_admin,
         can_manage_members=can_manage_members,
+        event_id=event_id,
+        eventos=eventos,
     )
 
 
@@ -1109,6 +1124,83 @@ def update_textos():
     logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
     return redirect(url_for("respostas"))
+
+
+# ===== Gestão de Eventos =====
+
+
+@app.route("/admin/eventos")
+@login_required
+def admin_eventos():
+    """
+    Listar eventos do tenant
+    ---
+    tags: [Eventos]
+    responses:
+      200:
+        description: Página de gestão de eventos
+      302:
+        description: Redireciona para /login se não autenticado
+    """
+    tid = current_user.tenant_id
+    with engine.connect() as conn:
+        eventos = repo.list_events(conn, tid)
+        limits = repo.get_plan_limits(conn, tid)
+    can_create = (
+        limits["max_events"] is None
+        or len(eventos) < limits["max_events"]
+    )
+    return render_template(
+        "admin_eventos.html",
+        eventos=eventos,
+        can_create=can_create,
+        max_events=limits["max_events"],
+        is_tenant_admin=current_user.is_tenant_admin,
+        can_manage_members=(
+            limits["max_members"] is None or limits["max_members"] > 1
+        ),
+    )
+
+
+@app.route("/admin/eventos/criar", methods=["POST"])
+@login_required
+def criar_evento():
+    """
+    Criar novo evento
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: formData
+        name: title
+        type: string
+        required: true
+    responses:
+      302:
+        description: Redireciona para o novo evento ou para /admin/eventos com mensagem de erro
+      403:
+        description: Apenas tenant_admin pode criar eventos
+    """
+    if not current_user.is_tenant_admin:
+        abort(403)
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Nome do evento é obrigatório.", "danger")
+        return redirect(url_for("admin_eventos"))
+    tid = current_user.tenant_id
+    with engine.connect() as conn:
+        limits = repo.get_plan_limits(conn, tid)
+        total = repo.count_events_for_tenant(conn, tid)
+        if limits["max_events"] is not None and total >= limits["max_events"]:
+            flash(
+                f"Seu plano permite até {limits['max_events']} evento(s). "
+                "Faça upgrade para criar mais.",
+                "danger",
+            )
+            return redirect(url_for("admin_eventos"))
+        eid = repo.create_event(conn, tid, title, owner_user_id=current_user.db_id)
+        conn.commit()
+    flash(f'Evento "{title}" criado com sucesso!', "success")
+    return redirect(url_for("respostas", event_id=eid))
 
 
 # ===== Gerenciamento de Usuários =====

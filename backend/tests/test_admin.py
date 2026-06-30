@@ -12,7 +12,7 @@ _COUNT_ONE   = {'n': 1}    # at max_members for free plan
 
 
 def _respostas_db(db, guests=None, limits=None):
-    """Configura as 5 queries que respostas() executa via repo."""
+    """Configura as 6 queries que respostas() executa via repo (sem event_id_param)."""
     return setup_db(
         db,
         qresult(all_rows=guests or []),                    # repo.get_invitees
@@ -20,6 +20,7 @@ def _respostas_db(db, guests=None, limits=None):
         qresult(fetchone=DEFAULT_EVENT_ROW),                # repo.get_default_event_id
         qresult(fetchone=TEXTS_ROW),                        # repo.get_event_texts
         qresult(fetchone=limits or _LIMITS_NONE),           # repo.get_plan_limits
+        qresult(all_rows=[]),                               # repo.list_events
     )
 
 
