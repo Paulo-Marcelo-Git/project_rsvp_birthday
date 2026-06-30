@@ -9,6 +9,8 @@ __pycache__/
 
 # Env
 .env
+.env.*
+!.env.example
 
 # IDEs
 .vscode/
@@ -26,6 +28,7 @@ db_data/
 
 # Testes
 populate.py
+.pytest_cache/
 
 #Pasta De Uploads
 Uploads
@@ -35,3 +38,4 @@ docker-compose-old.yml
 
 # Specs e documentos internos (não subir para repo público)
 docs/superpowers/
+.superpowers/
