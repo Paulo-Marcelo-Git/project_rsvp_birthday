@@ -142,3 +142,24 @@ def test_create_event_returns_new_id(db_conn, tenant_factory):
     eid = repo.create_event(db_conn, t["tenant_id"], title="Teste", owner_user_id=None)
     db_conn.commit()
     assert isinstance(eid, int) and eid > 0
+
+
+@pytest.mark.integration
+def test_set_and_get_event_theme(db_conn, tenant_factory):
+    t = tenant_factory(name="TTheme")
+    tid = t["tenant_id"]
+    eid = t["event_id"]
+    assert repo.get_event_theme(db_conn, tid, eid) == "default"
+    repo.set_event_theme(db_conn, tid, eid, "girl")
+    db_conn.commit()
+    assert repo.get_event_theme(db_conn, tid, eid) == "girl"
+    repo.set_event_theme(db_conn, tid, eid, "boy")
+    db_conn.commit()
+    assert repo.get_event_theme(db_conn, tid, eid) == "boy"
+
+
+@pytest.mark.integration
+def test_set_event_theme_rejects_invalid(db_conn, tenant_factory):
+    t = tenant_factory(name="TInvalid")
+    with pytest.raises(ValueError):
+        repo.set_event_theme(db_conn, t["tenant_id"], t["event_id"], "purple")

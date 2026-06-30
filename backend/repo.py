@@ -241,6 +241,30 @@ def create_event(
     return int(row["id"])
 
 
+_VALID_THEMES = {"girl", "boy", "default"}
+
+
+def set_event_theme(conn, tenant_id: int, event_id: int, theme: str) -> None:
+    """Salva tema do evento. theme deve ser 'girl', 'boy' ou 'default'."""
+    if theme not in _VALID_THEMES:
+        raise ValueError(f"theme inválido: {theme!r}")
+    conn.execute(
+        text("UPDATE events SET theme = :theme WHERE id = :eid AND tenant_id = :tid"),
+        {"theme": theme, "eid": event_id, "tid": tenant_id},
+    )
+
+
+def get_event_theme(conn, tenant_id: int, event_id: int) -> str:
+    """Retorna o tema do evento ('girl', 'boy' ou 'default')."""
+    row = conn.execute(
+        text("SELECT theme FROM events WHERE id = :eid AND tenant_id = :tid"),
+        {"eid": event_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    if not row:
+        return "default"
+    return row["theme"] or "default"
+
+
 # ── invitees ──────────────────────────────────────────────────────────────────
 
 def get_invitees(
