@@ -119,6 +119,7 @@ def test_respostas_com_event_id_param(admin_client, db):
         qresult(all_rows=[]),                   # repo.get_invitees (filtrado por event_id=5)
         qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
         # event_id_param=5 → get_default_event_id NÃO é chamado
+        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
         qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
         qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
         qresult(all_rows=[_EVENT_ROW]),         # repo.list_events
@@ -135,6 +136,7 @@ def test_respostas_event_id_invalido_e_ignorado(admin_client, db):
         qresult(all_rows=[]),                   # repo.get_invitees (event_id_param=None)
         qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
         qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id (fallback)
+        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
         qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
         qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
         qresult(all_rows=[]),                   # repo.list_events
@@ -151,9 +153,31 @@ def test_respostas_event_id_nao_numerico_ignorado(admin_client, db):
         qresult(all_rows=[]),                   # repo.get_invitees
         qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
         qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id
+        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
         qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
         qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
         qresult(all_rows=[]),                   # repo.list_events
     )
     resp = admin_client.get('/admin/respostas?event_id=abc')
     assert resp.status_code == 200
+
+
+# ── /admin/set_tema ─────────────────────────────────────────────────────────────
+
+def test_set_tema_exige_admin(admin_client, db):
+    """set_tema returns redirect after setting theme."""
+    from tests.conftest import qresult, setup_db
+    setup_db(
+        db,
+        qresult(fetchone={'id': 1}),  # SELECT id FROM events (ownership check)
+        qresult(),                     # UPDATE events SET theme
+    )
+    resp = admin_client.post('/admin/set_tema',
+                             data={'theme': 'girl', 'event_id': '1'})
+    assert resp.status_code == 302
+
+
+def test_set_tema_rejeita_tema_invalido(admin_client, db):
+    resp = admin_client.post('/admin/set_tema',
+                             data={'theme': 'purple', 'event_id': '1'})
+    assert resp.status_code == 400

@@ -664,6 +664,7 @@ def invite(token):
 
         session["invite_token"] = token
         texts = repo.get_event_texts(conn, result["tenant_id"], result["event_id"])
+        event_theme = repo.get_event_theme(conn, result["tenant_id"], result["event_id"])
         return render_template(
             "invite.html",
             invitee=result,
@@ -672,6 +673,7 @@ def invite(token):
             no_text=texts.get("no_text"),
             post_yes_text=texts.get("post_yes_text"),
             post_no_text=texts.get("post_no_text"),
+            event_theme=event_theme,
         )
 
 
@@ -770,6 +772,7 @@ def respostas():
         if event_id is None:
             flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
             return redirect(url_for("admin_usuarios"))
+        event_theme = repo.get_event_theme(conn, tid, event_id) if event_id else "default"
         texts = repo.get_event_texts(conn, tid, event_id)
         current_event_title = texts.get("title", "Evento")
         limits = repo.get_plan_limits(conn, tid)
@@ -820,6 +823,7 @@ def respostas():
         can_manage_members=can_manage_members,
         event_id=event_id,
         eventos=eventos,
+        event_theme=event_theme,
     )
 
 
@@ -1126,6 +1130,56 @@ def update_textos():
     logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
     return redirect(url_for("respostas"))
+
+
+@app.route("/admin/set_tema", methods=["POST"])
+@login_required
+def set_tema():
+    """
+    Atualizar tema visual do evento
+    ---
+    tags: [Textos]
+    parameters:
+      - in: formData
+        name: theme
+        type: string
+        enum: [girl, boy, default]
+      - in: formData
+        name: event_id
+        type: integer
+    responses:
+      302:
+        description: Redireciona para /admin/respostas
+      400:
+        description: Tema inválido ou event_id inválido
+      403:
+        description: Apenas tenant_admin
+      404:
+        description: Evento não encontrado
+    """
+    if not current_user.is_tenant_admin:
+        abort(403)
+    theme = request.form.get("theme", "default")
+    if theme not in ("girl", "boy", "default"):
+        abort(400)
+    tid = current_user.tenant_id
+    try:
+        event_id = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        abort(400)
+    with engine.connect() as conn:
+        valid = conn.execute(
+            text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
+            {"eid": event_id, "tid": tid},
+        ).fetchone()
+        if not valid:
+            abort(404)
+        repo.set_event_theme(conn, tid, event_id, theme)
+        conn.commit()
+    logger.info(
+        f"Tema do evento id={event_id} alterado para '{theme}' por '{current_user.username}'."
+    )
+    return redirect(url_for("respostas", event_id=event_id))
 
 
 # ===== Gestão de Eventos =====

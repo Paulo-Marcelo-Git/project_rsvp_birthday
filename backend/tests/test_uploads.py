@@ -146,7 +146,8 @@ def test_invite_armazena_token_na_sessao(client, db):
     from tests.conftest import TEXTS_ROW
     setup_db(db,
              qresult(fetchone=GUEST_ROW),
-             qresult(fetchone=TEXTS_ROW))
+             qresult(fetchone=TEXTS_ROW),
+             qresult(fetchone={'theme': 'default'}))
 
     token = GUEST_ROW["token"]
     client.get(f"/invite/{token}")

@@ -4,10 +4,11 @@ TOKEN = GUEST_ROW['token']
 
 
 def test_convite_token_valido_exibe_pagina(client, db):
-    # GET: repo.get_invitee_by_token + repo.get_event_texts
+    # GET: repo.get_invitee_by_token + repo.get_event_texts + repo.get_event_theme
     setup_db(db,
              qresult(fetchone=GUEST_ROW),
-             qresult(fetchone=TEXTS_ROW))
+             qresult(fetchone=TEXTS_ROW),
+             qresult(fetchone={'theme': 'default'}))
 
     resp = client.get(f'/invite/{TOKEN}')
 
