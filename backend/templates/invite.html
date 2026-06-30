@@ -238,7 +238,7 @@
   </style>
 </head>
 
-<body class="{{ 'theme-' + event_theme if event_theme is defined and event_theme != 'default' else '' }}">
+<body{% if event_theme is defined and event_theme != 'default' %} class="theme-{{ event_theme }}"{% endif %}>
   <div class="invite-container">
 
     {% if invitee.media_url %}
