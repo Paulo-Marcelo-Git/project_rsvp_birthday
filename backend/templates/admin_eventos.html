@@ -1,16 +1,129 @@
+<!-- backend/templates/admin_eventos.html -->
 {% extends "base.html" %}
-{% block title %}Meus Eventos{% endblock %}
+{% block title %}Comemore+ — Meus Eventos{% endblock %}
+
+{% block navbar %}
+<nav class="app-navbar">
+  <div class="app-navbar-inner">
+    <span class="app-brand">Comemore+</span>
+    <div class="app-navbar-right">
+      <span class="app-user">Olá, <strong>{{ current_user.username }}</strong></span>
+      {% if can_manage_members %}
+        <a href="{{ url_for('admin_usuarios') }}" class="btn btn-sm btn-outline-light">
+          <i class="bi bi-people"></i><span class="d-none d-sm-inline ms-1">Usuários</span>
+        </a>
+      {% endif %}
+      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">
+        <i class="bi bi-box-arrow-right"></i><span class="d-none d-sm-inline ms-1">Sair</span>
+      </a>
+    </div>
+  </div>
+</nav>
+{% endblock %}
+
 {% block content %}
-<div class="container py-4">
-  <h2>Meus Eventos</h2>
-  {% if eventos %}
-    <ul>
-      {% for e in eventos %}
-        <li>{{ e.title }}</li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p>Nenhum evento encontrado.</p>
-  {% endif %}
+<div class="page-wrapper">
+  <div class="page-header">
+    <div>
+      <h5 class="page-title">Meus Eventos</h5>
+      <span class="page-subtitle">Gerencie seus eventos de comemoração</span>
+    </div>
+    {% if can_create %}
+      <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalCriar">
+        <i class="bi bi-plus-lg me-1"></i>Novo Evento
+      </button>
+    {% else %}
+      <span class="badge bg-warning text-dark">
+        Limite atingido ({{ max_events }} evento{{ 's' if max_events != 1 else '' }})
+      </span>
+    {% endif %}
+  </div>
+
+  <div class="content-card">
+    {% if not eventos %}
+      <p class="text-muted text-center py-4">Nenhum evento encontrado.</p>
+    {% else %}
+      <div class="table-card">
+        <table class="table app-table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Nome do Evento</th>
+              <th class="text-center">Tema</th>
+              <th class="text-center">Convidados</th>
+              <th class="text-center">Status</th>
+              <th class="text-center">Criado em</th>
+              <th class="text-center"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in eventos %}
+            <tr>
+              <td class="fw-medium">{{ ev.title }}</td>
+              <td class="text-center">
+                {% if ev.theme == 'girl' %}
+                  <span class="badge" style="background:#fce4ec;color:#880e4f;">🎀 Menina</span>
+                {% elif ev.theme == 'boy' %}
+                  <span class="badge" style="background:#e3f2fd;color:#0d47a1;">💙 Menino</span>
+                {% else %}
+                  <span class="badge bg-light text-muted border">Padrão</span>
+                {% endif %}
+              </td>
+              <td class="text-center">{{ ev.total_invitees }}</td>
+              <td class="text-center">
+                {% if ev.status == 'published' %}
+                  <span class="badge bg-success">Publicado</span>
+                {% elif ev.status == 'draft' %}
+                  <span class="badge bg-secondary">Rascunho</span>
+                {% else %}
+                  <span class="badge bg-light text-muted border">Arquivado</span>
+                {% endif %}
+              </td>
+              <td class="text-center text-muted small">{{ ev.created_at.strftime('%d/%m/%Y') if ev.created_at else '-' }}</td>
+              <td class="text-center">
+                <a href="{{ url_for('respostas', event_id=ev.id) }}"
+                   class="btn btn-xs btn-primary">
+                  <i class="bi bi-people me-1"></i>Gerenciar
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
 </div>
+
+<!-- Modal Criar Evento -->
+<div class="modal fade" id="modalCriar" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <form class="modal-content" action="{{ url_for('criar_evento') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-plus-lg me-2"></i>Novo Evento</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-medium">Nome do Evento <span class="text-danger">*</span></label>
+          <input name="title" class="form-control" placeholder="Ex: Festa da Ana" required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Criar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.delete-guest-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Excluir?')) e.preventDefault();
+    });
+  });
+</script>
 {% endblock %}

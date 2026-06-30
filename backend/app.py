@@ -771,6 +771,7 @@ def respostas():
             flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
             return redirect(url_for("admin_usuarios"))
         texts = repo.get_event_texts(conn, tid, event_id)
+        current_event_title = texts.get("title", "Evento")
         limits = repo.get_plan_limits(conn, tid)
         eventos = repo.list_events(conn, tid)
 
@@ -808,6 +809,7 @@ def respostas():
         "admin_responses.html",
         convidados=convidados,
         texts=texts,
+        current_event_title=current_event_title,
         total_sim=counts["total_sim"],
         total_nao=counts["total_nao"],
         total_aguardando=counts["total_aguardando"],

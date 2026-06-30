@@ -124,7 +124,7 @@ def test_get_default_event_id_filtra_tenant_id():
 
 def test_get_event_texts_filtra_tenant_id():
     c = _conn(fetchone={
-        "question_text": "Vai?", "yes_text": "Sim",
+        "title": "Festa", "question_text": "Vai?", "yes_text": "Sim",
         "no_text": "Não", "extra_texts": None,
     })
     repo.get_event_texts(c, 42, 1)
@@ -203,7 +203,7 @@ def test_count_events_for_tenant_filtra_tenant():
 
 def test_get_event_texts_extrai_post_texts_do_json():
     c = _conn(fetchone={
-        "question_text": "Vai?", "yes_text": "Sim", "no_text": "Não",
+        "title": "Festa", "question_text": "Vai?", "yes_text": "Sim", "no_text": "Não",
         "extra_texts": '{"post_yes_text": "Sim!", "post_no_text": "Não!"}',
     })
     result = repo.get_event_texts(c, 1, 1)

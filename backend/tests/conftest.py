@@ -141,6 +141,7 @@ STATS_ROW = {'total': 0, 'total_sim': 0, 'total_nao': 0, 'total_aguardando': 0}
 DEFAULT_EVENT_ROW = {'id': 1}
 
 TEXTS_ROW = {
+    'title': 'Festa Teste',
     'question_text': 'Você vai comparecer?',
     'yes_text': 'Sim',
     'no_text': 'Não',

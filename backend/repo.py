@@ -116,7 +116,7 @@ def get_event_texts(conn, tenant_id: int, event_id: int) -> dict:
     """
     row = conn.execute(
         text("""
-            SELECT question_text, yes_text, no_text, extra_texts
+            SELECT title, question_text, yes_text, no_text, extra_texts
             FROM events
             WHERE id = :eid AND tenant_id = :tid
         """),
@@ -126,6 +126,7 @@ def get_event_texts(conn, tenant_id: int, event_id: int) -> dict:
         return {}
     extra = json.loads(row["extra_texts"]) if row["extra_texts"] else {}
     return {
+        "title":          row["title"]          or "",
         "question_text":  row["question_text"] or "",
         "yes_text":       row["yes_text"]       or "",
         "no_text":        row["no_text"]        or "",

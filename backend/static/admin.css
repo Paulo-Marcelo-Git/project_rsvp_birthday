@@ -60,3 +60,11 @@ h2 {
 .btn {
   font-weight: 500;
 }
+
+.event-switcher {
+  display: flex;
+  align-items: center;
+  margin-top: .35rem;
+  font-size: .8rem;
+  color: #475569;
+}
