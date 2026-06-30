@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 # ── helpers internos ──────────────────────────────────────────────────────────
 
-def _extra_where(owner_user_id, search, table_alias="i"):
+def _extra_where(owner_user_id, search, table_alias="i", event_id=None):
     """
     Retorna (extra_sql_str, params_dict) para filtros opcionais de owner e busca.
     tenant_id já é filtrado pelo caller — não duplicar aqui.
@@ -27,9 +27,23 @@ def _extra_where(owner_user_id, search, table_alias="i"):
     if owner_user_id is not None:
         clauses.append("e.owner_user_id = :owner_user_id")
         params["owner_user_id"] = owner_user_id
+    if event_id is not None:
+        clauses.append(f"{table_alias}.event_id = :event_id")
+        params["event_id"] = event_id
     if search:
-        clauses.append(f"{table_alias}.name LIKE :search")
-        params["search"] = f"%{search}%"
+        _norm = search.strip().lower()
+        _response_map = {"sim": "yes", "não": "no", "nao": "no", "aguardando": "pending"}
+        _db_response = _response_map.get(_norm)
+
+        if _db_response:
+            clauses.append(f"{table_alias}.response = :response_val")
+            params["response_val"] = _db_response
+        else:
+            clauses.append(
+                f"({table_alias}.name LIKE :search"
+                f" OR {table_alias}.email LIKE :search)"
+            )
+            params["search"] = f"%{search}%"
     extra = (" AND " + " AND ".join(clauses)) if clauses else ""
     return extra, params
 
@@ -186,6 +200,46 @@ def create_default_event(
     return int(row["id"])
 
 
+def list_events(conn, tenant_id: int) -> list[dict]:
+    """Lista todos os eventos do tenant, mais recente primeiro."""
+    rows = conn.execute(
+        text("""
+            SELECT id, tenant_id, title, status, theme, event_date, created_at,
+                   (SELECT COUNT(*) FROM invitees i WHERE i.event_id = e.id) AS total_invitees
+            FROM events e
+            WHERE tenant_id = :tid
+            ORDER BY created_at DESC
+        """),
+        {"tid": tenant_id},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def create_event(
+    conn, tenant_id: int, title: str, *, owner_user_id: int | None = None
+) -> int:
+    """Cria novo evento para o tenant. Retorna event_id."""
+    import secrets as _sec
+    slug = _sec.token_urlsafe(16)[:22]
+    extra = json.dumps(
+        {"post_yes_text": "Que bom! Te esperamos!", "post_no_text": "Sentiremos sua falta."},
+        ensure_ascii=False,
+    )
+    conn.execute(
+        text("""
+            INSERT INTO events
+                (tenant_id, owner_user_id, title, event_type, slug, status,
+                 question_text, yes_text, no_text, extra_texts)
+            VALUES
+                (:tid, :owner, :title, 'aniversario', :slug, 'draft',
+                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
+        """),
+        {"tid": tenant_id, "owner": owner_user_id, "title": title, "slug": slug, "extra": extra},
+    )
+    row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
+    return int(row["id"])
+
+
 # ── invitees ──────────────────────────────────────────────────────────────────
 
 def get_invitees(
@@ -194,15 +248,17 @@ def get_invitees(
     *,
     owner_user_id: int | None = None,
     search: str = "",
+    event_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
     """
     Lista convidados do tenant com aliases de compatibilidade.
     Se owner_user_id: filtra pelos eventos desse usuário (visão de member).
+    Se event_id: filtra por evento específico.
     SEMPRE filtra tenant_id.
     """
-    extra, params = _extra_where(owner_user_id, search)
+    extra, params = _extra_where(owner_user_id, search, event_id=event_id)
     params.update({"tid": tenant_id, "limit": limit, "offset": offset})
 
     rows = conn.execute(
@@ -232,9 +288,10 @@ def count_invitees_by_response(
     *,
     owner_user_id: int | None = None,
     search: str = "",
+    event_id: int | None = None,
 ) -> dict:
     """Retorna {total, total_sim, total_nao, total_aguardando}."""
-    extra, params = _extra_where(owner_user_id, search)
+    extra, params = _extra_where(owner_user_id, search, event_id=event_id)
     params["tid"] = tenant_id
 
     row = conn.execute(
