@@ -61,11 +61,12 @@
         <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
       {% endif %}
       <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd">+ Convidado</button>
-      <a href="{{ url_for('exportar_convidados_xlsx', search=search) }}" class="btn btn-success">📥 Exportar Excel</a>
+      <a href="{{ url_for('exportar_convidados_xlsx', search=search, event_id=event_id) }}" class="btn btn-success">📥 Exportar Excel</a>
     </div>
   </div>
 
   <form class="d-flex mb-3" method="get" action="{{ url_for('respostas') }}">
+    <input type="hidden" name="event_id" value="{{ event_id }}">
     <input type="text" name="search" class="form-control me-2" placeholder="Buscar por nome ou email" value="{{ search }}">
     <button class="btn btn-outline-primary" type="submit">Buscar</button>
   </form>
@@ -236,17 +237,17 @@
     <ul class="pagination justify-content-center mt-4">
       {% if page > 1 %}
         <li class="page-item">
-          <a class="page-link" href="{{ url_for('respostas', page=page-1, search=search) }}">Anterior</a>
+          <a class="page-link" href="{{ url_for('respostas', page=page-1, search=search, event_id=event_id) }}">Anterior</a>
         </li>
       {% endif %}
       {% for p in range(1, total_pages + 1) %}
         <li class="page-item {% if p == page %}active{% endif %}">
-          <a class="page-link" href="{{ url_for('respostas', page=p, search=search) }}">{{ p }}</a>
+          <a class="page-link" href="{{ url_for('respostas', page=p, search=search, event_id=event_id) }}">{{ p }}</a>
         </li>
       {% endfor %}
       {% if page < total_pages %}
         <li class="page-item">
-          <a class="page-link" href="{{ url_for('respostas', page=page+1, search=search) }}">Próxima</a>
+          <a class="page-link" href="{{ url_for('respostas', page=page+1, search=search, event_id=event_id) }}">Próxima</a>
         </li>
       {% endif %}
     </ul>

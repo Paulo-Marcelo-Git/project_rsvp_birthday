@@ -844,10 +844,22 @@ def exportar_convidados_xlsx():
     tid = current_user.tenant_id
     is_admin = current_user.is_tenant_admin
     owner_uid = None if is_admin else current_user.db_id
+    try:
+        event_id_param = int(request.args.get("event_id", 0)) or None
+    except (ValueError, TypeError):
+        event_id_param = None
 
     with engine.connect() as conn:
+        if event_id_param:
+            valid = conn.execute(
+                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
+                {"eid": event_id_param, "tid": tid},
+            ).fetchone()
+            if not valid:
+                event_id_param = None
         result = repo.get_invitees(
-            conn, tid, owner_user_id=owner_uid, search=search, limit=10000
+            conn, tid, owner_user_id=owner_uid, search=search,
+            event_id=event_id_param, limit=10000
         )
 
     wb = Workbook()

@@ -181,3 +181,28 @@ def test_set_tema_rejeita_tema_invalido(admin_client, db):
     resp = admin_client.post('/admin/set_tema',
                              data={'theme': 'purple', 'event_id': '1'})
     assert resp.status_code == 400
+
+
+# ── /admin/exportar_xlsx?event_id= ──────────────────────────────────────────────
+
+def test_exportar_xlsx_com_event_id_valido_filtra(admin_client, db):
+    """exportar_xlsx aceita ?event_id= válido e filtra por ele."""
+    setup_db(
+        db,
+        qresult(fetchone={'id': 5}),  # validar event_id pertence ao tenant
+        qresult(all_rows=[]),          # repo.get_invitees (filtrado por event_id=5)
+    )
+    resp = admin_client.get('/admin/exportar_xlsx?event_id=5')
+    assert resp.status_code == 200
+    assert 'spreadsheetml' in resp.content_type
+
+
+def test_exportar_xlsx_event_id_invalido_e_ignorado(admin_client, db):
+    """event_id que não pertence ao tenant é ignorado (exporta sem filtro)."""
+    setup_db(
+        db,
+        qresult(fetchone=None),  # validar event_id → não pertence ao tenant
+        qresult(all_rows=[]),     # repo.get_invitees (event_id_param=None)
+    )
+    resp = admin_client.get('/admin/exportar_xlsx?event_id=999')
+    assert resp.status_code == 200
