@@ -4,7 +4,7 @@
 
 body {
   font-family: 'Inter', sans-serif;
-  background: linear-gradient(to right, #fce4ec, #e3f2fd); /* gradiente rosa e azul claro */
+  background: #f4f5f7;
 }
 
 h2 {
@@ -59,6 +59,28 @@ h2 {
 
 .btn {
   font-weight: 500;
+  border-radius: 8px;
+}
+
+.btn-xs {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+}
+
+.btn-primary {
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: #1e40af;
+  border-color: #1e40af;
+}
+
+a {
+  color: #1d4ed8;
 }
 
 .event-switcher {
@@ -84,4 +106,173 @@ body.theme-boy {
 }
 .theme-btn-group .btn.active-theme {
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+}
+
+/* ===== TOPBAR COMPARTILHADA ===== */
+.app-navbar {
+  background-color: #1e293b;
+  padding: .75rem 0;
+  margin-bottom: 1.5rem;
+}
+
+.app-navbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem;
+}
+
+.app-brand {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.app-navbar-right {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.app-user {
+  color: #cbd5e1;
+  font-size: .85rem;
+  margin-right: .25rem;
+}
+
+/* ===== ESTRUTURA DE PÁGINA ===== */
+.page-wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.page-title {
+  margin: 0;
+  font-weight: 700;
+  color: #111827;
+}
+
+.page-subtitle {
+  display: block;
+  font-size: .85rem;
+  color: #6b7280;
+  margin-top: .25rem;
+}
+
+/* ===== CARD DE CONTEÚDO ===== */
+.content-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+  padding: 1.25rem;
+}
+
+.table-card {
+  margin: -1.25rem;
+  overflow-x: auto;
+}
+
+/* ===== STAT CARDS ===== */
+.stat-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #9ca3af;
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+}
+
+.stat-card-label {
+  font-size: .75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.stat-card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.stat-card.ok { border-left-color: #16a34a; }
+.stat-card.no { border-left-color: #dc2626; }
+.stat-card.pending { border-left-color: #d97706; }
+
+/* ===== PILLS ===== */
+.pill {
+  display: inline-block;
+  padding: .25rem .65rem;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pill-yes { background: #dcfce7; color: #166534; }
+.pill-no { background: #fee2e2; color: #991b1b; }
+.pill-pending { background: #f3f4f6; color: #4b5563; }
+
+.pill-girl { background: #fce4ec; color: #880e4f; }
+.pill-boy { background: #e3f2fd; color: #0d47a1; }
+.pill-neutral { background: #f3f4f6; color: #6b7280; }
+
+.pill-published { background: #dcfce7; color: #166534; }
+.pill-draft { background: #f3f4f6; color: #4b5563; }
+.pill-archived { background: #f3f4f6; color: #9ca3af; }
+
+.pill-active { background: #dcfce7; color: #166534; }
+.pill-suspended { background: #fee2e2; color: #991b1b; }
+.pill-trial { background: #fef3c7; color: #92400e; }
+
+/* ===== APP TABLE ===== */
+.app-table {
+  margin-bottom: 0;
+}
+
+.app-table thead th {
+  background: transparent;
+  color: #6b7280;
+  text-transform: uppercase;
+  font-size: .72rem;
+  letter-spacing: .03em;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+  padding: .75rem 1rem;
+}
+
+.app-table tbody td {
+  padding: .85rem 1rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.app-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.app-table tbody tr:hover {
+  background-color: #f9fafb;
 }
