@@ -4,35 +4,29 @@
 {% block title %}Comemore+ - Usuários{% endblock %}
 
 {% block content %}
-<div class="container py-3 d-flex justify-content-between align-items-center border-bottom mb-4">
-  <h3 class="mb-0" style="color: #1976d2; font-weight: 700;">Comemore+</h3>
-  <div class="d-flex align-items-center gap-3">
-    <span class="text-muted small">Olá, {{ current_user.username }}</span>
-    <a href="{{ url_for('respostas') }}" class="btn btn-sm btn-outline-secondary">← Painel</a>
-    <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-secondary">Sair</a>
-  </div>
-</div>
+{% include "_topbar.html" %}
 
-<div class="container py-3">
+<div class="page-wrapper">
 
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <div class="d-flex align-items-center gap-2">
-      <h2 class="mb-0">Gerenciar Usuários</h2>
+  <div class="page-header">
+    <div>
+      <h5 class="page-title">Gerenciar Usuários</h5>
       {% if max_members is not none %}
-        <span class="badge bg-secondary">{{ member_count }} de {{ max_members }}</span>
+        <span class="page-subtitle">{{ member_count }} de {{ max_members }}</span>
       {% endif %}
     </div>
     {% if can_add_member %}
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddUser">
-      + Novo Usuário
+    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddUser">
+      <i class="bi bi-plus-lg me-1"></i>Novo Usuário
     </button>
     {% endif %}
   </div>
 
+  <div class="content-card">
   {% if users %}
   <!-- Desktop -->
-  <div class="d-none d-md-block">
-    <table class="table table-striped table-bordered shadow-sm align-middle">
+  <div class="d-none d-md-block table-card">
+    <table class="table app-table align-middle mb-0">
       <thead>
         <tr>
           <th>#</th>
@@ -56,9 +50,9 @@
           <td><span class="badge bg-secondary">{{ u.guest_count }}</span></td>
           <td>
             {% if u.must_change_password %}
-              <span class="badge bg-warning text-dark">Troca senha pendente</span>
+              <span class="pill pill-pending">Troca senha pendente</span>
             {% else %}
-              <span class="badge bg-success">Ativo</span>
+              <span class="pill pill-active">Ativo</span>
             {% endif %}
           </td>
           <td class="text-center">
@@ -105,9 +99,9 @@
           <div class="d-flex justify-content-between align-items-start mb-2">
             <h5 class="card-title mb-0">{{ u.username }}</h5>
             {% if u.must_change_password %}
-              <span class="badge bg-warning text-dark">Troca senha pendente</span>
+              <span class="pill pill-pending">Troca senha pendente</span>
             {% else %}
-              <span class="badge bg-success">Ativo</span>
+              <span class="pill pill-active">Ativo</span>
             {% endif %}
           </div>
           <p class="mb-1"><strong>Criado em:</strong> {{ u.created_at.strftime("%d/%m/%Y %H:%M") if u.created_at else '-' }}</p>
@@ -152,6 +146,7 @@
     {% endif %}
   </div>
   {% endif %}
+  </div>
 
 </div>
 
