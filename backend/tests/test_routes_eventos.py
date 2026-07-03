@@ -42,6 +42,7 @@ def test_admin_eventos_lista_para_admin(admin_client, db):
     _eventos_db(db)
     resp = admin_client.get('/admin/eventos')
     assert resp.status_code == 200
+    assert b'app-navbar' in resp.data
 
 
 def test_admin_eventos_lista_vazia(admin_client, db):

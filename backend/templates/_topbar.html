@@ -10,7 +10,7 @@
     <div class="app-navbar-right">
       <span class="app-user">Olá, <strong>{{ current_user.username }}</strong></span>
 
-      {% if request.endpoint not in ('admin_eventos', 'superadmin') %}
+      {% if request.endpoint not in ('admin_eventos', 'admin_usuarios', 'superadmin') %}
         <a href="{{ url_for('admin_eventos') }}" class="btn btn-sm btn-outline-light">
           <i class="bi bi-calendar-event"></i><span class="d-none d-sm-inline ms-1">Eventos</span>
         </a>
