@@ -2,26 +2,9 @@
 {% extends "base.html" %}
 {% block title %}Comemore+ — Meus Eventos{% endblock %}
 
-{% block navbar %}
-<nav class="app-navbar">
-  <div class="app-navbar-inner">
-    <span class="app-brand">Comemore+</span>
-    <div class="app-navbar-right">
-      <span class="app-user">Olá, <strong>{{ current_user.username }}</strong></span>
-      {% if can_manage_members %}
-        <a href="{{ url_for('admin_usuarios') }}" class="btn btn-sm btn-outline-light">
-          <i class="bi bi-people"></i><span class="d-none d-sm-inline ms-1">Usuários</span>
-        </a>
-      {% endif %}
-      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">
-        <i class="bi bi-box-arrow-right"></i><span class="d-none d-sm-inline ms-1">Sair</span>
-      </a>
-    </div>
-  </div>
-</nav>
-{% endblock %}
-
 {% block content %}
+{% include "_topbar.html" %}
+
 <div class="page-wrapper">
   <div class="page-header">
     <div>
@@ -61,21 +44,21 @@
               <td class="fw-medium">{{ ev.title }}</td>
               <td class="text-center">
                 {% if ev.theme == 'girl' %}
-                  <span class="badge" style="background:#fce4ec;color:#880e4f;">🎀 Menina</span>
+                  <span class="pill pill-girl">🎀 Menina</span>
                 {% elif ev.theme == 'boy' %}
-                  <span class="badge" style="background:#e3f2fd;color:#0d47a1;">💙 Menino</span>
+                  <span class="pill pill-boy">💙 Menino</span>
                 {% else %}
-                  <span class="badge bg-light text-muted border">Padrão</span>
+                  <span class="pill pill-neutral">Padrão</span>
                 {% endif %}
               </td>
               <td class="text-center">{{ ev.total_invitees }}</td>
               <td class="text-center">
                 {% if ev.status == 'published' %}
-                  <span class="badge bg-success">Publicado</span>
+                  <span class="pill pill-published">Publicado</span>
                 {% elif ev.status == 'draft' %}
-                  <span class="badge bg-secondary">Rascunho</span>
+                  <span class="pill pill-draft">Rascunho</span>
                 {% else %}
-                  <span class="badge bg-light text-muted border">Arquivado</span>
+                  <span class="pill pill-archived">Arquivado</span>
                 {% endif %}
               </td>
               <td class="text-center text-muted small">{{ ev.created_at.strftime('%d/%m/%Y') if ev.created_at else '-' }}</td>
@@ -116,14 +99,4 @@
     </form>
   </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-  document.querySelectorAll('.delete-guest-form').forEach(function(form) {
-    form.addEventListener('submit', function(e) {
-      if (!confirm('Excluir?')) e.preventDefault();
-    });
-  });
-</script>
 {% endblock %}

@@ -1,0 +1,34 @@
+<!-- backend/templates/_topbar.html -->
+<nav class="app-navbar">
+  <div class="app-navbar-inner">
+    <span class="app-brand">
+      Comemore+
+      {% if request.endpoint == 'superadmin' %}
+        <span class="badge bg-danger">SUPER ADMIN</span>
+      {% endif %}
+    </span>
+    <div class="app-navbar-right">
+      <span class="app-user">Olá, <strong>{{ current_user.username }}</strong></span>
+
+      {% if request.endpoint not in ('admin_eventos', 'superadmin') %}
+        <a href="{{ url_for('admin_eventos') }}" class="btn btn-sm btn-outline-light">
+          <i class="bi bi-calendar-event"></i><span class="d-none d-sm-inline ms-1">Eventos</span>
+        </a>
+      {% endif %}
+
+      {% if request.endpoint == 'admin_usuarios' %}
+        <a href="{{ url_for('respostas') }}" class="btn btn-sm btn-outline-light">
+          <i class="bi bi-arrow-left"></i><span class="d-none d-sm-inline ms-1">Painel</span>
+        </a>
+      {% elif current_user.is_tenant_admin and can_manage_members is defined and can_manage_members %}
+        <a href="{{ url_for('admin_usuarios') }}" class="btn btn-sm btn-outline-light">
+          <i class="bi bi-people"></i><span class="d-none d-sm-inline ms-1">Usuários</span>
+        </a>
+      {% endif %}
+
+      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">
+        <i class="bi bi-box-arrow-right"></i><span class="d-none d-sm-inline ms-1">Sair</span>
+      </a>
+    </div>
+  </div>
+</nav>
