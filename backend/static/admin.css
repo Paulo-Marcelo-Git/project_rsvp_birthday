@@ -276,3 +276,74 @@ body.theme-boy {
 .app-table tbody tr:hover {
   background-color: #f9fafb;
 }
+
+/* ===== AUTENTICAÇÃO (Fase 2) ===== */
+.auth-page {
+  min-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.auth-brand {
+  font-weight: 700;
+  font-size: 1.7rem;
+  color: #1d4ed8;
+  margin-bottom: 24px;
+}
+
+.auth-box {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(17, 24, 39, .06);
+  padding: 32px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-box-wide {
+  max-width: 440px;
+}
+
+.auth-box-message {
+  max-width: 480px;
+  text-align: center;
+  padding: 36px 32px;
+}
+
+.auth-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #111827;
+  text-align: center;
+  margin: 0 0 6px 0;
+}
+
+.auth-desc {
+  font-size: .82rem;
+  color: #6b7280;
+  text-align: center;
+  margin: 0 0 20px 0;
+}
+
+.auth-icon {
+  font-size: 2.4rem;
+  margin-bottom: 14px;
+}
+
+.auth-links {
+  text-align: center;
+  margin-top: 16px;
+  font-size: .8rem;
+  color: #6b7280;
+}
+
+.auth-footer-version {
+  margin-top: 18px;
+  font-size: .78rem;
+  color: #9ca3af;
+  text-align: center;
+}
