@@ -4,47 +4,11 @@
 {% block title %}Comemore+ - Login{% endblock %}
 
 {% block content %}
-<style>
-  body {
-    background: linear-gradient(to right, #fce4ec, #e3f2fd);
-  }
-  .login-header {
-    font-weight: 700;
-    font-size: 2rem;
-    color: #2c3e50;
-    margin-bottom: 20px;
-  }
-  .login-box {
-    background: #ffffff;
-    padding: 30px;
-    border-radius: 16px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
-    width: 100%;
-    max-width: 400px;
-  }
-  .form-label {
-    font-weight: 500;
-  }
-  .btn-login {
-    background: #1976d2;
-    color: white;
-    font-weight: 600;
-  }
-  .btn-login:hover {
-    background: #1565c0;
-  }
-  .footer-version {
-    margin-top: 20px;
-    font-size: 0.9rem;
-    color: #666;
-  }
-</style>
+<div class="auth-page">
+  <div class="auth-brand">Comemore+</div>
 
-<div class="container d-flex flex-column align-items-center justify-content-center" style="min-height: 90vh;">
-  <h1 class="login-header">Comemore+</h1>
-
-  <div class="login-box">
-    <h4 class="mb-4 text-center">Área do Anfitrião</h4>
+  <div class="auth-box">
+    <h4 class="auth-title">Área do Anfitrião</h4>
 
     <form method="POST" action="{{ url_for('login') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -57,28 +21,23 @@
         <input type="password" name="password" class="form-control" required>
       </div>
       <div class="d-grid">
-        <button type="submit" class="btn btn-login">Entrar</button>
+        <button type="submit" class="btn btn-primary">Entrar</button>
       </div>
-      <div class="text-center mt-3">
-        <a href="{{ url_for('forgot_password') }}" class="text-muted small">
-          Esqueci minha senha
-        </a>
+      <div class="auth-links">
+        <a href="{{ url_for('forgot_password') }}">Esqueci minha senha</a>
         &nbsp;·&nbsp;
-        <a href="{{ url_for('resend_verification') }}" class="text-muted small">
-          Reenviar verificação
-        </a>
+        <a href="{{ url_for('resend_verification') }}">Reenviar verificação</a>
       </div>
     </form>
   </div>
 
   <div class="mt-3">
-    <a href="{{ url_for('signup') }}"
-       class="btn btn-outline-success btn-sm">
+    <a href="{{ url_for('signup') }}" class="btn btn-outline-success btn-sm">
       Criar conta grátis
     </a>
   </div>
 
-  <div class="footer-version text-center">
+  <div class="auth-footer-version">
     {{ app_version }}
   </div>
 </div>
