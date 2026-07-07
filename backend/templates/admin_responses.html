@@ -121,7 +121,14 @@
             {% if is_tenant_admin %}
             <td><span class="badge bg-light text-dark border">{{ row.owner_username }}</span></td>
             {% endif %}
-            <td><a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank">{{ url_for('invite', token=row.token, _external=True) }}</a></td>
+            <td class="text-nowrap">
+              <a href="{{ url_for('invite', token=row.token, _external=True) }}" target="_blank" class="btn btn-xs btn-outline-primary me-1" title="Abrir link do convite">
+                <i class="bi bi-box-arrow-up-right"></i>
+              </a>
+              <button type="button" class="btn btn-xs btn-outline-secondary copy-invite-link" data-url="{{ url_for('invite', token=row.token, _external=True) }}" title="Copiar link do convite">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </td>
             <td>
               {% if row.whatsapp_url %}
                 <a href="{{ row.whatsapp_url }}" class="btn btn-sm btn-success" target="_blank">WhatsApp</a>
@@ -129,7 +136,7 @@
                 <span class="text-muted">Sem número</span>
               {% endif %}
             </td>
-            <td class="text-center">
+            <td class="text-center text-nowrap">
               <button
                 class="btn btn-sm btn-outline-success me-1"
                 title="Editar"
@@ -364,6 +371,20 @@
     document.getElementById('edit-response').value = button.getAttribute('data-response') || '';
     const id = button.getAttribute('data-id');
     document.getElementById('editForm').action = "{{ url_for('edit_convidado', id=0) }}".replace('/0/', '/' + id + '/');
+  });
+
+  document.querySelectorAll('.copy-invite-link').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      navigator.clipboard.writeText(btn.dataset.url).then(function() {
+        const icon = btn.querySelector('i');
+        icon.classList.remove('bi-clipboard');
+        icon.classList.add('bi-clipboard-check');
+        setTimeout(function() {
+          icon.classList.remove('bi-clipboard-check');
+          icon.classList.add('bi-clipboard');
+        }, 1500);
+      });
+    });
   });
 </script>
 {% endblock %}
