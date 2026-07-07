@@ -131,6 +131,52 @@ def test_add_convidado_ilimitado_cria(admin_client, db):
     conn.commit.assert_called_once()
 
 
+def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
+    """Convidado deve ir para o evento indicado no form, não para o mais recente do tenant."""
+    conn = setup_db(db,
+                    qresult(fetchone={'id': 5}),   # valida event_id=5 pertence ao tenant
+                    qresult(fetchone=_LIMITS_FREE),
+                    qresult(fetchone=_COUNT_ZERO),
+                    qresult())                      # add_invitee
+
+    resp = admin_client.post('/admin/convidados/add', data={
+        'name': 'Convidado Evento Certo',
+        'email': 'certo@email.com',
+        'phone': '',
+        'event_id': '5',
+    })
+
+    assert resp.status_code == 302
+    assert '/admin/respostas?event_id=5' in resp.headers['Location']
+    assert conn.execute.call_count == 4
+    insert_params = conn.execute.call_args_list[-1][0][1]
+    assert insert_params['eid'] == 5
+    conn.commit.assert_called_once()
+
+
+def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
+    """event_id que não pertence ao tenant não deve ser aceito — cai no evento padrão."""
+    conn = setup_db(db,
+                    qresult(fetchone=None),          # event_id=999 não pertence ao tenant
+                    qresult(fetchone=DEFAULT_EVENT_ROW),  # fallback: get_default_event_id
+                    qresult(fetchone=_LIMITS_FREE),
+                    qresult(fetchone=_COUNT_ZERO),
+                    qresult())                        # add_invitee
+
+    resp = admin_client.post('/admin/convidados/add', data={
+        'name': 'Convidado Tentativa Invasao',
+        'email': 'x@email.com',
+        'phone': '',
+        'event_id': '999',
+    })
+
+    assert resp.status_code == 302
+    assert conn.execute.call_count == 5
+    insert_params = conn.execute.call_args_list[-1][0][1]
+    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
+    conn.commit.assert_called_once()
+
+
 def test_add_convidado_sem_nome_nao_salva(admin_client, db):
     resp = admin_client.post('/admin/convidados/add', data={'name': ''})
 

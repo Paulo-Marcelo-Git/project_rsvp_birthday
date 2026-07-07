@@ -922,6 +922,9 @@ def add_convidado():
       - in: formData
         name: media_file
         type: file
+      - in: formData
+        name: event_id
+        type: integer
     responses:
       302:
         description: Redireciona para /admin/respostas
@@ -950,8 +953,22 @@ def add_convidado():
 
     tid = current_user.tenant_id
     token = secrets.token_urlsafe(16)[:22]
+    try:
+        event_id_form = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        event_id_form = 0
+
     with engine.connect() as conn:
-        event_id = repo.get_default_event_id(conn, tid)
+        event_id = None
+        if event_id_form:
+            valid = conn.execute(
+                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
+                {"eid": event_id_form, "tid": tid},
+            ).mappings().fetchone()
+            if valid:
+                event_id = event_id_form
+        if event_id is None:
+            event_id = repo.get_default_event_id(conn, tid)
         if event_id is None:
             flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
             return redirect(url_for("respostas"))
@@ -963,7 +980,7 @@ def add_convidado():
                 "Faça upgrade do plano para adicionar mais.",
                 "danger",
             )
-            return redirect(url_for("respostas"))
+            return redirect(url_for("respostas", event_id=event_id))
         repo.add_invitee(
             conn, tid, event_id, name, token,
             phone=phone, email=email, observation=msg, media_url=media_filename,
@@ -972,7 +989,7 @@ def add_convidado():
 
     logger.info(f"Convidado adicionado: '{name}' por '{current_user.username}'.")
     flash(f'Convidado "{name}" adicionado com sucesso!', "success")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=event_id))
 
 
 @app.route("/admin/convidados/<int:id>/edit", methods=["POST"])

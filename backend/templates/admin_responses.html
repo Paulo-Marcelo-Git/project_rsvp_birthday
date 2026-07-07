@@ -264,6 +264,7 @@
     <div class="modal-dialog">
       <form class="modal-content" action="{{ url_for('add_convidado') }}" method="post" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="event_id" value="{{ event_id }}">
         <div class="modal-header">
           <h5 class="modal-title">Adicionar Novo Convidado</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
