@@ -38,4 +38,5 @@ docker-compose-old.yml
 
 # Specs e documentos internos (não subir para repo público)
 docs/superpowers/
+docs/smoke-tests/
 .superpowers/
