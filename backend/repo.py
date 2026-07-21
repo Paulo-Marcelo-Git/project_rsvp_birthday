@@ -94,6 +94,20 @@ def create_tenant(conn, name: str) -> int:
     return int(row["id"])
 
 
+def get_system_tenant_id(conn) -> int:
+    """Retorna o id do tenant reservado do sistema (criado pela migration 0006)."""
+    row = conn.execute(
+        text("SELECT id FROM tenants WHERE name = :name"),
+        {"name": "Comemore+ System"},
+    ).mappings().fetchone()
+    if not row:
+        raise RuntimeError(
+            "Tenant reservado do sistema não encontrado — rode "
+            "'alembic upgrade head' (migration 0006) antes de criar o super-admin."
+        )
+    return int(row["id"])
+
+
 # ── eventos ───────────────────────────────────────────────────────────────────
 
 def get_default_event_id(conn, tenant_id: int) -> int | None:
@@ -729,7 +743,9 @@ def set_tenant_status(conn, tenant_id: int, status: str) -> None:
 
 
 def list_all_tenants(conn) -> list[dict]:
-    """Lista todos os tenants com contagens de uso. Sem filtro de tenant_id — super-admin only."""
+    """Lista todos os tenants com contagens de uso, exceto o tenant reservado
+    do sistema (onde mora a conta super_admin). Sem filtro de tenant_id —
+    super-admin only."""
     rows = conn.execute(text("""
         SELECT
             t.id, t.name, t.plan, t.status, t.created_at,
@@ -739,6 +755,10 @@ def list_all_tenants(conn) -> list[dict]:
             (SELECT COUNT(*) FROM users    WHERE tenant_id = t.id) AS member_count
         FROM tenants t
         JOIN plan_limits pl ON t.plan = pl.plan
+        WHERE NOT EXISTS (
+            SELECT 1 FROM users u
+            WHERE u.tenant_id = t.id AND u.role = 'super_admin'
+        )
         ORDER BY t.created_at DESC
     """)).mappings().all()
     return [dict(r) for r in rows]

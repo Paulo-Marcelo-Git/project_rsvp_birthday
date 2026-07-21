@@ -330,3 +330,27 @@ def test_get_invitees_retorna_alias_response_date():
     repo.get_invitees(c, 1)
     sql = str(c.execute.call_args[0][0])
     assert "responded_at" in sql and "response_date" in sql
+
+
+# ── system tenant (super-admin only) ──────────────────────────────────────────
+
+def test_get_system_tenant_id_retorna_id_do_tenant_reservado():
+    c = _conn(fetchone={'id': 7})
+    result = repo.get_system_tenant_id(c)
+    assert result == 7
+    params = _last_params(c)
+    assert params["name"] == "Comemore+ System"
+
+
+def test_get_system_tenant_id_levanta_erro_se_nao_existir():
+    c = _conn(fetchone=None)
+    with pytest.raises(RuntimeError):
+        repo.get_system_tenant_id(c)
+
+
+def test_list_all_tenants_exclui_tenant_reservado_na_query():
+    c = _conn(all_rows=[])
+    repo.list_all_tenants(c)
+    sql = str(c.execute.call_args[0][0])
+    assert "super_admin" in sql
+    assert "NOT EXISTS" in sql
