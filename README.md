@@ -136,7 +136,7 @@ Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de con
 | `/superadmin/tenant/<id>/suspend` | Super-admin do SaaS | Suspende o acesso de um tenant |
 | `/superadmin/tenant/<id>/reactivate` | Super-admin do SaaS | Reativa um tenant suspenso |
 
-> **Super-admin do SaaS:** acesso a `/superadmin/*` exige a env var `SUPERADMIN_EMAIL` configurada e uma conta logada com esse email — que **não pode** pertencer a um tenant existente (ver seção de configuração acima).
+> **Super-admin do SaaS:** acesso a `/superadmin/*` exige `role='super_admin'` gravado no banco (não mais uma comparação de email a cada request). A conta é provisionada uma única vez via `flask create-superadmin`, que lê `SUPERADMIN_EMAIL` — ver seção "Limites por Plano e Painel Super-Admin" abaixo.
 
 ---
 
