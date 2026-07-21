@@ -64,7 +64,8 @@ project_rsvp_birthday/
 │   │       ├── 0002_seed_default_tenant.py
 │   │       ├── 0003_email_verification_tokens.py
 │   │       ├── 0004_plan_limits.py
-│   │       └── 0005_accepted_terms_at.py
+│   │       ├── 0005_accepted_terms_at.py
+│   │       └── 0006_super_admin_role.py
 │   ├── Dockerfile
 │   ├── entrypoint.sh        # Roda `alembic upgrade head` antes do gunicorn (*.sh text eol=lf via .gitattributes)
 │   ├── requirements.txt
@@ -87,7 +88,7 @@ project_rsvp_birthday/
 ## Schema (fonte de verdade: Alembic)
 
 - **`tenants`** — conta do cliente. Raiz da árvore (apagar cascateia tudo = LGPD).
-- **`users`** — `tenant_id` + `role` (`tenant_admin`/`member`). `email` UNIQUE global; `username` UNIQUE por tenant.
+- **`users`** — `tenant_id` + `role` (`tenant_admin`/`member`/`super_admin`). `email` UNIQUE global; `username` UNIQUE por tenant. Conta `super_admin` mora no tenant reservado `Comemore+ System` (migration 0006), nunca num tenant de cliente real.
 - **`events`** — núcleo do produto. N eventos por tenant. Textos do convite por evento. `slug` aleatório.
 - **`invitees`** — FK para `events` + `tenant_id` desnormalizado (isolamento barato sem JOIN). `token` UNIQUE global.
 - **`password_reset_tokens`** — TTL 1h, flag `used`.
@@ -105,6 +106,7 @@ project_rsvp_birthday/
 - Novos membros: senha temporária aleatória (`secrets.token_urlsafe(12)`) + email de convite (TTL 72h).
 - `SKIP_EMAIL_VERIFICATION=true` (dev only, default OFF) — ausência da var = verificação obrigatória.
 - Sem `AdminUser` por env var, sem `DEFAULT_PASSWORD` hardcoded.
+- Super-admin: `role='super_admin'`, provisionado via `flask create-superadmin` (lê `SUPERADMIN_EMAIL`, cria a conta no tenant reservado com senha temporária + email de convite). Loga direto em `/superadmin` e fica restrito a essas rotas — não acessa o painel de tenant normal.
 
 ---
 

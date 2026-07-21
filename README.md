@@ -155,7 +155,7 @@ Schema SaaS multi-tenant:
 | Tabela | Descrição |
 |--------|-----------|
 | `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). Tem `plan` (free/pro/business) e `status` (trial/active/suspended/canceled), geridos via `/superadmin`. |
-| `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`). Email UNIQUE global. `accepted_terms_at` registra o aceite dos termos no signup. |
+| `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`/`super_admin`). Email UNIQUE global. `accepted_terms_at` registra o aceite dos termos no signup. |
 | `events` | N eventos por tenant, com textos do convite e `theme` (padrão/menina/menino) por evento. |
 | `invitees` | Convidados com `tenant_id` desnormalizado e `token` UNIQUE global. |
 | `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used`. |
@@ -407,10 +407,18 @@ Cada tenant tem um `plan` (`free`/`pro`/`business`) e um `status` (`trial`/`acti
 
 Ao atingir o limite, a criação de novo evento/convidado/membro é bloqueada com uma mensagem clara — sem exceção silenciosa.
 
-O painel `/superadmin` permite ao operador do SaaS listar todos os tenants e alterar plano/status (suspender, reativar). Acesso protegido pela env var `SUPERADMIN_EMAIL`:
+O painel `/superadmin` permite ao operador do SaaS listar todos os tenants e alterar plano/status (suspender, reativar). A conta em si é registrada no banco como `role='super_admin'` — não é mais uma comparação de email a cada request.
 
-- O email deve estar logado e bater exatamente com `SUPERADMIN_EMAIL`.
-- Esse email **não pode** pertencer a uma conta de tenant existente no banco — se pertencer, o acesso é bloqueado como configuração inválida (evita um tenant se auto-promover a super-admin).
+**Provisionar o super-admin (uma vez):**
+
+```bash
+docker exec rsvp_backend flask create-superadmin
+```
+
+- Lê `SUPERADMIN_EMAIL` do `.env`, cria a conta no tenant reservado `Comemore+ System` com senha temporária.
+- Envia email de convite (mesmo mecanismo de "novo membro") se `EMAIL_SMTP`/`EMAIL_USER` estiverem configurados; senão imprime a senha temporária no terminal.
+- Idempotente: rodar de novo com a mesma `SUPERADMIN_EMAIL` não duplica a conta.
+- Ao logar, a conta é reconhecida como `super_admin` automaticamente e cai direto em `/superadmin` — fica impedida de acessar as rotas de tenant normal.
 
 ---
 
