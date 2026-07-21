@@ -20,6 +20,13 @@ Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o
 - Gerenciamento de sub-usuários (cada um vê apenas seus próprios convidados)
 - Reset de senha self-service por email (link com TTL de 1h)
 - Backup automático diário com retenção configurável
+- Múltiplos eventos por tenant, cada um com tema visual (padrão / menina / menino)
+- Edição e exclusão de convidados já cadastrados
+- Envio de email assíncrono via fila Redis + RQ (fallback síncrono em dev sem Redis)
+- Rate limiting (login, signup, reset de senha, confirmação de convite) contra abuso
+- Termos de uso e política de privacidade (LGPD), com aceite obrigatório no cadastro
+- Limites de uso por plano (free / pro / business): eventos, convidados e membros
+- Painel super-admin do SaaS: gerenciar plano e status (ativo/suspenso) de cada tenant
 
 ---
 
@@ -44,6 +51,8 @@ DB_HOST=db
 SECRET_KEY=chave_flask_aleatoria
 
 # Email SMTP — obrigatório em produção (signup falha com erro claro sem isso)
+# Dev local rápido: Gmail App Password. Produção: use Brevo/Resend (ver seção
+# "Configuração de Email Transacional" mais abaixo).
 EMAIL_SMTP=smtp.gmail.com
 EMAIL_PORTA=587
 EMAIL_USER=seu_email@gmail.com
@@ -55,8 +64,15 @@ APP_BASE_URL=https://seudominio.com.br
 # Dev only — jamais em produção
 # SKIP_EMAIL_VERIFICATION=1
 
+# Fila de email assíncrono (Redis + RQ) — ausente = executa síncrono (dev)
+REDIS_URL=redis://redis:6379/0
+
 # Backup (opcional — default já aplicado no container)
 BACKUP_RETENTION_DAYS=7
+
+# Super-admin do SaaS — acessa /superadmin para gerenciar tenants (plano/status)
+# Este email NÃO pode existir como conta de tenant no banco, senão o acesso é bloqueado.
+# SUPERADMIN_EMAIL=admin@seudominio.com
 ```
 
 > `EMAIL_PASS` deve ser um **App Password** do Google: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
@@ -89,19 +105,38 @@ Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de con
 
 | Rota | Acesso | Descrição |
 |------|--------|-----------|
-| `/signup` | Público | Criar conta (tenant + tenant_admin + evento padrão) |
-| `/login` | Público | Login |
-| `/forgot_password` | Público | Solicitar reset de senha |
+| `/signup` | Público | Criar conta (tenant + tenant_admin + evento padrão) — rate limit 5/hora |
+| `/login` | Público | Login — rate limit 10/min |
+| `/logout` | Login | Encerra a sessão |
+| `/forgot_password` | Público | Solicitar reset de senha — rate limit 5/hora |
 | `/reset_password/<token>` | Público | Redefinir senha via link de email |
 | `/resend-verification` | Público | Reenviar link de verificação de email |
-| `/invite/<token>` | Público | Página de confirmação do convidado |
+| `/verify-email/<token>` | Público | Confirma o email a partir do link (TTL 24h) |
+| `/termos` | Público | Termos de uso (LGPD) |
+| `/privacidade` | Público | Política de privacidade (LGPD) |
+| `/invite/<token>` | Público | Página de confirmação do convidado — rate limit 30/min (GET) / 10/min (POST) |
 | `/uploads/<filename>` | Tenant autenticado ou convidado c/ session | Serve arquivo de upload com validação de posse |
 | `/admin/respostas` | Login | Lista de respostas com paginação e busca |
 | `/admin/exportar_xlsx` | Login | Download da lista em Excel |
 | `/admin/convidados/add` | Login | Adicionar convidado |
+| `/admin/convidados/<id>/edit` | Login | Editar convidado |
+| `/admin/convidados/<id>/delete` | Login | Excluir convidado |
 | `/admin/textos` | tenant_admin | Editar textos do convite |
+| `/admin/set_tema` | tenant_admin | Define o tema visual do evento (padrão/menina/menino) |
+| `/admin/eventos` | Login | Lista os eventos do tenant |
+| `/admin/eventos/criar` | Login | Cria um novo evento no tenant |
 | `/admin/usuarios` | tenant_admin | Gerenciar membros do tenant |
+| `/admin/usuarios/add` | tenant_admin | Convida um novo membro (senha temporária por email) |
+| `/admin/usuarios/<id>/edit` | tenant_admin | Edita dados de um membro |
+| `/admin/usuarios/<id>/reset_senha` | tenant_admin | Reenvia senha temporária a um membro |
+| `/admin/usuarios/<id>/delete` | tenant_admin | Remove um membro do tenant |
 | `/change_password` | Login (member) | Troca de senha obrigatória |
+| `/superadmin` | Super-admin do SaaS | Lista todos os tenants do sistema |
+| `/superadmin/tenant/<id>/set_plan` | Super-admin do SaaS | Altera o plano (free/pro/business) de um tenant |
+| `/superadmin/tenant/<id>/suspend` | Super-admin do SaaS | Suspende o acesso de um tenant |
+| `/superadmin/tenant/<id>/reactivate` | Super-admin do SaaS | Reativa um tenant suspenso |
+
+> **Super-admin do SaaS:** acesso a `/superadmin/*` exige a env var `SUPERADMIN_EMAIL` configurada e uma conta logada com esse email — que **não pode** pertencer a um tenant existente (ver seção de configuração acima).
 
 ---
 
@@ -119,12 +154,13 @@ Schema SaaS multi-tenant:
 
 | Tabela | Descrição |
 |--------|-----------|
-| `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). |
-| `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`). Email UNIQUE global. |
-| `events` | N eventos por tenant, com textos do convite por evento. |
+| `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). Tem `plan` (free/pro/business) e `status` (trial/active/suspended/canceled), geridos via `/superadmin`. |
+| `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`). Email UNIQUE global. `accepted_terms_at` registra o aceite dos termos no signup. |
+| `events` | N eventos por tenant, com textos do convite e `theme` (padrão/menina/menino) por evento. |
 | `invitees` | Convidados com `tenant_id` desnormalizado e `token` UNIQUE global. |
 | `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used`. |
 | `email_verification_tokens` | Tokens de verificação de email com TTL de 24h e flag `used`. |
+| `plan_limits` | Limites por plano (PK `plan`): `max_events`, `max_invitees`, `max_members` (`NULL` = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(ilimitado). |
 
 ---
 
@@ -326,6 +362,57 @@ A rota `/uploads/<filename>` não é pública:
 - **Usuário logado:** o arquivo deve pertencer ao tenant do usuário autenticado
 - **Convidado sem login:** session do Flask valida o token de convite contra o `media_url` do registro (sem expor o token em query string)
 - Qualquer outro acesso → 404 (sem vazar existência do arquivo)
+
+## Fila de Email Assíncrona (Redis + RQ)
+
+Todo envio de email (verificação, reset de senha, convite de membro) passa por `enqueue_email()` (`backend/queue_utils.py`), que decide entre fila e envio direto:
+
+- **`REDIS_URL` presente:** enfileira o job via RQ; o serviço `worker` (container `rsvp_worker`) processa a fila em background.
+- **`REDIS_URL` ausente:** executa o envio de forma síncrona (conveniente em dev local sem Redis).
+- **`REDIS_URL` presente mas Redis fora do ar:** loga o erro — **não** cai para envio síncrono em produção (evita travar a request esperando o SMTP).
+
+```bash
+# Ver logs do worker (deve mostrar "Performed" para cada job)
+docker logs -f rsvp_worker
+
+# Inspecionar quantos jobs estão na fila
+docker exec rsvp_redis redis-cli llen rq:queue:default
+```
+
+---
+
+## Rate Limiting
+
+Via **Flask-Limiter**, com storage Redis (mesma instância da fila) e fallback automático para `memory://` se o Redis não estiver configurado:
+
+| Rota | Limite |
+|------|--------|
+| `/login` (POST) | 10 por minuto |
+| `/signup` (POST) | 5 por hora |
+| `/forgot_password` (POST) | 5 por hora |
+| `/invite/<token>` (GET) | 30 por minuto |
+| `/invite/<token>` (POST) | 10 por minuto |
+
+---
+
+## Limites por Plano e Painel Super-Admin
+
+Cada tenant tem um `plan` (`free`/`pro`/`business`) e um `status` (`trial`/`active`/`suspended`/`canceled`). Os limites de uso por plano ficam na tabela `plan_limits`:
+
+| Plano | Eventos | Convidados | Membros |
+|-------|---------|-----------|---------|
+| `free` | 2 | 50 | 1 |
+| `pro` | 10 | 500 | 5 |
+| `business` | ilimitado | ilimitado | ilimitado |
+
+Ao atingir o limite, a criação de novo evento/convidado/membro é bloqueada com uma mensagem clara — sem exceção silenciosa.
+
+O painel `/superadmin` permite ao operador do SaaS listar todos os tenants e alterar plano/status (suspender, reativar). Acesso protegido pela env var `SUPERADMIN_EMAIL`:
+
+- O email deve estar logado e bater exatamente com `SUPERADMIN_EMAIL`.
+- Esse email **não pode** pertencer a uma conta de tenant existente no banco — se pertencer, o acesso é bloqueado como configuração inválida (evita um tenant se auto-promover a super-admin).
+
+---
 
 ## Testes de integração
 
