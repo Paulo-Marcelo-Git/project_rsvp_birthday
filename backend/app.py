@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from flasgger import Swagger
+import click
 from flask import (
     Flask,
     Response,
@@ -1694,6 +1695,58 @@ def superadmin_reactivate(tenant_id):
         conn.commit()
     flash(f"Tenant {tenant_id} reativado.", "success")
     return redirect(url_for("superadmin"))
+
+
+@app.cli.command("create-superadmin")
+def create_superadmin():
+    """Provisiona a conta super-admin a partir de SUPERADMIN_EMAIL."""
+    superadmin_email = os.getenv("SUPERADMIN_EMAIL", "").strip().lower()
+    if not superadmin_email:
+        click.echo("Erro: SUPERADMIN_EMAIL não está definida no ambiente.")
+        return
+
+    with engine.connect() as conn:
+        existing = repo.get_user_by_email_global(conn, superadmin_email)
+        if existing and existing.get("role") == "super_admin":
+            click.echo(f"Já existe um super-admin para '{superadmin_email}'. Nada a fazer.")
+            return
+        if existing:
+            click.echo(
+                f"Erro: '{superadmin_email}' já existe como usuário comum "
+                f"(role='{existing.get('role')}'). Não é possível promover automaticamente."
+            )
+            return
+
+        tenant_id = repo.get_system_tenant_id(conn)
+        temp_pass = secrets.token_urlsafe(12)
+        username = "superadmin"
+        user_id = repo.add_user(
+            conn, tenant_id, username, superadmin_email,
+            generate_password_hash(temp_pass),
+            role="super_admin",
+            must_change_password=True,
+        )
+        conn.commit()
+
+    if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"):
+        with engine.connect() as conn:
+            token = uuid.uuid4().hex
+            expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            conn.execute(
+                text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
+                     "VALUES (:uid, :tok, :exp)"),
+                {"uid": user_id, "tok": token, "exp": expires},
+            )
+            conn.commit()
+        base_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
+        reset_url = f"{base_url}/reset_password/{token}"
+        enqueue_email(tasks.send_member_invite_email, superadmin_email, username, reset_url)
+        click.echo(f"Super-admin criado. Email de convite enviado para {superadmin_email}.")
+    else:
+        click.echo(
+            f"Super-admin criado. Senha temporária: {temp_pass} "
+            f"(troque no primeiro acesso via /change_password)."
+        )
 
 
 if __name__ == "__main__":
