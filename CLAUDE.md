@@ -45,7 +45,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Flask-Limiter 3.8.0 — rate limiting com Redis storage + fallback memory://
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
-- pytest (148 unit tests + 33 integration tests deselected sem MySQL real)
+- pytest (173 unit tests + 45 integration tests deselected sem MySQL real)
 
 ---
 
@@ -71,7 +71,7 @@ project_rsvp_birthday/
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 148 unit tests + integration (marcados @pytest.mark.integration)
+│   └── tests/               # pytest — 173 unit tests + integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
 ├── docs/superpowers/plans/  # Histórico de planos por sub-fase
 ├── .github/workflows/deploy.yml
