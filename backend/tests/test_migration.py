@@ -396,3 +396,85 @@ class TestMigration0005:
                 {"db": TEST_DB},
             ).scalar()
         assert count == 0, "accepted_terms_at ainda presente após downgrade"
+
+
+@pytest.mark.integration
+class TestMigration0006:
+    """Migration 0006: role 'super_admin' + tenant reservado do sistema."""
+
+    def test_01_upgrade_applies_cleanly(self, test_db):
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode == 0, (
+            f"upgrade head falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+    def test_02_role_enum_inclui_super_admin(self, test_db):
+        with test_db.connect() as conn:
+            row = conn.execute(text("""
+                SELECT COLUMN_TYPE FROM information_schema.columns
+                WHERE table_schema = :db AND table_name = 'users' AND column_name = 'role'
+            """), {"db": TEST_DB}).fetchone()
+        assert row is not None, "Coluna users.role não encontrada"
+        assert "super_admin" in row[0], f"ENUM role sem 'super_admin': {row[0]}"
+
+    def test_03_tenant_reservado_criado(self, test_db):
+        with test_db.connect() as conn:
+            row = conn.execute(text(
+                "SELECT plan, status FROM tenants WHERE name = 'Comemore+ System'"
+            )).mappings().fetchone()
+        assert row is not None, "Tenant 'Comemore+ System' não foi criado"
+        assert row["plan"] == "business"
+        assert row["status"] == "active"
+
+    def test_04_reupgrade_nao_duplica_tenant_reservado(self, test_db):
+        """Rodar upgrade head de novo (idempotência do INSERT ... WHERE NOT EXISTS)."""
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode == 0
+        with test_db.connect() as conn:
+            count = conn.execute(text(
+                "SELECT COUNT(*) FROM tenants WHERE name = 'Comemore+ System'"
+            )).scalar()
+        assert count == 1, f"Esperava 1 tenant reservado, encontrou {count}"
+
+    def test_05_downgrade_bloqueado_com_super_admin_existente(self, test_db):
+        """downgrade deve falhar (exit != 0) se existir usuário role='super_admin'."""
+        with test_db.connect() as conn:
+            tenant_row = conn.execute(text(
+                "SELECT id FROM tenants WHERE name = 'Comemore+ System'"
+            )).mappings().fetchone()
+            conn.execute(text("""
+                INSERT INTO users (tenant_id, username, email, password_hash, role)
+                VALUES (:tid, 'superadmin', 'sa@test.com', 'x', 'super_admin')
+            """), {"tid": tenant_row["id"]})
+            conn.commit()
+
+        result = _run_alembic("downgrade", "0005")
+        assert result.returncode != 0, "downgrade deveria falhar com super_admin existente"
+
+        with test_db.connect() as conn:
+            conn.execute(text("DELETE FROM users WHERE email = 'sa@test.com'"))
+            conn.commit()
+
+    def test_06_downgrade_remove_role_e_tenant_reservado(self, test_db):
+        """Sem super_admin restante, downgrade deve funcionar e remover o tenant reservado."""
+        result = _run_alembic("downgrade", "0005")
+        assert result.returncode == 0, (
+            f"downgrade falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        with test_db.connect() as conn:
+            count = conn.execute(text(
+                "SELECT COUNT(*) FROM tenants WHERE name = 'Comemore+ System'"
+            )).scalar()
+            row = conn.execute(text("""
+                SELECT COLUMN_TYPE FROM information_schema.columns
+                WHERE table_schema = :db AND table_name = 'users' AND column_name = 'role'
+            """), {"db": TEST_DB}).fetchone()
+        assert count == 0, "Tenant reservado ainda presente após downgrade"
+        assert "super_admin" not in row[0], "ENUM ainda contém 'super_admin' após downgrade"
+
+    def test_07_reupgrade_after_downgrade(self, test_db):
+        """Re-aplicar upgrade head deixa o schema pronto para as próximas fases/testes."""
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode == 0, (
+            f"re-upgrade falhou.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
