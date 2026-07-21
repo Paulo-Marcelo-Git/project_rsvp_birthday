@@ -35,7 +35,7 @@ _ADMIN_DBUSER = _app_module.DbUser(
 SUPERADMIN_EMAIL = 'superadmin@test.com'
 
 _SUPERADMIN_DBUSER = _app_module.DbUser(
-    999, 'superadmin', generate_password_hash('Superpass@1'), False, 99, 'member',
+    999, 'superadmin', generate_password_hash('Superpass@1'), False, 99, 'super_admin',
     email=SUPERADMIN_EMAIL,
 )
 
@@ -99,9 +99,8 @@ def admin_client(client):
 
 
 @pytest.fixture
-def superadmin_client(client, monkeypatch):
-    """Client autenticado como superadmin (member, email == SUPERADMIN_EMAIL)."""
-    monkeypatch.setenv('SUPERADMIN_EMAIL', SUPERADMIN_EMAIL)
+def superadmin_client(client):
+    """Client autenticado como super-admin (role='super_admin')."""
     with client.session_transaction() as sess:
         sess['_user_id'] = 'user_999'
         sess['_fresh'] = True

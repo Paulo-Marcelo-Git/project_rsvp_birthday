@@ -29,6 +29,20 @@ def test_login_credenciais_invalidas_exibe_erro(client, db):
     assert 'inválidos' in resp.data.decode()
 
 
+def test_login_seta_email_no_dbuser_da_sessao(client, db):
+    """Regressão: DbUser construído no login() deve carregar current_user.email."""
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),
+             qresult(fetchone={'status': 'active'}))
+
+    client.post('/login', data={
+        'email': 'landlord@test.com',
+        'password': _PW,
+    })
+    from flask_login import current_user
+    assert current_user.email == 'landlord@test.com'
+
+
 def test_login_dbuser_tenant_admin_redireciona_para_respostas(client, db):
     """DbUser com role='tenant_admin' e is_active=1 autentica e redireciona para respostas."""
     setup_db(db,

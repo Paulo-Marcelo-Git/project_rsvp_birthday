@@ -1,4 +1,4 @@
-from tests.conftest import setup_db, qresult, SUPERADMIN_EMAIL
+from tests.conftest import setup_db, qresult
 
 _TENANT_ROW = {
     'id': 1, 'name': 'Festa da Ana', 'plan': 'free', 'status': 'active',
@@ -16,15 +16,8 @@ def test_superadmin_nao_autenticado_redireciona(client):
     assert '/login' in resp.headers['Location']
 
 
-def test_superadmin_sem_env_var_retorna_403(admin_client):
-    """Sem SUPERADMIN_EMAIL configurado → 403 mesmo se estiver autenticado."""
-    resp = admin_client.get('/superadmin')
-    assert resp.status_code == 403
-
-
-def test_superadmin_tenant_admin_normal_retorna_403(admin_client, monkeypatch):
-    """Tenant admin com email diferente de SUPERADMIN_EMAIL → 403."""
-    monkeypatch.setenv('SUPERADMIN_EMAIL', SUPERADMIN_EMAIL)
+def test_superadmin_role_tenant_admin_retorna_403(admin_client):
+    """tenant_admin (role != super_admin) não acessa /superadmin → 403."""
     resp = admin_client.get('/superadmin')
     assert resp.status_code == 403
 

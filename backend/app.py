@@ -170,6 +170,10 @@ class DbUser(UserMixin):
     def is_tenant_admin(self):
         return self.role == "tenant_admin"
 
+    @property
+    def is_super_admin(self):
+        return self.role == "super_admin"
+
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)
 
@@ -222,10 +226,7 @@ def superadmin_required(f):
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated:
             return redirect(url_for("login"))
-        superadmin_email = os.getenv("SUPERADMIN_EMAIL", "")
-        if not superadmin_email:
-            abort(403)
-        if current_user.email != superadmin_email:
+        if not current_user.is_super_admin:
             abort(403)
         return f(*args, **kwargs)
 
@@ -310,6 +311,7 @@ def login():
                 candidate = DbUser(
                     row["id"], row["username"], row["password_hash"],
                     row["must_change_password"], row["tenant_id"], row["role"],
+                    email=row.get("email"),
                 )
                 if candidate.check_password(password):
                     status = repo.get_tenant_status(conn, row["tenant_id"])
