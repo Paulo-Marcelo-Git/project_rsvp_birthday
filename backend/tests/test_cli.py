@@ -1,4 +1,7 @@
+from unittest.mock import patch
+
 from tests.conftest import setup_db, qresult, flask_app
+import tasks
 
 
 def test_create_superadmin_sem_env_var_mostra_erro(monkeypatch):
@@ -51,3 +54,27 @@ def test_create_superadmin_cria_com_sucesso_sem_smtp(db, monkeypatch):
 
     assert 'Senha temporária' in result.output
     conn.commit.assert_called()
+
+
+def test_create_superadmin_cria_com_sucesso_com_smtp(db, monkeypatch):
+    monkeypatch.setenv('SUPERADMIN_EMAIL', 'sa@test.com')
+    monkeypatch.setenv('EMAIL_SMTP', 'smtp-relay.brevo.com')
+    monkeypatch.setenv('EMAIL_USER', 'login@brevo.com')
+    conn = setup_db(db,
+                    qresult(fetchone=None),                  # get_user_by_email_global
+                    qresult(fetchone={'id': 7}),               # get_system_tenant_id
+                    qresult(),                                 # add_user INSERT
+                    qresult(fetchone={'id': 999}),             # LAST_INSERT_ID
+                    qresult())                                 # password_reset_tokens INSERT
+
+    with patch('app.enqueue_email') as mock_enqueue:
+        runner = flask_app.test_cli_runner()
+        result = runner.invoke(args=['create-superadmin'])
+
+    assert 'Email de convite enviado' in result.output
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0] is tasks.send_member_invite_email
+    assert mock_enqueue.call_args[0][1] == 'sa@test.com'
+    assert mock_enqueue.call_args[0][2] == 'superadmin'
+    assert '/reset_password/' in mock_enqueue.call_args[0][3]
+    assert conn.execute.call_count == 5
