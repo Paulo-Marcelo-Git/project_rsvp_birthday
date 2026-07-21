@@ -59,3 +59,10 @@ def test_superadmin_reactivate_redireciona(superadmin_client, db):
 
     assert resp.status_code == 302
     assert '/superadmin' in resp.headers['Location']
+
+
+def test_superadmin_bloqueia_acesso_a_rota_de_tenant(superadmin_client):
+    """Super-admin autenticado é redirecionado de volta pro painel ao tentar rota de tenant."""
+    resp = superadmin_client.get('/admin/eventos')
+    assert resp.status_code == 302
+    assert '/superadmin' in resp.headers['Location']

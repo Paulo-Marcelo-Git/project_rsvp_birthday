@@ -180,6 +180,31 @@ def test_login_tenant_trial_permite(client, db):
     assert '/admin/respostas' in resp.headers['Location']
 
 
+_SUPER_ADMIN_ROW = {
+    'id': 999, 'username': 'superadmin',
+    'email': 'superadmin@test.com',
+    'password_hash': generate_password_hash('Superpass@1'),
+    'must_change_password': False,
+    'tenant_id': 99, 'role': 'super_admin',
+    'is_active': 1,
+}
+
+
+def test_login_super_admin_redireciona_para_superadmin(client, db):
+    """DbUser com role='super_admin' é redirecionado direto para /superadmin."""
+    setup_db(db,
+             qresult(fetchone=_SUPER_ADMIN_ROW),
+             qresult(fetchone={'status': 'active'}))
+
+    resp = client.post('/login', data={
+        'email': 'superadmin@test.com',
+        'password': 'Superpass@1',
+    })
+
+    assert resp.status_code == 302
+    assert '/superadmin' in resp.headers['Location']
+
+
 # ── 5B-2: páginas públicas de termos e privacidade ────────────────────────────
 
 def test_termos_retorna_200(client):

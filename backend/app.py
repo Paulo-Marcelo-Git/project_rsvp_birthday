@@ -255,6 +255,22 @@ def force_password_change():
         return redirect(url_for("change_password"))
 
 
+_SUPER_ADMIN_ALLOWED_ENDPOINTS = {
+    "superadmin", "superadmin_set_plan", "superadmin_suspend",
+    "superadmin_reactivate", "change_password", "logout", "static",
+}
+
+
+@app.before_request
+def restrict_super_admin_to_panel():
+    if (
+        current_user.is_authenticated
+        and current_user.is_super_admin
+        and request.endpoint not in _SUPER_ADMIN_ALLOWED_ENDPOINTS
+    ):
+        return redirect(url_for("superadmin"))
+
+
 # Helpers
 def save_uploaded_file(file):
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -329,6 +345,8 @@ def login():
             login_user(user)
             logger.info(f"Login bem-sucedido: '{email}'.")
             flash("Login realizado com sucesso.", "success")
+            if user.is_super_admin:
+                return redirect(url_for("superadmin"))
             return redirect(url_for("respostas"))
 
         logger.warning(f"Tentativa de login inválida: '{email}'.")
