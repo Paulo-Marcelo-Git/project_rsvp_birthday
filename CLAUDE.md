@@ -21,6 +21,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | Fase 3D | ✅ Concluída | Guia Brevo × Resend, SPF/DKIM/DMARC, valores exatos no `.env.example` |
 | **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` com check de config inválida |
 | **Fase 5** | ✅ Concluída | Flask-Limiter (Redis/memory storage), rate limiting em 5 rotas (login/signup/forgot/invite), /termos + /privacidade (LGPD), aceite obrigatório no signup + `accepted_terms_at`, migration 0005, fix `datetime.utcnow()`, supressão warning RQ serializer, integration test fluxo completo |
+| **Deploy** | ✅ Concluída | Live em produção na VPS Hostinger (`https://zapbyte.com.br`), HTTPS via Certbot, CI/CD GitHub Actions → SSH funcionando (deploy automático a cada push em `main`). Fix de bug real: cron do serviço `backup` não herdava env vars do container (`DB_NAME: unbound variable`), backups automáticos silenciosamente quebrados — corrigido gravando `VAR=valor` no topo do crontab |
 
 ---
 
@@ -166,4 +167,5 @@ BACKUP_RETENTION_DAYS=7
 | 3A–3D | Backup + uploads em volume + fila Redis/RQ + guia email transacional | ✅ |
 | **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | ✅ |
 | **5** | **Rate limiting (Flask-Limiter), LGPD (/termos + /privacidade + aceite), migration 0005, fixes técnicos** | ✅ |
-| **Deploy** | **Deploy na VPS Hostinger + beta fechado** (ver `DEPLOY_CHECKLIST.md`) | 🔜 |
+| **Deploy** | **Deploy na VPS Hostinger** (ver `DEPLOY_CHECKLIST.md`) | ✅ |
+| **Beta** | **Beta fechado** — app já está live, falta só convidar usuários reais | 🔜 |
