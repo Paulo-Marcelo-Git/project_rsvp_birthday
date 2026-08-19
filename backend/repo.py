@@ -11,6 +11,8 @@ Aliases de compatibilidade nos SELECTs:
 Permite refatorar o banco sem alterar templates durante a transição.
 """
 import json
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -84,6 +86,39 @@ def get_valid_reset_token(conn, token: str) -> dict | None:
     return dict(row) if row else None
 
 
+def create_password_reset_token(conn, user_id: int, hours: int = 1) -> str:
+    """
+    Cria token de reset/convite de senha para o usuário e retorna o token.
+    Não comita — quem chama decide o momento do commit (permite combinar
+    com outra escrita na mesma transação, ex.: criação do usuário).
+    """
+    token = uuid.uuid4().hex
+    expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=hours)
+    conn.execute(
+        text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
+             "VALUES (:uid, :tok, :exp)"),
+        {"uid": user_id, "tok": token, "exp": expires},
+    )
+    return token
+
+
+SYSTEM_TENANT_NAME = "Comemore+ System"
+
+
+def get_system_tenant_id(conn) -> int:
+    """Retorna o id do tenant reservado do sistema (criado pela migration 0006)."""
+    row = conn.execute(
+        text("SELECT id FROM tenants WHERE name = :name"),
+        {"name": SYSTEM_TENANT_NAME},
+    ).mappings().fetchone()
+    if not row:
+        raise RuntimeError(
+            "Tenant reservado do sistema não encontrado — rode "
+            "'alembic upgrade head' (migration 0006) antes de criar o super-admin."
+        )
+    return int(row["id"])
+
+
 def create_tenant(conn, name: str) -> int:
     """Cria um novo tenant e retorna o tenant_id gerado."""
     conn.execute(
@@ -91,20 +126,6 @@ def create_tenant(conn, name: str) -> int:
         {"name": name},
     )
     row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
-    return int(row["id"])
-
-
-def get_system_tenant_id(conn) -> int:
-    """Retorna o id do tenant reservado do sistema (criado pela migration 0006)."""
-    row = conn.execute(
-        text("SELECT id FROM tenants WHERE name = :name"),
-        {"name": "Comemore+ System"},
-    ).mappings().fetchone()
-    if not row:
-        raise RuntimeError(
-            "Tenant reservado do sistema não encontrado — rode "
-            "'alembic upgrade head' (migration 0006) antes de criar o super-admin."
-        )
     return int(row["id"])
 
 

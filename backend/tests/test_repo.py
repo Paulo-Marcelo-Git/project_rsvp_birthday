@@ -4,6 +4,7 @@ parâmetros das queries e que as funções globais NÃO filtram por tenant.
 
 Usam mocks leves de conn.execute; não precisam de banco real.
 """
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -339,7 +340,7 @@ def test_get_system_tenant_id_retorna_id_do_tenant_reservado():
     result = repo.get_system_tenant_id(c)
     assert result == 7
     params = _last_params(c)
-    assert params["name"] == "Comemore+ System"
+    assert params["name"] == repo.SYSTEM_TENANT_NAME
 
 
 def test_get_system_tenant_id_levanta_erro_se_nao_existir():
@@ -354,3 +355,34 @@ def test_list_all_tenants_exclui_tenant_reservado_na_query():
     sql = str(c.execute.call_args[0][0])
     assert "super_admin" in sql
     assert "NOT EXISTS" in sql
+
+
+# ── password reset tokens ──────────────────────────────────────────────────────
+
+def test_create_password_reset_token_insere_e_retorna_token():
+    c = _conn()
+    token = repo.create_password_reset_token(c, 42)
+    assert isinstance(token, str) and len(token) == 32
+    params = _last_params(c)
+    assert params["uid"] == 42
+    assert params["tok"] == token
+    assert isinstance(params["exp"], datetime)
+    c.commit.assert_not_called()
+
+
+def test_create_password_reset_token_default_ttl_1_hora():
+    c = _conn()
+    before = datetime.now(timezone.utc).replace(tzinfo=None)
+    repo.create_password_reset_token(c, 1)
+    params = _last_params(c)
+    delta = params["exp"] - before
+    assert timedelta(hours=1) <= delta < timedelta(hours=1, minutes=1)
+
+
+def test_create_password_reset_token_aceita_ttl_customizado():
+    c = _conn()
+    before = datetime.now(timezone.utc).replace(tzinfo=None)
+    repo.create_password_reset_token(c, 1, hours=24)
+    params = _last_params(c)
+    delta = params["exp"] - before
+    assert timedelta(hours=24) <= delta < timedelta(hours=24, minutes=1)
