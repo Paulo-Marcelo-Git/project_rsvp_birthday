@@ -1,5 +1,7 @@
 from tests.conftest import setup_db, qresult, USER_ROW_FULL
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import tasks
 
 _LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
 _LIMITS_FREE = {'max_events': 2, 'max_invitees': 50, 'max_members': 1}
@@ -102,3 +104,25 @@ def test_admin_usuarios_mostra_botao_quando_ilimitado(admin_client, db):
     resp = admin_client.get('/admin/usuarios')
     assert resp.status_code == 200
     assert b'data-bs-target="#modalAddUser"' in resp.data
+
+
+# ── reset de senha de sub-usuário ─────────────────────────────────────────────
+
+def test_reset_senha_usuario_com_smtp_envia_convite(admin_client, db, monkeypatch):
+    monkeypatch.setenv('EMAIL_SMTP', 'smtp-relay.brevo.com')
+    monkeypatch.setenv('EMAIL_USER', 'login@brevo.com')
+    conn = setup_db(db,
+                    qresult(fetchone={'username': 'op', 'email': 'op@test.com'}),  # get_user_by_id
+                    qresult(),   # update_user (nova senha)
+                    qresult())   # create_password_reset_token INSERT
+
+    with patch('app.enqueue_email') as mock_enqueue:
+        resp = admin_client.post('/admin/usuarios/5/reset_senha')
+
+    assert resp.status_code == 302
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0] is tasks.send_member_invite_email
+    assert mock_enqueue.call_args[0][1] == 'op@test.com'
+    assert mock_enqueue.call_args[0][2] == 'op'
+    assert '/reset_password/' in mock_enqueue.call_args[0][3]
+    conn.commit.assert_called()

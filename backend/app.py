@@ -1412,13 +1412,7 @@ def add_usuario():
 
         if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"):
             with engine.connect() as conn:
-                token = uuid.uuid4().hex
-                expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
-                conn.execute(
-                    text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
-                         "VALUES (:uid, :tok, :exp)"),
-                    {"uid": new_user_id, "tok": token, "exp": expires},
-                )
+                token = repo.create_password_reset_token(conn, new_user_id)
                 conn.commit()
             base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
             reset_url = f"{base_url}/reset_password/{token}"
@@ -1539,14 +1533,7 @@ def reset_senha_usuario(id):
 
     if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER") and user.get("email"):
         with engine.connect() as conn:
-            token = uuid.uuid4().hex
-            from datetime import timezone
-            expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
-            conn.execute(
-                text("INSERT INTO password_reset_tokens (user_id, token, expires_at) "
-                     "VALUES (:uid, :tok, :exp)"),
-                {"uid": id, "tok": token, "exp": expires},
-            )
+            token = repo.create_password_reset_token(conn, id)
             conn.commit()
         base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
         reset_url = f"{base_url}/reset_password/{token}"
