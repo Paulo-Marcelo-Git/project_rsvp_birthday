@@ -544,13 +544,7 @@ def forgot_password():
             row = repo.get_user_by_email_global(conn, email)
 
             if row and row.get("email"):
-                token = uuid.uuid4().hex
-                expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
-                conn.execute(
-                    text("""INSERT INTO password_reset_tokens
-                            (user_id, token, expires_at) VALUES (:uid, :tok, :exp)"""),
-                    {"uid": row["id"], "tok": token, "exp": expires},
-                )
+                token = repo.create_password_reset_token(conn, row["id"])
                 conn.commit()
                 base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
                 email_to_send = row["email"]
