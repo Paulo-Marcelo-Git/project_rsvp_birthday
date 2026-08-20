@@ -78,3 +78,52 @@ def test_create_superadmin_cria_com_sucesso_com_smtp(db, monkeypatch):
     assert mock_enqueue.call_args[0][2] == 'superadmin'
     assert '/reset_password/' in mock_enqueue.call_args[0][3]
     assert conn.execute.call_count == 5
+
+
+def test_create_superadmin_reenvia_convite_se_incompleto_com_smtp(db, monkeypatch):
+    """Super-admin existe mas nunca trocou a senha (convite anterior não
+    completado) — reenvia um novo convite em vez de travar em 'Nada a fazer'."""
+    monkeypatch.setenv('SUPERADMIN_EMAIL', 'sa@test.com')
+    monkeypatch.setenv('EMAIL_SMTP', 'smtp-relay.brevo.com')
+    monkeypatch.setenv('EMAIL_USER', 'login@brevo.com')
+    conn = setup_db(db,
+                    qresult(fetchone={
+                        'id': 999, 'tenant_id': 5, 'username': 'superadmin', 'email': 'sa@test.com',
+                        'password_hash': 'x', 'role': 'super_admin', 'must_change_password': True,
+                        'is_active': 1, 'whatsapp': None,
+                    }),                # get_user_by_email_global
+                    qresult())         # create_password_reset_token INSERT
+
+    with patch('app.enqueue_email') as mock_enqueue:
+        runner = flask_app.test_cli_runner()
+        result = runner.invoke(args=['create-superadmin'])
+
+    assert 'Nada a fazer' not in result.output
+    assert 'Email de convite enviado' in result.output
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0] is tasks.send_member_invite_email
+    assert mock_enqueue.call_args[0][1] == 'sa@test.com'
+    assert mock_enqueue.call_args[0][2] == 'superadmin'
+    conn.commit.assert_called()
+
+
+def test_create_superadmin_reenvia_com_nova_senha_se_incompleto_sem_smtp(db, monkeypatch):
+    """Mesmo cenário, mas sem SMTP configurado: gera nova senha temporária
+    em vez de travar (não há como reenviar link por email)."""
+    monkeypatch.setenv('SUPERADMIN_EMAIL', 'sa@test.com')
+    monkeypatch.delenv('EMAIL_SMTP', raising=False)
+    monkeypatch.delenv('EMAIL_USER', raising=False)
+    conn = setup_db(db,
+                    qresult(fetchone={
+                        'id': 999, 'tenant_id': 5, 'username': 'superadmin', 'email': 'sa@test.com',
+                        'password_hash': 'x', 'role': 'super_admin', 'must_change_password': True,
+                        'is_active': 1, 'whatsapp': None,
+                    }),                # get_user_by_email_global
+                    qresult())         # update_user (nova senha)
+
+    runner = flask_app.test_cli_runner()
+    result = runner.invoke(args=['create-superadmin'])
+
+    assert 'Nada a fazer' not in result.output
+    assert 'Senha temporária' in result.output
+    conn.commit.assert_called()
