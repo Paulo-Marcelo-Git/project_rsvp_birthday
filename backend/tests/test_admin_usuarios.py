@@ -109,11 +109,14 @@ def test_admin_usuarios_mostra_botao_quando_ilimitado(admin_client, db):
 # ── reset de senha de sub-usuário ─────────────────────────────────────────────
 
 def test_reset_senha_usuario_com_smtp_envia_convite(admin_client, db, monkeypatch):
+    """Com SMTP configurado, AINDA ASSIM rotaciona a senha imediatamente (revoga
+    acesso agora) além de mandar o link — regressão corrigida (spec pré-prod #2):
+    a rotação imediata não é 'trabalho desperdiçado', é a revogação real."""
     monkeypatch.setenv('EMAIL_SMTP', 'smtp-relay.brevo.com')
     monkeypatch.setenv('EMAIL_USER', 'login@brevo.com')
     conn = setup_db(db,
                     qresult(fetchone={'username': 'op', 'email': 'op@test.com'}),  # get_user_by_id
-                    qresult(),   # update_user (nova senha)
+                    qresult(),   # update_user (rotaciona a senha AGORA)
                     qresult())   # create_password_reset_token INSERT
 
     with patch('app.enqueue_email') as mock_enqueue:
@@ -125,4 +128,22 @@ def test_reset_senha_usuario_com_smtp_envia_convite(admin_client, db, monkeypatc
     assert mock_enqueue.call_args[0][1] == 'op@test.com'
     assert mock_enqueue.call_args[0][2] == 'op'
     assert '/reset_password/' in mock_enqueue.call_args[0][3]
+    conn.commit.assert_called()
+    assert conn.execute.call_count == 3  # get_user_by_id + update_user + create_password_reset_token
+
+
+def test_reset_senha_usuario_sem_smtp_gera_senha_temporaria(admin_client, db, monkeypatch):
+    """Sem SMTP configurado, mantém o fallback: gera e grava senha temporária, mostra na flash."""
+    monkeypatch.delenv('EMAIL_SMTP', raising=False)
+    monkeypatch.delenv('EMAIL_USER', raising=False)
+    conn = setup_db(db,
+                    qresult(fetchone={'username': 'op', 'email': 'op@test.com'}),  # get_user_by_id
+                    qresult())   # update_user (senha temporária)
+
+    resp = admin_client.post('/admin/usuarios/5/reset_senha')
+
+    assert resp.status_code == 302
+    with admin_client.session_transaction() as sess:
+        flashes = sess.get('_flashes', [])
+    assert any('Senha temporária' in msg for _cat, msg in flashes)
     conn.commit.assert_called()

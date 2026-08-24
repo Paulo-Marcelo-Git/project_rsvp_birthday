@@ -14,6 +14,12 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 
+def _resolve_smtp_from(smtp_user: str) -> str:
+    """Remetente visível (From) — EMAIL_FROM se definido (endereço validado no
+    provedor), senão cai pro EMAIL_USER (login SMTP, comportamento antigo)."""
+    return os.getenv("EMAIL_FROM", smtp_user)
+
+
 def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
     smtp_host = os.getenv("EMAIL_SMTP")
     smtp_user = os.getenv("EMAIL_USER")
@@ -25,7 +31,8 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
 
     smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
     smtp_pass = os.getenv("EMAIL_PASS", "")
-    from_addr = f"Comemore+ <{smtp_user}>"
+    smtp_from = _resolve_smtp_from(smtp_user)
+    from_addr = f"Comemore+ <{smtp_from}>"
     subject = "Redefinição de senha — Comemore+"
 
     html_body = f"""<!DOCTYPE html>
@@ -84,7 +91,7 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
             <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
                        border-top:1px solid #eee;">
               <p style="margin:0;font-size:12px;color:#888;">
-                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
+                &copy; 2026 Comemore+ &middot; {smtp_from}<br>
                 Este é um email automático, não responda.
               </p>
             </td>
@@ -140,7 +147,8 @@ def send_verification_email(to_address: str, verify_url: str) -> bool:
 
     smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
     smtp_pass = os.getenv("EMAIL_PASS", "")
-    from_addr = f"Comemore+ <{smtp_user}>"
+    smtp_from = _resolve_smtp_from(smtp_user)
+    from_addr = f"Comemore+ <{smtp_from}>"
     subject = "Confirme seu email — Comemore+"
 
     html_body = f"""<!DOCTYPE html>
@@ -195,7 +203,7 @@ def send_verification_email(to_address: str, verify_url: str) -> bool:
             <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
                        border-top:1px solid #eee;">
               <p style="margin:0;font-size:12px;color:#888;">
-                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
+                &copy; 2026 Comemore+ &middot; {smtp_from}<br>
                 Este é um email automático, não responda.
               </p>
             </td>
@@ -252,7 +260,8 @@ def send_member_invite_email(to_address: str, username: str, reset_url: str) -> 
 
     smtp_port = int(os.getenv("EMAIL_PORTA", "587"))
     smtp_pass = os.getenv("EMAIL_PASS", "")
-    from_addr = f"Comemore+ <{smtp_user}>"
+    smtp_from = _resolve_smtp_from(smtp_user)
+    from_addr = f"Comemore+ <{smtp_from}>"
     subject = "Você foi convidado para o Comemore+"
 
     html_body = f"""<!DOCTYPE html>
@@ -307,7 +316,7 @@ def send_member_invite_email(to_address: str, username: str, reset_url: str) -> 
             <td style="background:#f5f5f5;padding:20px 40px;text-align:center;
                        border-top:1px solid #eee;">
               <p style="margin:0;font-size:12px;color:#888;">
-                &copy; 2026 Comemore+ &middot; {smtp_user}<br>
+                &copy; 2026 Comemore+ &middot; {smtp_from}<br>
                 Este é um email automático, não responda.
               </p>
             </td>

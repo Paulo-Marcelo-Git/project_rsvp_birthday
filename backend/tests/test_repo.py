@@ -357,6 +357,144 @@ def test_list_all_tenants_exclui_tenant_reservado_na_query():
     assert "NOT EXISTS" in sql
 
 
+def test_list_all_tenants_seleciona_trial_ends_at():
+    c = _conn(all_rows=[])
+    repo.list_all_tenants(c)
+    sql = str(c.execute.call_args[0][0])
+    assert "trial_ends_at" in sql
+
+
+def test_list_all_tenants_seleciona_suspended_reason():
+    c = _conn(all_rows=[])
+    repo.list_all_tenants(c)
+    sql = str(c.execute.call_args[0][0])
+    assert "suspended_reason" in sql
+
+
+def test_list_all_tenants_seleciona_email_do_tenant_admin():
+    c = _conn(all_rows=[])
+    repo.list_all_tenants(c)
+    sql = str(c.execute.call_args[0][0])
+    assert "admin_email" in sql
+    assert "tenant_admin" in sql
+
+
+# ── expiração de trial ────────────────────────────────────────────────────────
+
+def test_get_tenant_status_and_trial_retorna_dict_com_status_plano_e_trial():
+    c = _conn(fetchone={
+        'status': 'trial', 'plan': 'free', 'trial_ends_at': None,
+        'trial_expired': False, 'trial_days_remaining': None,
+        'suspended_reason': None,
+    })
+    result = repo.get_tenant_status_and_trial(c, 5)
+    assert result == {
+        'status': 'trial', 'plan': 'free', 'trial_ends_at': None,
+        'trial_expired': False, 'trial_days_remaining': None,
+        'suspended_reason': None,
+    }
+    params = _last_params(c)
+    assert params["tid"] == 5
+
+
+def test_get_tenant_status_and_trial_seleciona_suspended_reason_no_sql():
+    c = _conn(fetchone={'status': 'trial', 'plan': 'free', 'trial_ends_at': None,
+                         'trial_expired': False, 'trial_days_remaining': None, 'suspended_reason': None})
+    repo.get_tenant_status_and_trial(c, 5)
+    sql = str(c.execute.call_args[0][0])
+    assert "suspended_reason" in sql
+
+
+def test_get_tenant_status_and_trial_seleciona_plan_no_sql():
+    c = _conn(fetchone={'status': 'trial', 'plan': 'free', 'trial_ends_at': None, 'trial_expired': False, 'trial_days_remaining': None})
+    repo.get_tenant_status_and_trial(c, 5)
+    sql = str(c.execute.call_args[0][0])
+    assert "plan" in sql
+
+
+def test_get_tenant_status_and_trial_seleciona_dias_restantes_no_sql():
+    c = _conn(fetchone={'status': 'trial', 'plan': 'free', 'trial_ends_at': None, 'trial_expired': False, 'trial_days_remaining': None})
+    repo.get_tenant_status_and_trial(c, 5)
+    sql = str(c.execute.call_args[0][0])
+    assert "trial_days_remaining" in sql
+    assert "TIMESTAMPDIFF" in sql
+
+
+def test_get_tenant_status_and_trial_retorna_none_se_tenant_nao_existir():
+    c = _conn(fetchone=None)
+    result = repo.get_tenant_status_and_trial(c, 999)
+    assert result is None
+
+
+def test_get_tenant_status_and_trial_calcula_expiracao_no_sql():
+    """trial_expired deve ser calculado no SQL (UTC_TIMESTAMP), não comparado
+    em Python — evita bug de datetime naive vs aware."""
+    c = _conn(fetchone={'status': 'trial', 'plan': 'free', 'trial_ends_at': None, 'trial_expired': False, 'trial_days_remaining': None})
+    repo.get_tenant_status_and_trial(c, 5)
+    sql = str(c.execute.call_args[0][0])
+    assert "UTC_TIMESTAMP()" in sql
+    assert "trial_expired" in sql
+
+
+def test_start_tenant_trial_update_e_atomico_com_guarda_trial_ends_at_null():
+    """UPDATE guardado por 'AND trial_ends_at IS NULL' — evita que duas
+    requisições concorrentes no primeiro login sobrescrevam uma à outra
+    (a segunda UPDATE não afeta nenhuma linha, é um no-op seguro)."""
+    c = _conn(fetchone={'trial_ends_at': datetime(2026, 1, 1)})
+    repo.start_tenant_trial(c, 5)
+    first_sql = str(c.execute.call_args_list[0][0][0])
+    first_params = c.execute.call_args_list[0][0][1]
+    assert "trial_ends_at IS NULL" in first_sql
+    assert "INTERVAL" in first_sql
+    assert first_params["tid"] == 5
+    assert first_params["days"] == repo.TRIAL_DAYS
+    assert repo.TRIAL_DAYS == 14
+
+
+def test_start_tenant_trial_retorna_o_valor_final_persistido():
+    """Sempre lê de volta o valor final (SELECT após o UPDATE) — garante que,
+    mesmo sob concorrência, a requisição que 'perdeu' a corrida (UPDATE
+    no-op) ainda exibe a mesma data que foi realmente persistida."""
+    fixed = datetime(2026, 9, 5, 12, 0, 0)
+    c = _conn(fetchone={'trial_ends_at': fixed})
+    result = repo.start_tenant_trial(c, 5)
+
+    assert result == fixed
+    assert c.execute.call_count == 2
+    second_sql = str(c.execute.call_args_list[1][0][0])
+    second_params = c.execute.call_args_list[1][0][1]
+    assert "SELECT" in second_sql
+    assert second_params["tid"] == 5
+
+
+# ── suspended_reason — distingue suspensão por trial de suspensão manual ─────
+
+def test_set_tenant_status_suspended_grava_reason():
+    c = _conn()
+    repo.set_tenant_status(c, 5, "suspended", reason="trial_expired")
+    params = _last_params(c)
+    assert params["status"] == "suspended"
+    assert params["reason"] == "trial_expired"
+    assert params["tid"] == 5
+
+
+def test_set_tenant_status_manual_grava_reason_manual():
+    c = _conn()
+    repo.set_tenant_status(c, 5, "suspended", reason="manual")
+    params = _last_params(c)
+    assert params["reason"] == "manual"
+
+
+def test_set_tenant_status_nao_suspended_limpa_reason_mesmo_se_passado():
+    """Transicionar pra qualquer status != 'suspended' sempre limpa o motivo —
+    evita um suspended_reason velho sobrar associado a uma conta já reativada."""
+    c = _conn()
+    repo.set_tenant_status(c, 5, "active", reason="trial_expired")
+    params = _last_params(c)
+    assert params["status"] == "active"
+    assert params["reason"] is None
+
+
 # ── password reset tokens ──────────────────────────────────────────────────────
 
 def test_create_password_reset_token_insere_e_retorna_token():

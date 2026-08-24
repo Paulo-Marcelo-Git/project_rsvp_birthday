@@ -738,13 +738,50 @@ def count_members_for_tenant(conn, tenant_id: int) -> int:
     return int(row["n"] or 0)
 
 
-def get_tenant_status(conn, tenant_id: int) -> str | None:
-    """Retorna o status do tenant ('trial', 'active', 'suspended', 'canceled') ou None."""
+TRIAL_DAYS = 14
+TRIAL_WARNING_DAYS = 3
+
+
+def get_tenant_status_and_trial(conn, tenant_id: int) -> dict | None:
+    """Retorna status, plan, trial_ends_at, se o trial já expirou e quantos
+    dias faltam pra expirar. Tudo calculado no SQL (UTC_TIMESTAMP), não em
+    Python, pra evitar comparar datetime naive vs aware. plan é usado pelo
+    caller pra só aplicar a expiração de trial em contas 'free' — Pro/Business
+    nunca expiram. Retorna None se o tenant não existir."""
     row = conn.execute(
-        text("SELECT status FROM tenants WHERE id = :tid"),
+        text("""
+            SELECT status, plan, trial_ends_at, suspended_reason,
+                   (trial_ends_at IS NOT NULL AND trial_ends_at < UTC_TIMESTAMP()) AS trial_expired,
+                   TIMESTAMPDIFF(DAY, UTC_TIMESTAMP(), trial_ends_at) AS trial_days_remaining
+            FROM tenants WHERE id = :tid
+        """),
         {"tid": tenant_id},
     ).mappings().fetchone()
-    return row["status"] if row else None
+    return dict(row) if row else None
+
+
+def start_tenant_trial(conn, tenant_id: int):
+    """Inicia a contagem do trial (TRIAL_DAYS a partir de agora) — chamado no
+    primeiro login do tenant, quando trial_ends_at ainda está NULL.
+
+    O UPDATE é guardado por 'AND trial_ends_at IS NULL': sob duas requisições
+    concorrentes no primeiro login, só a primeira realmente escreve — a
+    segunda é um no-op seguro (não sobrescreve com uma data diferente).
+    Sempre lê de volta o valor final via SELECT, então ambas as requisições
+    retornam a mesma data, seja qual for a que "ganhou" a corrida."""
+    conn.execute(
+        text("""
+            UPDATE tenants
+            SET trial_ends_at = UTC_TIMESTAMP() + INTERVAL :days DAY
+            WHERE id = :tid AND trial_ends_at IS NULL
+        """),
+        {"tid": tenant_id, "days": TRIAL_DAYS},
+    )
+    row = conn.execute(
+        text("SELECT trial_ends_at FROM tenants WHERE id = :tid"),
+        {"tid": tenant_id},
+    ).mappings().fetchone()
+    return row["trial_ends_at"] if row else None
 
 
 def set_tenant_plan(conn, tenant_id: int, plan: str) -> None:
@@ -755,11 +792,18 @@ def set_tenant_plan(conn, tenant_id: int, plan: str) -> None:
     )
 
 
-def set_tenant_status(conn, tenant_id: int, status: str) -> None:
-    """Altera o status do tenant. Valores válidos: 'trial', 'active', 'suspended', 'canceled'."""
+def set_tenant_status(conn, tenant_id: int, status: str, reason: str | None = None) -> None:
+    """Altera o status do tenant. Valores válidos: 'trial', 'active', 'suspended', 'canceled'.
+    reason ('trial_expired'/'manual') só é gravado quando status='suspended' —
+    em qualquer outra transição é limpo (NULL), pra não deixar um motivo velho
+    associado a uma conta que já foi reativada ou está em outro estado."""
     conn.execute(
-        text("UPDATE tenants SET status = :status WHERE id = :tid"),
-        {"status": status, "tid": tenant_id},
+        text("UPDATE tenants SET status = :status, suspended_reason = :reason WHERE id = :tid"),
+        {
+            "status": status,
+            "reason": reason if status == "suspended" else None,
+            "tid": tenant_id,
+        },
     )
 
 
@@ -769,7 +813,10 @@ def list_all_tenants(conn) -> list[dict]:
     super-admin only."""
     rows = conn.execute(text("""
         SELECT
-            t.id, t.name, t.plan, t.status, t.created_at,
+            t.id, t.name, t.plan, t.status, t.created_at, t.trial_ends_at, t.suspended_reason,
+            (SELECT email FROM users
+             WHERE tenant_id = t.id AND role = 'tenant_admin'
+             ORDER BY id LIMIT 1) AS admin_email,
             pl.max_events, pl.max_invitees, pl.max_members,
             (SELECT COUNT(*) FROM events   WHERE tenant_id = t.id) AS event_count,
             (SELECT COUNT(*) FROM invitees WHERE tenant_id = t.id) AS invitee_count,

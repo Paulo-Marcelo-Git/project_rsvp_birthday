@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from flasgger import Swagger
+from werkzeug.middleware.proxy_fix import ProxyFix
 import click
 from flask import (
     Flask,
@@ -60,6 +61,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# Em produção o tráfego só chega via nginx (proxy reverso) em loopback — sem
+# isso, request.remote_addr é sempre o IP do proxy, não o do cliente real, o
+# que faz o rate limiting (Flask-Limiter) tratar todo mundo como uma única
+# origem. x_for=1 confia em exatamente 1 hop de proxy (nginx), lendo o
+# X-Forwarded-For que ele define.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 app.secret_key = os.getenv("SECRET_KEY")
 app.config["APP_VERSION"] = APP_VERSION
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
@@ -256,10 +263,17 @@ def force_password_change():
         return redirect(url_for("change_password"))
 
 
-_SUPER_ADMIN_ALLOWED_ENDPOINTS = {
-    "superadmin", "superadmin_set_plan", "superadmin_suspend",
-    "superadmin_reactivate", "change_password", "logout", "static",
-}
+_SUPER_ADMIN_EXTRA_ALLOWED_ENDPOINTS = {"change_password", "logout", "static"}
+
+
+def _is_superadmin_panel_endpoint(endpoint: str | None) -> bool:
+    """Toda rota do painel do super-admin usa o prefixo 'superadmin' no nome
+    do endpoint (convenção já seguida por todas as rotas /superadmin/*) — deriva
+    da convenção em vez de manter um set fixo que pode ficar desatualizado
+    quando uma rota nova é adicionada."""
+    return bool(endpoint) and (
+        endpoint == "superadmin" or endpoint.startswith("superadmin_")
+    )
 
 
 @app.before_request
@@ -267,7 +281,8 @@ def restrict_super_admin_to_panel():
     if (
         current_user.is_authenticated
         and current_user.is_super_admin
-        and request.endpoint not in _SUPER_ADMIN_ALLOWED_ENDPOINTS
+        and not _is_superadmin_panel_endpoint(request.endpoint)
+        and request.endpoint not in _SUPER_ADMIN_EXTRA_ALLOWED_ENDPOINTS
     ):
         return redirect(url_for("superadmin"))
 
@@ -287,6 +302,74 @@ def save_uploaded_file(file):
 
 
 # Rotas
+def _build_password_reset_url(conn, user_id: int, base_url: str | None = None) -> str:
+    """Cria o token de reset de senha e monta a URL completa
+    (/reset_password/<token>) — usado por qualquer fluxo que precise mandar
+    um link de definição/redefinição de senha (esqueci senha, convite de
+    novo usuário, reset por admin, CLI create-superadmin).
+
+    base_url: passe explicitamente quando não houver request ativo (ex.: CLI,
+    fora de qualquer rota Flask) — sem isso, o fallback usa request.host_url,
+    que levanta RuntimeError fora de um request context."""
+    token = repo.create_password_reset_token(conn, user_id)
+    if base_url is None:
+        base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
+    return f"{base_url}/reset_password/{token}"
+
+
+def _check_tenant_access(conn, tenant_id, email) -> bool:
+    """Verifica se o tenant do usuário pode logar e conduz o ciclo de vida
+    do trial (Free-only): inicia a contagem no primeiro login, expira e
+    suspende quando o prazo passou, ou avisa quando está perto de expirar.
+    Sempre com flash já disparado quando relevante. Retorna True se o login
+    deve ser bloqueado (o caller deve reexibir o form), False se pode seguir."""
+    info = repo.get_tenant_status_and_trial(conn, tenant_id)
+    status = info["status"] if info else None
+
+    if status == "suspended":
+        logger.warning(f"Login bloqueado (tenant suspenso): '{email}'.")
+        flash(
+            "Sua conta está suspensa. "
+            "Entre em contato com o suporte.",
+            "danger",
+        )
+        return True
+
+    if status == "trial" and info["plan"] == "free":
+        if info["trial_ends_at"] is None:
+            ends_at = repo.start_tenant_trial(conn, tenant_id)
+            conn.commit()
+            flash(
+                f"🎉 Seu período de teste começou! Você tem "
+                f"{repo.TRIAL_DAYS} dias para explorar o Comemore+ "
+                f"— sua conta expira em {ends_at:%d/%m/%Y}.",
+                "trial_modal",
+            )
+        elif info["trial_expired"]:
+            repo.set_tenant_status(conn, tenant_id, "suspended", reason="trial_expired")
+            conn.commit()
+            logger.warning(f"Login bloqueado (trial expirado): '{email}'.")
+            flash(
+                "Seu período de teste expirou. Entre em contato "
+                "com o suporte para continuar usando o Comemore+.",
+                "danger",
+            )
+            return True
+        elif 0 <= info["trial_days_remaining"] <= repo.TRIAL_WARNING_DAYS:
+            quando = "hoje" if info["trial_days_remaining"] == 0 else (
+                f"em {info['trial_days_remaining']} dia(s)"
+            )
+            flash(
+                f"⏳ Sua conta expira {quando} "
+                f"({info['trial_ends_at']:%d/%m/%Y}). Faça upgrade "
+                f"do seu plano para continuar usando o Comemore+ "
+                f"sem interrupções.",
+                "trial_modal",
+            )
+
+    return False
+
+
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute", methods=["POST"])
 def login():
@@ -331,14 +414,7 @@ def login():
                     email=row.get("email"),
                 )
                 if candidate.check_password(password):
-                    status = repo.get_tenant_status(conn, row["tenant_id"])
-                    if status == "suspended":
-                        logger.warning(f"Login bloqueado (tenant suspenso): '{email}'.")
-                        flash(
-                            "Sua conta está suspensa. "
-                            "Entre em contato com o suporte.",
-                            "danger",
-                        )
+                    if _check_tenant_access(conn, row["tenant_id"], email):
                         return render_template("login.html")
                     user = candidate
 
@@ -544,12 +620,10 @@ def forgot_password():
             row = repo.get_user_by_email_global(conn, email)
 
             if row and row.get("email"):
-                token = repo.create_password_reset_token(conn, row["id"])
+                token_to_send = _build_password_reset_url(conn, row["id"])
                 conn.commit()
-                base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
                 email_to_send = row["email"]
                 username_to_send = row["username"]
-                token_to_send = f"{base_url}/reset_password/{token}"
 
         if email_to_send:
             enqueue_email(tasks.send_reset_email, email_to_send, username_to_send, token_to_send)
@@ -1406,10 +1480,8 @@ def add_usuario():
 
         if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"):
             with engine.connect() as conn:
-                token = repo.create_password_reset_token(conn, new_user_id)
+                reset_url = _build_password_reset_url(conn, new_user_id)
                 conn.commit()
-            base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
-            reset_url = f"{base_url}/reset_password/{token}"
             enqueue_email(tasks.send_member_invite_email, email, username, reset_url)
             flash(f'Usuário "{username}" criado. Email de convite enviado para {email}.', "success")
         else:
@@ -1510,11 +1582,18 @@ def reset_senha_usuario(id):
         description: Usuário não encontrado
     """
     tid = current_user.tenant_id
+    email_configured = bool(
+        os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER")
+    )
+    # Rotaciona a senha SEMPRE, mesmo com SMTP configurado — é o que revoga o
+    # acesso da senha antiga imediatamente. O link de email é um passo além,
+    # não um substituto: sem isso, a senha antiga continuaria válida até (se)
+    # o usuário abrir o email, mesmo com a UI dizendo "senha resetada".
+    temp_pass = secrets.token_urlsafe(12)
     with engine.connect() as conn:
         user = repo.get_user_by_id(conn, tid, id)
         if not user:
             abort(404)
-        temp_pass = secrets.token_urlsafe(12)
         repo.update_user(
             conn, tid, id,
             password_hash=generate_password_hash(temp_pass),
@@ -1525,12 +1604,10 @@ def reset_senha_usuario(id):
         f"Senha de '{user['username']}' (id={id}) resetada por '{current_user.username}'."
     )
 
-    if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER") and user.get("email"):
+    if email_configured and user.get("email"):
         with engine.connect() as conn:
-            token = repo.create_password_reset_token(conn, id)
+            reset_url = _build_password_reset_url(conn, id)
             conn.commit()
-        base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
-        reset_url = f"{base_url}/reset_password/{token}"
         enqueue_email(tasks.send_member_invite_email, user["email"], user["username"], reset_url)
         flash(f'Senha de "{user["username"]}" resetada. Email com link enviado para {user["email"]}.', "success")
     else:
@@ -1644,6 +1721,22 @@ def superadmin():
     return render_template("superadmin.html", tenants=tenants)
 
 
+def _load_target_tenant_or_flash(conn, tenant_id: int) -> dict | None:
+    """Confirma que tenant_id é um tenant de cliente válido pra ações do
+    super-admin: precisa existir, e não pode ser o tenant reservado do
+    sistema (onde mora a própria conta super-admin — evita autobloqueio do
+    painel). Já dispara o flash de erro quando inválido. Retorna as infos
+    do tenant (já buscadas, reaproveitáveis pelo caller) se válido."""
+    if tenant_id == repo.get_system_tenant_id(conn):
+        flash("Não é possível alterar o tenant reservado do sistema.", "danger")
+        return None
+    info = repo.get_tenant_status_and_trial(conn, tenant_id)
+    if info is None:
+        flash("Tenant não encontrado.", "danger")
+        return None
+    return info
+
+
 @app.route("/superadmin/tenant/<int:tenant_id>/set_plan", methods=["POST"])
 @superadmin_required
 def superadmin_set_plan(tenant_id):
@@ -1652,7 +1745,19 @@ def superadmin_set_plan(tenant_id):
         flash("Plano inválido.", "danger")
         return redirect(url_for("superadmin"))
     with engine.connect() as conn:
+        info = _load_target_tenant_or_flash(conn, tenant_id)
+        if info is None:
+            return redirect(url_for("superadmin"))
         repo.set_tenant_plan(conn, tenant_id, plan)
+        if (
+            plan in ("pro", "business")
+            and info["status"] == "suspended"
+            and info.get("suspended_reason") == "trial_expired"
+        ):
+            # Só reativa automaticamente suspensão por trial expirado —
+            # suspensão manual (abuso/fraude/não pagamento) exige
+            # reativação explícita mesmo após o upgrade de plano.
+            repo.set_tenant_status(conn, tenant_id, "active")
         conn.commit()
     flash(f"Plano do tenant {tenant_id} alterado para '{plan}'.", "success")
     return redirect(url_for("superadmin"))
@@ -1662,7 +1767,9 @@ def superadmin_set_plan(tenant_id):
 @superadmin_required
 def superadmin_suspend(tenant_id):
     with engine.connect() as conn:
-        repo.set_tenant_status(conn, tenant_id, "suspended")
+        if _load_target_tenant_or_flash(conn, tenant_id) is None:
+            return redirect(url_for("superadmin"))
+        repo.set_tenant_status(conn, tenant_id, "suspended", reason="manual")
         conn.commit()
     flash(f"Tenant {tenant_id} suspenso.", "warning")
     return redirect(url_for("superadmin"))
@@ -1672,10 +1779,42 @@ def superadmin_suspend(tenant_id):
 @superadmin_required
 def superadmin_reactivate(tenant_id):
     with engine.connect() as conn:
+        if _load_target_tenant_or_flash(conn, tenant_id) is None:
+            return redirect(url_for("superadmin"))
         repo.set_tenant_status(conn, tenant_id, "active")
         conn.commit()
     flash(f"Tenant {tenant_id} reativado.", "success")
     return redirect(url_for("superadmin"))
+
+
+def _reuse_or_create_superadmin_account(conn, existing, superadmin_email, email_configured):
+    """Reenvia convite pra conta existente (nunca completou o primeiro acesso)
+    ou cria a conta super-admin do zero no tenant reservado. Retorna
+    (user_id, username, temp_pass) explícito — temp_pass é None quando o
+    email será usado pra reenviar o link (nesse caso não há senha temporária
+    pra mostrar)."""
+    if existing:
+        user_id = existing["id"]
+        username = existing["username"]
+        temp_pass = None
+        if not email_configured:
+            temp_pass = secrets.token_urlsafe(12)
+            repo.update_user(
+                conn, existing["tenant_id"], user_id,
+                password_hash=generate_password_hash(temp_pass),
+            )
+        return user_id, username, temp_pass
+
+    tenant_id = repo.get_system_tenant_id(conn)
+    username = "superadmin"
+    temp_pass = secrets.token_urlsafe(12)
+    user_id = repo.add_user(
+        conn, tenant_id, username, superadmin_email,
+        generate_password_hash(temp_pass),
+        role="super_admin",
+        must_change_password=True,
+    )
+    return user_id, username, temp_pass
 
 
 @app.cli.command("create-superadmin")
@@ -1688,9 +1827,7 @@ def create_superadmin():
 
     base_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
     email_configured = bool(os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"))
-    username = "superadmin"
-    temp_pass = None
-    token = None
+    reset_url = None
 
     with engine.connect() as conn:
         existing = repo.get_user_by_email_global(conn, superadmin_email)
@@ -1706,32 +1843,15 @@ def create_superadmin():
             click.echo(f"Já existe um super-admin ativo para '{superadmin_email}'. Nada a fazer.")
             return
 
-        if existing:
-            # Conta existe mas nunca completou o primeiro acesso — reenvia o convite.
-            user_id = existing["id"]
-            username = existing["username"]
-            if not email_configured:
-                temp_pass = secrets.token_urlsafe(12)
-                repo.update_user(
-                    conn, existing["tenant_id"], user_id,
-                    password_hash=generate_password_hash(temp_pass),
-                )
-        else:
-            tenant_id = repo.get_system_tenant_id(conn)
-            temp_pass = secrets.token_urlsafe(12)
-            user_id = repo.add_user(
-                conn, tenant_id, username, superadmin_email,
-                generate_password_hash(temp_pass),
-                role="super_admin",
-                must_change_password=True,
-            )
+        user_id, username, temp_pass = _reuse_or_create_superadmin_account(
+            conn, existing, superadmin_email, email_configured
+        )
 
         if email_configured:
-            token = repo.create_password_reset_token(conn, user_id)
+            reset_url = _build_password_reset_url(conn, user_id, base_url=base_url)
         conn.commit()
 
-    if token:
-        reset_url = f"{base_url}/reset_password/{token}"
+    if reset_url:
         enqueue_email(tasks.send_member_invite_email, superadmin_email, username, reset_url)
         click.echo(f"Super-admin provisionado. Email de convite enviado para {superadmin_email}.")
     else:

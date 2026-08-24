@@ -9,6 +9,19 @@ from unittest.mock import MagicMock, patch
 
 # ── tasks.py: funções de email ────────────────────────────────────────────────
 
+def test_resolve_smtp_from_usa_email_from_quando_definido(monkeypatch):
+    import tasks
+    monkeypatch.setenv('EMAIL_FROM', 'noreply@zapbyte.com.br')
+    assert tasks._resolve_smtp_from('login@brevo.com') == 'noreply@zapbyte.com.br'
+
+
+def test_resolve_smtp_from_cai_pro_smtp_user_sem_email_from(monkeypatch):
+    import tasks
+    monkeypatch.delenv('EMAIL_FROM', raising=False)
+    assert tasks._resolve_smtp_from('login@brevo.com') == 'login@brevo.com'
+
+
+
 def test_send_reset_email_sem_config_loga_warning(caplog):
     """Sem EMAIL_SMTP configurado, deve logar warning e retornar sem erro."""
     import tasks
@@ -72,6 +85,45 @@ def test_send_member_invite_email_chama_smtp(monkeypatch):
 
     assert result is True
     mock_smtp.sendmail.assert_called_once()
+
+
+def test_send_reset_email_usa_email_from_quando_definido(monkeypatch):
+    """EMAIL_FROM (remetente validado no provedor) deve prevalecer sobre EMAIL_USER (login SMTP)."""
+    import tasks
+    monkeypatch.setenv('EMAIL_SMTP', 'smtp-relay.brevo.com')
+    monkeypatch.setenv('EMAIL_PORTA', '587')
+    monkeypatch.setenv('EMAIL_USER', 'afdad2001@smtp-brevo.com')
+    monkeypatch.setenv('EMAIL_PASS', 'secret')
+    monkeypatch.setenv('EMAIL_FROM', 'noreply@zapbyte.com.br')
+
+    mock_smtp = MagicMock()
+    with patch('smtplib.SMTP', return_value=mock_smtp):
+        tasks.send_reset_email('dest@test.com', 'joao', 'http://x/reset/tok123')
+
+    # login SMTP continua sendo o EMAIL_USER (só serve pra autenticar)
+    mock_smtp.login.assert_called_once_with('afdad2001@smtp-brevo.com', 'secret')
+    # mas o remetente da mensagem (envelope From) é o EMAIL_FROM validado
+    call_args = mock_smtp.sendmail.call_args
+    from_envelope = call_args[0][0]
+    assert 'noreply@zapbyte.com.br' in from_envelope
+    assert 'afdad2001@smtp-brevo.com' not in from_envelope
+
+
+def test_send_reset_email_sem_email_from_usa_email_user(monkeypatch):
+    """Sem EMAIL_FROM configurado, mantém comportamento atual (fallback pro EMAIL_USER)."""
+    import tasks
+    monkeypatch.setenv('EMAIL_SMTP', 'smtp.gmail.com')
+    monkeypatch.setenv('EMAIL_PORTA', '587')
+    monkeypatch.setenv('EMAIL_USER', 'bot@gmail.com')
+    monkeypatch.setenv('EMAIL_PASS', 'secret')
+    monkeypatch.delenv('EMAIL_FROM', raising=False)
+
+    mock_smtp = MagicMock()
+    with patch('smtplib.SMTP', return_value=mock_smtp):
+        tasks.send_reset_email('dest@test.com', 'joao', 'http://x/reset/tok123')
+
+    call_args = mock_smtp.sendmail.call_args
+    assert 'bot@gmail.com' in call_args[0][0]
 
 
 # ── queue_utils.py: helper de enfileiramento ──────────────────────────────────

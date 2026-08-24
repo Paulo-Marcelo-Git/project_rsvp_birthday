@@ -21,9 +21,11 @@
         <tr>
           <th>#</th>
           <th>Nome</th>
+          <th>Email</th>
           <th>Plano</th>
           <th>Status</th>
           <th>Criado em</th>
+          <th>Trial expira</th>
           <th>Eventos</th>
           <th>Convidados</th>
           <th>Membros</th>
@@ -35,6 +37,7 @@
         <tr>
           <td class="text-muted small">{{ t.id }}</td>
           <td><strong>{{ t.name }}</strong></td>
+          <td class="small">{{ t.admin_email or '-' }}</td>
           <td>
             <form action="{{ url_for('superadmin_set_plan', tenant_id=t.id) }}" method="post" class="d-flex gap-1">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -50,7 +53,9 @@
             {% if t.status == 'active' %}
               <span class="pill pill-active">Ativo</span>
             {% elif t.status == 'suspended' %}
-              <span class="pill pill-suspended">Suspenso</span>
+              <span class="pill pill-suspended">
+                Suspenso{% if t.suspended_reason == 'trial_expired' %} (trial){% elif t.suspended_reason == 'manual' %} (manual){% endif %}
+              </span>
             {% elif t.status == 'trial' %}
               <span class="pill pill-trial">Trial</span>
             {% else %}
@@ -58,6 +63,17 @@
             {% endif %}
           </td>
           <td class="small">{{ t.created_at.strftime("%d/%m/%Y") if t.created_at else '-' }}</td>
+          <td class="small">
+            {% if t.status == 'trial' and t.plan == 'free' %}
+              {% if t.trial_ends_at %}
+                {{ t.trial_ends_at.strftime("%d/%m/%Y") }}
+              {% else %}
+                Ainda não logou
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </td>
           <td><span class="badge bg-secondary">{{ t.event_count }} / {{ t.max_events or '∞' }}</span></td>
           <td><span class="badge bg-secondary">{{ t.invitee_count }} / {{ t.max_invitees or '∞' }}</span></td>
           <td><span class="badge bg-secondary">{{ t.member_count }} / {{ t.max_members or '∞' }}</span></td>

@@ -193,9 +193,12 @@ Valores para o `.env`:
 ```env
 EMAIL_SMTP=smtp-relay.brevo.com
 EMAIL_PORTA=587
-EMAIL_USER=seu-login@brevo.com   # e-mail com que se cadastrou na Brevo
-EMAIL_PASS=xSMTP-KEY-BREVO       # chave gerada no passo 2
+EMAIL_USER=seu-login@brevo.com     # login SMTP (Configurações → SMTP e API) — só autentica
+EMAIL_PASS=xSMTP-KEY-BREVO         # chave gerada no passo 2
+EMAIL_FROM=noreply@seu-dominio.com # remetente — precisa ser um endereço do domínio verificado no passo 3
 ```
+
+> **Atenção:** `EMAIL_USER` (login SMTP) e `EMAIL_FROM` (remetente) são coisas diferentes no Brevo. Algumas contas geram um login SMTP no formato `xxxxx@smtp-brevo.com`, que autentica mas **não é um remetente válido** — usá-lo como `From` faz o Brevo aceitar a mensagem no protocolo e rejeitá-la depois, de forma assíncrona (o envio parece "OK" no app, mas o email nunca chega). Sempre configure `EMAIL_FROM` com um endereço do domínio verificado no passo 3.
 
 ---
 
@@ -210,8 +213,9 @@ Valores para o `.env`:
 ```env
 EMAIL_SMTP=smtp.resend.com
 EMAIL_PORTA=587
-EMAIL_USER=resend                # literal "resend" — não é seu e-mail
-EMAIL_PASS=re_xxxxxxxxxxxx       # API key gerada no passo 2
+EMAIL_USER=resend                  # literal "resend" — não é seu e-mail
+EMAIL_PASS=re_xxxxxxxxxxxx         # API key gerada no passo 2
+EMAIL_FROM=noreply@seu-dominio.com # remetente — precisa ser um endereço do domínio verificado no passo 3
 ```
 
 ---
