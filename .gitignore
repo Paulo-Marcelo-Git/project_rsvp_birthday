@@ -40,3 +40,6 @@ docker-compose-old.yml
 docs/superpowers/
 docs/smoke-tests/
 .superpowers/
+
+# Artefatos de sessões de teste com Playwright MCP
+.playwright-mcp/
