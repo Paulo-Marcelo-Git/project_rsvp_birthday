@@ -170,17 +170,58 @@ def test_superadmin_set_plan_pro_nao_toca_status_se_nao_suspenso(superadmin_clie
 
 
 def test_superadmin_set_plan_free_ainda_valida_tenant(superadmin_client, db):
-    """Definir plano free ainda valida que o tenant existe/não é o reservado,
-    mas não altera status (só a checagem de reativação é exclusiva de pro/business)."""
+    """Definir plano free ainda valida que o tenant existe/não é o reservado.
+    _VALID_INFO tem status='active', então também dispara o rearme pra
+    'trial' (item #7) — daí o 4º qresult para o UPDATE de status."""
     setup_db(db,
              qresult(fetchone={'id': 99}),  # get_system_tenant_id
              qresult(fetchone=dict(_VALID_INFO)),  # get_tenant_status_and_trial
-             qresult())  # set_tenant_plan UPDATE
+             qresult(),  # set_tenant_plan UPDATE
+             qresult())  # set_tenant_status -> trial
 
     resp = superadmin_client.post('/superadmin/tenant/1/set_plan',
                                    data={'plan': 'free'})
 
     assert resp.status_code == 302
+
+
+def test_superadmin_set_plan_free_reverte_active_para_trial(superadmin_client, db, monkeypatch):
+    """Rebaixar pra free um tenant com status=active deve voltar pra
+    'trial' — senão upgrade seguido de downgrade cria acesso free
+    ilimitado sem nunca mais expirar (loophole do item #7)."""
+    calls = []
+    monkeypatch.setattr(app_module.repo, 'set_tenant_status',
+                         lambda conn, tid, status, **kw: calls.append((tid, status)))
+    setup_db(db,
+             qresult(fetchone={'id': 99}),  # get_system_tenant_id
+             qresult(fetchone={'status': 'active', 'plan': 'pro', 'trial_ends_at': None,
+                                'trial_expired': False, 'trial_days_remaining': None,
+                                'suspended_reason': None}),  # get_tenant_status_and_trial
+             qresult())  # set_tenant_plan UPDATE
+
+    resp = superadmin_client.post('/superadmin/tenant/1/set_plan', data={'plan': 'free'})
+
+    assert resp.status_code == 302
+    assert calls == [(1, 'trial')]
+
+
+def test_superadmin_set_plan_free_nao_toca_status_se_ja_trial(superadmin_client, db, monkeypatch):
+    """Rebaixar pra free um tenant que já está em 'trial' não deve gerar
+    UPDATE de status extra (idempotente)."""
+    calls = []
+    monkeypatch.setattr(app_module.repo, 'set_tenant_status',
+                         lambda conn, tid, status, **kw: calls.append((tid, status)))
+    setup_db(db,
+             qresult(fetchone={'id': 99}),  # get_system_tenant_id
+             qresult(fetchone={'status': 'trial', 'plan': 'pro', 'trial_ends_at': None,
+                                'trial_expired': False, 'trial_days_remaining': None,
+                                'suspended_reason': None}),  # get_tenant_status_and_trial
+             qresult())  # set_tenant_plan UPDATE
+
+    resp = superadmin_client.post('/superadmin/tenant/1/set_plan', data={'plan': 'free'})
+
+    assert resp.status_code == 302
+    assert calls == []
 
 
 def test_superadmin_suspend_redireciona(superadmin_client, db):
@@ -221,7 +262,8 @@ def test_superadmin_set_plan_realmente_executa_e_nao_e_bloqueado(superadmin_clie
     conn = setup_db(db,
                      qresult(fetchone={'id': 99}),  # get_system_tenant_id
                      qresult(fetchone=dict(_VALID_INFO)),  # get_tenant_status_and_trial
-                     qresult())  # set_tenant_plan UPDATE
+                     qresult(),  # set_tenant_plan UPDATE
+                     qresult())  # set_tenant_status -> trial (_VALID_INFO tem status='active')
 
     resp = superadmin_client.post('/superadmin/tenant/1/set_plan', data={'plan': 'free'})
 

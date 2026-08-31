@@ -113,8 +113,10 @@ def test_login_por_username_falha_limpo(client, db):
     assert 'inválidos' in resp.data.decode()
 
 
-def test_login_usuario_nao_verificado_exibe_mensagem_especifica(client, db):
-    """Usuário com is_active=0 vê mensagem 'Confirme seu email', não a genérica de senha inválida."""
+def test_login_usuario_nao_verificado_exibe_mensagem_generica(client, db):
+    """Usuário com is_active=0 vê a mesma mensagem genérica de credenciais
+    inválidas — mensagem específica permitiria enumerar emails cadastrados
+    e descobrir quais já verificaram a conta."""
     user_row = {
         'id': 99, 'username': 'noverified',
         'email': 'noverified@test.com',
@@ -132,8 +134,25 @@ def test_login_usuario_nao_verificado_exibe_mensagem_especifica(client, db):
 
     assert resp.status_code == 200
     body = resp.data.decode()
-    assert 'Confirme seu email' in body
-    assert 'inválidos' not in body
+    assert 'inválidos' in body
+    assert 'Confirme seu email' not in body
+
+
+def test_login_sucesso_marca_sessao_como_permanente(client, db):
+    """Login bem-sucedido deve marcar session.permanent=True — só assim
+    PERMANENT_SESSION_LIFETIME tem efeito (Flask ignora o timeout se a
+    sessão não for marcada como permanente)."""
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),
+             qresult(fetchone={'status': 'active', 'trial_ends_at': None, 'trial_expired': False}))
+
+    client.post('/login', data={
+        'email': 'landlord@test.com',
+        'password': _PW,
+    })
+
+    with client.session_transaction() as sess:
+        assert sess.permanent is True
 
 
 # ── 4D-1: login bloqueado para tenants suspensos ──────────────────────────────
@@ -346,10 +365,27 @@ def test_proxyfix_ajusta_remote_addr_via_x_forwarded_for():
 def test_build_password_reset_url_monta_url_com_token(monkeypatch):
     monkeypatch.setattr(app_module.repo, 'create_password_reset_token',
                          lambda conn, uid: 'TOKEN123')
+    monkeypatch.setattr(app_module.repo, 'invalidate_password_reset_tokens',
+                         lambda conn, uid: None)
     monkeypatch.setenv('APP_BASE_URL', 'https://comemore.example.com')
     with app_module.app.test_request_context():
         url = app_module._build_password_reset_url(MagicMock(), 42)
     assert url == 'https://comemore.example.com/reset_password/TOKEN123'
+
+
+def test_build_password_reset_url_invalida_tokens_anteriores_do_usuario(monkeypatch):
+    """Item #4: um link de reset antigo (vazado/encaminhado por engano) não
+    deve continuar válido depois que um novo reset é solicitado — mesma
+    convenção já usada no fluxo de verificação de email."""
+    calls = []
+    monkeypatch.setattr(app_module.repo, 'invalidate_password_reset_tokens',
+                         lambda conn, uid: calls.append(uid))
+    monkeypatch.setattr(app_module.repo, 'create_password_reset_token',
+                         lambda conn, uid: 'TOKEN123')
+    monkeypatch.setenv('APP_BASE_URL', 'https://comemore.example.com')
+    with app_module.app.test_request_context():
+        app_module._build_password_reset_url(MagicMock(), 42)
+    assert calls == [42]
 
 
 # ── _check_tenant_access isolado (helper extraído do login(), item #3/#4) ────
@@ -412,6 +448,19 @@ def test_check_tenant_access_ativo_nao_bloqueia(monkeypatch):
     with app_module.app.test_request_context():
         blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
         assert blocked is False
+
+
+def test_check_tenant_access_status_desconhecido_bloqueia(monkeypatch):
+    """status='canceled' (ou qualquer valor fora de active/trial) deve
+    bloquear por padrão (deny-by-default) — hoje cai no `return False`
+    implícito e deixa logar como se a conta estivesse ativa."""
+    monkeypatch.setattr(app_module.repo, 'get_tenant_status_and_trial',
+                         lambda conn, tid: {'status': 'canceled', 'plan': 'free',
+                                             'trial_ends_at': None, 'trial_expired': False,
+                                             'trial_days_remaining': None, 'suspended_reason': None})
+    with app_module.app.test_request_context():
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        assert blocked is True
 
 
 # ── pop-up (modal) de aviso de trial no template base ─────────────────────────

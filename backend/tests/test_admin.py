@@ -78,6 +78,7 @@ def test_respostas_mostra_botao_usuarios_ilimitado(admin_client, db):
 
 def test_add_convidado_cria_registro(admin_client, db):
     conn = setup_db(db,
+                    qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),   # get_default_event_id
                     qresult(fetchone=_LIMITS_FREE),         # get_plan_limits
                     qresult(fetchone=_COUNT_ZERO),          # count_invitees_for_event
@@ -90,13 +91,16 @@ def test_add_convidado_cria_registro(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 4
+    assert conn.execute.call_count == 5
+    first_sql = str(conn.execute.call_args_list[0][0][0])
+    assert "FOR UPDATE" in first_sql
     conn.commit.assert_called_once()
 
 
 def test_add_convidado_no_limite_nao_cria(admin_client, db):
     """Quando count_invitees == max_invitees, deve redirecionar com flash e NÃO inserir."""
     conn = setup_db(db,
+                    qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),  # get_default_event_id
                     qresult(fetchone=_LIMITS_FREE),        # get_plan_limits (max=50)
                     qresult(fetchone=_COUNT_50))           # count_invitees_for_event (=50)
@@ -108,13 +112,14 @@ def test_add_convidado_no_limite_nao_cria(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 3   # event_id + limits + count; sem INSERT
+    assert conn.execute.call_count == 4   # lock + event_id + limits + count; sem INSERT
     conn.commit.assert_not_called()
 
 
 def test_add_convidado_ilimitado_cria(admin_client, db):
     """Com max_invitees=None (business), deve inserir mesmo com contagem alta."""
     conn = setup_db(db,
+                    qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),  # get_default_event_id
                     qresult(fetchone=_LIMITS_NONE),        # get_plan_limits (unlimited)
                     qresult(fetchone={'n': 9999}),         # count_invitees_for_event
@@ -127,14 +132,15 @@ def test_add_convidado_ilimitado_cria(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 4
+    assert conn.execute.call_count == 5
     conn.commit.assert_called_once()
 
 
 def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
     """Convidado deve ir para o evento indicado no form, não para o mais recente do tenant."""
     conn = setup_db(db,
-                    qresult(fetchone={'id': 5}),   # valida event_id=5 pertence ao tenant
+                    qresult(),                      # lock_tenant_for_update FOR UPDATE
+                    qresult(fetchone={'id': 5, 'owner_user_id': 1}),   # valida event_id=5 pertence ao tenant
                     qresult(fetchone=_LIMITS_FREE),
                     qresult(fetchone=_COUNT_ZERO),
                     qresult())                      # add_invitee
@@ -148,7 +154,7 @@ def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
 
     assert resp.status_code == 302
     assert '/admin/respostas?event_id=5' in resp.headers['Location']
-    assert conn.execute.call_count == 4
+    assert conn.execute.call_count == 5
     insert_params = conn.execute.call_args_list[-1][0][1]
     assert insert_params['eid'] == 5
     conn.commit.assert_called_once()
@@ -157,6 +163,7 @@ def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
 def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
     """event_id que não pertence ao tenant não deve ser aceito — cai no evento padrão."""
     conn = setup_db(db,
+                    qresult(),                        # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=None),          # event_id=999 não pertence ao tenant
                     qresult(fetchone=DEFAULT_EVENT_ROW),  # fallback: get_default_event_id
                     qresult(fetchone=_LIMITS_FREE),
@@ -171,9 +178,56 @@ def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 5
+    assert conn.execute.call_count == 6
     insert_params = conn.execute.call_args_list[-1][0][1]
     assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
+    conn.commit.assert_called_once()
+
+
+def test_add_convidado_member_com_event_id_de_outro_member_usa_default_proprio(member_client, db):
+    """IDOR (item #5): member não pode usar o event_id de outro member do
+    mesmo tenant — deve cair no fallback filtrado pelo PRÓPRIO dono, não no
+    evento mais recente do tenant inteiro."""
+    conn = setup_db(db,
+                    qresult(),                                          # lock_tenant_for_update FOR UPDATE
+                    qresult(fetchone={'id': 7, 'owner_user_id': 99}),  # evento pertence a outro member
+                    qresult(fetchone=DEFAULT_EVENT_ROW),                # fallback: get_default_event_id(owner=2)
+                    qresult(fetchone=_LIMITS_FREE),
+                    qresult(fetchone=_COUNT_ZERO),
+                    qresult())                                          # add_invitee
+
+    resp = member_client.post('/admin/convidados/add', data={
+        'name': 'Convidado Invasao Member',
+        'email': 'x@email.com',
+        'phone': '',
+        'event_id': '7',
+    })
+
+    assert resp.status_code == 302
+    insert_params = conn.execute.call_args_list[-1][0][1]
+    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
+    conn.commit.assert_called_once()
+
+
+def test_add_convidado_member_com_event_id_proprio_aceita(member_client, db):
+    """Member usando o próprio event_id (owner_user_id == db_id) é aceito normalmente."""
+    conn = setup_db(db,
+                    qresult(),                                        # lock_tenant_for_update FOR UPDATE
+                    qresult(fetchone={'id': 7, 'owner_user_id': 2}),  # evento pertence ao próprio member (db_id=2)
+                    qresult(fetchone=_LIMITS_FREE),
+                    qresult(fetchone=_COUNT_ZERO),
+                    qresult())
+
+    resp = member_client.post('/admin/convidados/add', data={
+        'name': 'Convidado Legitimo',
+        'email': 'ok@email.com',
+        'phone': '',
+        'event_id': '7',
+    })
+
+    assert resp.status_code == 302
+    insert_params = conn.execute.call_args_list[-1][0][1]
+    assert insert_params['eid'] == 7
     conn.commit.assert_called_once()
 
 
@@ -239,6 +293,7 @@ def test_edit_convidado_inexistente_retorna_404(admin_client, db):
 def test_add_usuario_no_limite_nao_cria(admin_client, db):
     """Quando count_members == max_members, deve redirecionar com flash e NÃO inserir."""
     conn = setup_db(db,
+                    qresult(),                        # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=_LIMITS_FREE),  # get_plan_limits (max_members=1)
                     qresult(fetchone=_COUNT_ONE))     # count_members_for_tenant (=1)
 
@@ -248,13 +303,14 @@ def test_add_usuario_no_limite_nao_cria(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 2   # limits + count; sem INSERT
+    assert conn.execute.call_count == 3   # lock + limits + count; sem INSERT
     conn.commit.assert_not_called()
 
 
 def test_add_usuario_abaixo_limite_cria(admin_client, db):
     """Com count_members < max_members, deve criar o usuário."""
     conn = setup_db(db,
+                    qresult(),                           # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=_LIMITS_FREE),     # get_plan_limits (max_members=1)
                     qresult(fetchone=_COUNT_ZERO),       # count_members_for_tenant (=0)
                     qresult(),                           # add_user INSERT
@@ -272,6 +328,7 @@ def test_add_usuario_abaixo_limite_cria(admin_client, db):
 def test_add_usuario_ilimitado_cria(admin_client, db):
     """Com max_members=None (business), deve criar mesmo com contagem alta."""
     conn = setup_db(db,
+                    qresult(),                           # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=_LIMITS_NONE),     # get_plan_limits (unlimited)
                     qresult(fetchone={'n': 50}),         # count_members_for_tenant
                     qresult(),                           # add_user INSERT

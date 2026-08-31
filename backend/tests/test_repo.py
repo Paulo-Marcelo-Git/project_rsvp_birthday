@@ -123,6 +123,19 @@ def test_get_default_event_id_filtra_tenant_id():
     assert _last_params(c)["tid"] == 42
 
 
+def test_get_default_event_id_filtra_por_owner_quando_informado():
+    """Item #5: quando owner_user_id é informado, o fallback usado por
+    add_convidado deve restringir ao evento mais recente DESSE dono, não
+    do tenant inteiro — senão um member vaza pro evento de outro member."""
+    c = _conn(fetchone={"id": 5})
+    repo.get_default_event_id(c, 42, owner_user_id=7)
+    sql = _all_sqls(c)[-1]
+    params = _last_params(c)
+    assert "owner_user_id" in sql
+    assert params["tid"] == 42
+    assert params["owner"] == 7
+
+
 def test_get_event_texts_filtra_tenant_id():
     c = _conn(fetchone={
         "title": "Festa", "question_text": "Vai?", "yes_text": "Sim",
@@ -177,6 +190,19 @@ def test_within_limit_no_limite():
 def test_within_limit_ilimitado():
     assert repo.within_limit(0, None) is True
     assert repo.within_limit(9999, None) is True
+
+
+def test_lock_tenant_for_update_trava_a_linha_do_tenant():
+    """Item #6: trava a linha do tenant (SELECT ... FOR UPDATE) — serializa
+    count+insert de limite de plano contra requisições concorrentes do
+    MESMO tenant. Chamar antes do COUNT, na mesma transação do INSERT."""
+    c = _conn(fetchone={"id": 42})
+    repo.lock_tenant_for_update(c, 42)
+    sql = _all_sqls(c)[-1]
+    params = _last_params(c)
+    assert "FOR UPDATE" in sql
+    assert "tenants" in sql
+    assert params["tid"] == 42
 
 
 def test_count_invitees_for_event_filtra_tenant_e_event():
@@ -524,3 +550,16 @@ def test_create_password_reset_token_aceita_ttl_customizado():
     params = _last_params(c)
     delta = params["exp"] - before
     assert timedelta(hours=24) <= delta < timedelta(hours=24, minutes=1)
+
+
+def test_invalidate_password_reset_tokens_marca_pendentes_como_usados():
+    """Espelha invalidate_verification_tokens — invalida (used=1) só os
+    tokens ainda pendentes (used=0) do usuário, sem tocar em outros."""
+    c = _conn()
+    repo.invalidate_password_reset_tokens(c, 42)
+    sql = _all_sqls(c)[-1]
+    params = _last_params(c)
+    assert "UPDATE password_reset_tokens" in sql
+    assert "SET used = 1" in sql
+    assert "used = 0" in sql
+    assert params["uid"] == 42

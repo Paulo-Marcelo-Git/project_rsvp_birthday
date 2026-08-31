@@ -164,3 +164,112 @@ def test_new_tenant_first_login(integration_client):
     assert b"respostas" in r.data.lower() or b"convidados" in r.data.lower(), (
         "Após login esperava chegar em /admin/respostas mas o conteúdo não bate"
     )
+
+
+@pytest.mark.integration
+def test_add_usuario_concorrencia_real_respeita_limite_do_plano(integration_client):
+    """
+    Item #6 (corrida TOCTOU): duas requisições REALMENTE concorrentes
+    (threads distintas, conexões MySQL reais via connection pool) disputando
+    o ÚLTIMO slot de membro permitido pelo plano devem resultar em
+    EXATAMENTE UMA criação. Sem o lock (SELECT ... FOR UPDATE na linha do
+    tenant), as duas threads podem ler o mesmo count antes de qualquer
+    commit e o limite é furado — é exatamente o tipo de bug que um mock
+    não pega, por isso este teste roda contra MySQL real.
+    """
+    import threading
+    import app as app_module
+
+    email = "race_admin@test.com"
+    password = "RaceAdmin@Test1"
+
+    with app_module.engine.connect() as conn:
+        conn.execute(text("DELETE FROM users WHERE email LIKE 'race_%@test.com' OR email LIKE 'zz_seed_%@test.com'"))
+        # Consome os IDs baixos (1, 2) ANTES do signup real — o conftest.py
+        # tem DbUsers fake hardcoded para user_id=1 ('testadmin') e user_id=2
+        # ('membertest') que, se coincidirem com o id real do admin desta
+        # race, fariam o login resolver pro mock em vez da linha real do
+        # banco de integração (tenant_id errado, sem isso o teste falha por
+        # motivo totalmente alheio ao lock que estamos verificando).
+        for i in range(2):
+            conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(tenant_id, username, email, password_hash, role, is_active, must_change_password) "
+                    "VALUES (1, :u, :e, 'x', 'member', 1, 0)"
+                ),
+                {"u": f"zz_seed_{i}", "e": f"zz_seed_{i}@test.com"},
+            )
+        conn.commit()
+
+    r = integration_client.post("/signup", data={
+        "nome_anfitriao": "Race Tenant",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "accept_terms": "1",
+    }, follow_redirects=True)
+    assert r.status_code == 200, f"Signup falhou com status {r.status_code}"
+
+    with app_module.engine.connect() as conn:
+        tenant_id = conn.execute(
+            text("SELECT tenant_id FROM users WHERE email = :e"), {"e": email}
+        ).scalar()
+        assert tenant_id is not None
+
+        # Plano 'pro' (max_members=5) com 3 membros dummy + o próprio
+        # tenant_admin = 4 ocupados, sobra exatamente 1 slot pras 2
+        # requisições concorrentes disputarem.
+        conn.execute(text("UPDATE tenants SET plan = 'pro' WHERE id = :tid"), {"tid": tenant_id})
+        for i in range(3):
+            conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(tenant_id, username, email, password_hash, role, is_active, must_change_password) "
+                    "VALUES (:tid, :u, :e, 'x', 'member', 1, 0)"
+                ),
+                {"tid": tenant_id, "u": f"race_dummy_{i}", "e": f"race_dummy_{i}@test.com"},
+            )
+        conn.commit()
+
+    client_a = app_module.app.test_client()
+    client_b = app_module.app.test_client()
+    for c in (client_a, client_b):
+        r = c.post("/login", data={"email": email, "password": password})
+        assert r.status_code == 302, f"Login (setup da race) falhou: {r.status_code}"
+
+    results = {}
+
+    def _add_member(name, client):
+        resp = client.post(
+            "/admin/usuarios/add",
+            data={"username": f"race_{name}", "email": f"race_{name}@test.com", "whatsapp": ""},
+            follow_redirects=True,
+        )
+        results[name] = resp.data.decode()
+
+    t1 = threading.Thread(target=_add_member, args=("a", client_a))
+    t2 = threading.Thread(target=_add_member, args=("b", client_b))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    with app_module.engine.connect() as conn:
+        final_count = conn.execute(
+            text("SELECT COUNT(*) FROM users WHERE tenant_id = :tid"), {"tid": tenant_id}
+        ).scalar()
+
+    # 4 já existentes (admin + 3 dummies) + EXATAMENTE 1 novo — não 2.
+    assert final_count == 5, (
+        f"Esperava 5 membros (limite do plano respeitado), achou {final_count} "
+        "— o lock não serializou a corrida entre as duas requisições concorrentes."
+    )
+
+    # "criado." (com ponto, minúsculo após lower()) é da flash de sucesso —
+    # não confundir com "Criado em", cabeçalho estático da tabela presente
+    # nas duas páginas (sem ponto logo depois, então não colide).
+    sucesso = sum(1 for b in results.values() if "criado." in b.lower())
+    bloqueado = sum(1 for b in results.values() if "atingido" in b.lower())
+    assert sucesso == 1, f"Esperava exatamente 1 criação bem-sucedida, houve {sucesso}."
+    assert bloqueado == 1, f"Esperava exatamente 1 bloqueio por limite, houve {bloqueado}."

@@ -102,6 +102,21 @@ def create_password_reset_token(conn, user_id: int, hours: int = 1) -> str:
     return token
 
 
+def invalidate_password_reset_tokens(conn, user_id: int) -> None:
+    """Invalida todos os tokens de reset de senha pendentes do usuário —
+    espelha invalidate_verification_tokens. Chamar antes de criar um novo
+    token, para que um link antigo (vazado/encaminhado por engano) não
+    continue válido pela TTL depois de um reset mais recente."""
+    conn.execute(
+        text("""
+            UPDATE password_reset_tokens
+            SET used = 1
+            WHERE user_id = :uid AND used = 0
+        """),
+        {"uid": user_id},
+    )
+
+
 SYSTEM_TENANT_NAME = "Comemore+ System"
 
 
@@ -131,16 +146,30 @@ def create_tenant(conn, name: str) -> int:
 
 # ── eventos ───────────────────────────────────────────────────────────────────
 
-def get_default_event_id(conn, tenant_id: int) -> int | None:
-    """Retorna o id do evento mais recente do tenant (qualquer status), ou None."""
-    row = conn.execute(
-        text("""
-            SELECT id FROM events
-            WHERE tenant_id = :tid
-            ORDER BY id DESC LIMIT 1
-        """),
-        {"tid": tenant_id},
-    ).mappings().fetchone()
+def get_default_event_id(conn, tenant_id: int, owner_user_id: int | None = None) -> int | None:
+    """Retorna o id do evento mais recente do tenant (qualquer status), ou
+    None. Se owner_user_id for informado, restringe ao evento mais recente
+    DESSE dono — usado pelo fallback de add_convidado quando quem chama não
+    é tenant_admin, pra não vazar acesso ao evento de outro member do
+    mesmo tenant (item #5 da revisão pré-prod)."""
+    if owner_user_id is not None:
+        row = conn.execute(
+            text("""
+                SELECT id FROM events
+                WHERE tenant_id = :tid AND owner_user_id = :owner
+                ORDER BY id DESC LIMIT 1
+            """),
+            {"tid": tenant_id, "owner": owner_user_id},
+        ).mappings().fetchone()
+    else:
+        row = conn.execute(
+            text("""
+                SELECT id FROM events
+                WHERE tenant_id = :tid
+                ORDER BY id DESC LIMIT 1
+            """),
+            {"tid": tenant_id},
+        ).mappings().fetchone()
     return int(row["id"]) if row else None
 
 
@@ -682,6 +711,14 @@ def get_media_tenant(conn, filename: str) -> int | None:
 
 
 # ── planos e limites (4A/4B) ──────────────────────────────────────────────────
+
+def lock_tenant_for_update(conn, tenant_id: int) -> None:
+    """Trava a linha do tenant — serializa count+insert de limite de plano
+    contra requisições concorrentes do MESMO tenant (tenants diferentes não
+    se bloqueiam entre si). Chamar antes do COUNT, dentro da mesma
+    transação que fará o INSERT subsequente."""
+    conn.execute(text("SELECT id FROM tenants WHERE id = :tid FOR UPDATE"), {"tid": tenant_id})
+
 
 def get_plan_limits(conn, tenant_id: int) -> dict:
     """Retorna {max_events, max_invitees, max_members} do plano do tenant. NULL = ilimitado."""

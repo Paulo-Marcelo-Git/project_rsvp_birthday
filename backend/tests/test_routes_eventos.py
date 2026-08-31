@@ -63,6 +63,7 @@ def test_criar_evento_sucesso(admin_client, db):
     """Admin pode criar evento quando abaixo do limite."""
     setup_db(
         db,
+        qresult(),                             # lock_tenant_for_update FOR UPDATE
         qresult(fetchone=_LIMITS_NONE),      # get_plan_limits (sem limite)
         qresult(fetchone={'n': 1}),           # count_events_for_tenant
         qresult(),                             # INSERT events
@@ -74,10 +75,29 @@ def test_criar_evento_sucesso(admin_client, db):
     assert 'event_id=99' in resp.headers['Location']
 
 
+def test_criar_evento_trava_tenant_antes_do_count(admin_client, db):
+    """Item #6 (corrida TOCTOU): a primeira query da transação deve travar
+    a linha do tenant (FOR UPDATE), antes do count+insert — serializa
+    requisições concorrentes do mesmo tenant contra o limite do plano."""
+    conn = setup_db(
+        db,
+        qresult(),                             # lock_tenant_for_update FOR UPDATE
+        qresult(fetchone=_LIMITS_NONE),         # get_plan_limits
+        qresult(fetchone={'n': 1}),             # count_events_for_tenant
+        qresult(),                              # INSERT events
+        qresult(fetchone={'id': 99}),           # SELECT LAST_INSERT_ID()
+    )
+    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Nova Festa'})
+    assert resp.status_code == 302
+    first_sql = str(conn.execute.call_args_list[0][0][0])
+    assert "FOR UPDATE" in first_sql
+
+
 def test_criar_evento_bloqueia_limite_plano(admin_client, db):
     """Free plan: max_events=2, já tem 2 → bloqueado com mensagem de plano/limite."""
     setup_db(
         db,
+        qresult(),                             # lock_tenant_for_update FOR UPDATE
         qresult(fetchone=_LIMITS_FREE),       # get_plan_limits (max_events=2)
         qresult(fetchone={'n': 2}),            # count_events_for_tenant (já no limite)
         # Redirect para admin_eventos — 2 queries extras:

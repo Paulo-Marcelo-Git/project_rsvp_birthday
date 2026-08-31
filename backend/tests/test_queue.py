@@ -227,7 +227,7 @@ def test_forgot_password_enfileira_reset_email(client, db):
         "tenant_id": 1, "role": "member", "is_active": 1,
     }
     conn = MagicMock()
-    conn.execute.side_effect = [qresult(fetchone=user_row), MagicMock()]
+    conn.execute.side_effect = [qresult(fetchone=user_row), MagicMock(), MagicMock()]
     db.connect.return_value.__enter__.return_value = conn
 
     with patch("app.enqueue_email") as mock_enqueue:

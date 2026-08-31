@@ -311,6 +311,7 @@ def _build_password_reset_url(conn, user_id: int, base_url: str | None = None) -
     base_url: passe explicitamente quando não houver request ativo (ex.: CLI,
     fora de qualquer rota Flask) — sem isso, o fallback usa request.host_url,
     que levanta RuntimeError fora de um request context."""
+    repo.invalidate_password_reset_tokens(conn, user_id)
     token = repo.create_password_reset_token(conn, user_id)
     if base_url is None:
         base_url = os.getenv("APP_BASE_URL", request.host_url.rstrip("/"))
@@ -366,6 +367,13 @@ def _check_tenant_access(conn, tenant_id, email) -> bool:
                 f"sem interrupções.",
                 "trial_modal",
             )
+    elif status not in ("active", "trial"):
+        # Deny-by-default: 'canceled' ou qualquer status desconhecido
+        # futuro bloqueia — sem isso caía no `return False` implícito e
+        # passava como se a conta estivesse ativa.
+        logger.warning(f"Login bloqueado (status desconhecido/cancelado '{status}'): '{email}'.")
+        flash("Sua conta não está mais ativa. Entre em contato com o suporte.", "danger")
+        return True
 
     return False
 
@@ -400,14 +408,12 @@ def login():
         with engine.connect() as conn:
             row = repo.get_user_by_email_global(conn, email)
             if row and not row.get("is_active"):
+                # Mensagem genérica de propósito — mensagem específica
+                # permitiria enumerar emails cadastrados e quais já
+                # verificaram a conta. Quem esqueceu de verificar usa
+                # /resend-verification por conta própria.
                 logger.warning(f"Login bloqueado (email não verificado): '{email}'.")
-                flash(
-                    "Confirme seu email antes de fazer login. "
-                    "Verifique sua caixa de entrada ou solicite novo link.",
-                    "warning",
-                )
-                return render_template("login.html")
-            if row and row.get("is_active"):
+            elif row and row.get("is_active"):
                 candidate = DbUser(
                     row["id"], row["username"], row["password_hash"],
                     row["must_change_password"], row["tenant_id"], row["role"],
@@ -419,6 +425,7 @@ def login():
                     user = candidate
 
         if user:
+            session.permanent = True
             login_user(user)
             logger.info(f"Login bem-sucedido: '{email}'.")
             flash("Login realizado com sucesso.", "success")
@@ -1048,16 +1055,21 @@ def add_convidado():
         event_id_form = 0
 
     with engine.connect() as conn:
+        repo.lock_tenant_for_update(conn, tid)
         event_id = None
         if event_id_form:
             valid = conn.execute(
-                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
+                text("SELECT id, owner_user_id FROM events WHERE id = :eid AND tenant_id = :tid"),
                 {"eid": event_id_form, "tid": tid},
             ).mappings().fetchone()
-            if valid:
+            if valid and (
+                current_user.is_tenant_admin
+                or valid["owner_user_id"] == current_user.db_id
+            ):
                 event_id = event_id_form
         if event_id is None:
-            event_id = repo.get_default_event_id(conn, tid)
+            owner_filter = None if current_user.is_tenant_admin else current_user.db_id
+            event_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
         if event_id is None:
             flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
             return redirect(url_for("respostas"))
@@ -1362,6 +1374,7 @@ def criar_evento():
         return redirect(url_for("admin_eventos"))
     tid = current_user.tenant_id
     with engine.connect() as conn:
+        repo.lock_tenant_for_update(conn, tid)
         limits = repo.get_plan_limits(conn, tid)
         total = repo.count_events_for_tenant(conn, tid)
         if limits["max_events"] is not None and total >= limits["max_events"]:
@@ -1454,20 +1467,22 @@ def add_usuario():
         return redirect(url_for("admin_usuarios"))
 
     tid = current_user.tenant_id
-    with engine.connect() as conn:
-        limits = repo.get_plan_limits(conn, tid)
-        current_count = repo.count_members_for_tenant(conn, tid)
-    if not repo.within_limit(current_count, limits["max_members"]):
-        flash(
-            f"Limite de {limits['max_members']} membro(s) atingido. "
-            "Faça upgrade do plano para adicionar mais.",
-            "danger",
-        )
-        return redirect(url_for("admin_usuarios"))
-
     temp_pass = secrets.token_urlsafe(12)
     try:
         with engine.connect() as conn:
+            # Trava o tenant e faz count+insert na MESMA transação — evita
+            # a corrida (TOCTOU) de duas requisições concorrentes lendo o
+            # mesmo count antes de qualquer uma commitar (item #6).
+            repo.lock_tenant_for_update(conn, tid)
+            limits = repo.get_plan_limits(conn, tid)
+            current_count = repo.count_members_for_tenant(conn, tid)
+            if not repo.within_limit(current_count, limits["max_members"]):
+                flash(
+                    f"Limite de {limits['max_members']} membro(s) atingido. "
+                    "Faça upgrade do plano para adicionar mais.",
+                    "danger",
+                )
+                return redirect(url_for("admin_usuarios"))
             new_user_id = repo.add_user(
                 conn, tid, username, email,
                 generate_password_hash(temp_pass),
@@ -1758,6 +1773,12 @@ def superadmin_set_plan(tenant_id):
             # suspensão manual (abuso/fraude/não pagamento) exige
             # reativação explícita mesmo após o upgrade de plano.
             repo.set_tenant_status(conn, tenant_id, "active")
+        elif plan == "free" and info["status"] == "active":
+            # Rearma a checagem de trial — sem isso, um tenant promovido a
+            # pro/business (status volta a 'active') e depois rebaixado a
+            # free de novo ficaria com acesso ilimitado, já que
+            # _check_tenant_access só avalia expiração quando status='trial'.
+            repo.set_tenant_status(conn, tenant_id, "trial")
         conn.commit()
     flash(f"Plano do tenant {tenant_id} alterado para '{plan}'.", "success")
     return redirect(url_for("superadmin"))

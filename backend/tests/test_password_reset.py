@@ -83,6 +83,7 @@ def test_forgot_password_post_usuario_valido_envia_email(client, db):
     conn.execute.side_effect = [
         qresult(fetchone=user_row),
         MagicMock(),
+        MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn
 
@@ -204,6 +205,7 @@ def test_forgot_password_post_com_email_valido_envia_reset(client, db):
     conn.execute.side_effect = [
         qresult(fetchone=user_row),
         MagicMock(),
+        MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn
 
@@ -227,6 +229,7 @@ def test_forgot_password_post_com_email_case_insensitive(client, db):
     conn = MagicMock()
     conn.execute.side_effect = [
         qresult(fetchone=user_row),
+        MagicMock(),
         MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn

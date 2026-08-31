@@ -31,6 +31,7 @@ def test_add_usuario_sem_email_retorna_erro(admin_client, db):
 
 def test_add_usuario_com_email_cria_com_sucesso(admin_client, db):
     conn = setup_db(db,
+                    qresult(),                           # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=_LIMITS_NONE),    # get_plan_limits (unlimited)
                     qresult(fetchone={'n': 0}),          # count_members_for_tenant
                     qresult(),                           # add_user INSERT
@@ -41,6 +42,30 @@ def test_add_usuario_com_email_cria_com_sucesso(admin_client, db):
                                    'whatsapp': ''})
     assert resp.status_code == 302
     conn.commit.assert_called()
+
+
+def test_add_usuario_trava_tenant_e_usa_uma_unica_conexao(admin_client, db):
+    """Item #6: check de limite + insert devem correr na MESMA transação,
+    travada com FOR UPDATE — antes, eram duas conexões/transações
+    separadas, deixando uma janela real de corrida (TOCTOU) entre o count
+    e o insert de um novo membro."""
+    conn = setup_db(db,
+                    qresult(),                           # lock_tenant_for_update FOR UPDATE
+                    qresult(fetchone=_LIMITS_NONE),
+                    qresult(fetchone={'n': 0}),
+                    qresult(),
+                    qresult(fetchone={'id': 99}))
+
+    resp = admin_client.post('/admin/usuarios/add',
+                             data={'username': 'novo2', 'email': 'novo2@test.com',
+                                   'whatsapp': ''})
+
+    assert resp.status_code == 302
+    first_sql = str(conn.execute.call_args_list[0][0][0])
+    assert "FOR UPDATE" in first_sql
+    # check + insert na mesma conexão: só 1 abertura de conexão para esse fluxo
+    # (a 2ª chamada a db.connect(), se houver, seria só o build do reset-url por email)
+    assert db.connect.call_count == 1
 
 
 def test_edit_usuario_sem_email_retorna_erro(admin_client, db):
@@ -117,6 +142,7 @@ def test_reset_senha_usuario_com_smtp_envia_convite(admin_client, db, monkeypatc
     conn = setup_db(db,
                     qresult(fetchone={'username': 'op', 'email': 'op@test.com'}),  # get_user_by_id
                     qresult(),   # update_user (rotaciona a senha AGORA)
+                    qresult(),   # invalidate_password_reset_tokens UPDATE
                     qresult())   # create_password_reset_token INSERT
 
     with patch('app.enqueue_email') as mock_enqueue:
@@ -129,7 +155,7 @@ def test_reset_senha_usuario_com_smtp_envia_convite(admin_client, db, monkeypatc
     assert mock_enqueue.call_args[0][2] == 'op'
     assert '/reset_password/' in mock_enqueue.call_args[0][3]
     conn.commit.assert_called()
-    assert conn.execute.call_count == 3  # get_user_by_id + update_user + create_password_reset_token
+    assert conn.execute.call_count == 4  # get_user_by_id + update_user + invalidate_password_reset_tokens + create_password_reset_token
 
 
 def test_reset_senha_usuario_sem_smtp_gera_senha_temporaria(admin_client, db, monkeypatch):

@@ -39,6 +39,14 @@ _SUPERADMIN_DBUSER = _app_module.DbUser(
     email=SUPERADMIN_EMAIL,
 )
 
+# DbUser pré-construído para member_client — role='member', mesmo tenant do
+# admin_client (tenant_id=1) mas db_id diferente, pra testar checagem de
+# ownership (tenant_admin sempre bypassa, member só acessa o que é seu).
+_MEMBER_DBUSER = _app_module.DbUser(
+    2, 'membertest', generate_password_hash('MemberPass@1'), False, 1, 'member',
+    email='member@test.com',
+)
+
 
 @_app_module.login_manager.user_loader
 def _test_user_loader(user_id):
@@ -47,6 +55,8 @@ def _test_user_loader(user_id):
         return _ADMIN_DBUSER
     if user_id == 'user_999':
         return _SUPERADMIN_DBUSER
+    if user_id == 'user_2':
+        return _MEMBER_DBUSER
     if user_id and user_id.startswith('user_'):
         try:
             db_id = int(user_id[5:])
@@ -94,6 +104,15 @@ def admin_client(client):
     """Client com sessão de tenant_admin pré-configurada (não requer DB)."""
     with client.session_transaction() as sess:
         sess['_user_id'] = 'user_1'
+        sess['_fresh'] = True
+    return client
+
+
+@pytest.fixture
+def member_client(client):
+    """Client com sessão de member (role='member', tenant_id=1, db_id=2) pré-configurada."""
+    with client.session_transaction() as sess:
+        sess['_user_id'] = 'user_2'
         sess['_fresh'] = True
     return client
 

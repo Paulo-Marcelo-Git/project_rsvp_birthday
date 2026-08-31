@@ -65,6 +65,7 @@ def test_create_superadmin_cria_com_sucesso_com_smtp(db, monkeypatch):
                     qresult(fetchone={'id': 7}),               # get_system_tenant_id
                     qresult(),                                 # add_user INSERT
                     qresult(fetchone={'id': 999}),             # LAST_INSERT_ID
+                    qresult(),                                 # invalidate_password_reset_tokens UPDATE
                     qresult())                                 # password_reset_tokens INSERT
 
     with patch('app.enqueue_email') as mock_enqueue:
@@ -77,7 +78,7 @@ def test_create_superadmin_cria_com_sucesso_com_smtp(db, monkeypatch):
     assert mock_enqueue.call_args[0][1] == 'sa@test.com'
     assert mock_enqueue.call_args[0][2] == 'superadmin'
     assert '/reset_password/' in mock_enqueue.call_args[0][3]
-    assert conn.execute.call_count == 5
+    assert conn.execute.call_count == 6
 
 
 def test_create_superadmin_reenvia_convite_se_incompleto_com_smtp(db, monkeypatch):
@@ -92,6 +93,7 @@ def test_create_superadmin_reenvia_convite_se_incompleto_com_smtp(db, monkeypatc
                         'password_hash': 'x', 'role': 'super_admin', 'must_change_password': True,
                         'is_active': 1, 'whatsapp': None,
                     }),                # get_user_by_email_global
+                    qresult(),         # invalidate_password_reset_tokens UPDATE
                     qresult())         # create_password_reset_token INSERT
 
     with patch('app.enqueue_email') as mock_enqueue:
