@@ -39,6 +39,7 @@ docker-compose-old.yml
 # Specs e documentos internos (não subir para repo público)
 docs/superpowers/
 docs/smoke-tests/
+docs/design-system/
 .superpowers/
 
 # Artefatos de sessões de teste com Playwright MCP

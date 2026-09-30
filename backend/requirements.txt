@@ -14,3 +14,4 @@ flasgger==0.9.7.1
 rq==1.16.2
 redis==5.0.7
 Flask-Limiter==3.8.0
+debugpy==1.8.21

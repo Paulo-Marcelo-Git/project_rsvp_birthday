@@ -27,5 +27,16 @@ done
 echo "[entrypoint] Aplicando migrations Alembic..."
 alembic upgrade head
 
+if [ "${DEBUGPY_ENABLED:-}" = "true" ]; then
+    echo "############################################################"
+    echo "# ATENCAO: DEBUGPY_ENABLED=true                             #"
+    echo "# Rodando 'flask run' (single-thread, SEM gunicorn) com     #"
+    echo "# debugpy na porta 5678. Isto NAO deve rodar em producao -  #"
+    echo "# derruba a capacidade de throughput do backend.            #"
+    echo "# Para reverter: apague DEBUGPY_ENABLED do .env e reinicie. #"
+    echo "############################################################"
+    exec env FLASK_APP=app python -X frozen_modules=off -m debugpy --listen 0.0.0.0:5678 -m flask run --host 0.0.0.0 --port 8000 --no-reload
+fi
+
 echo "[entrypoint] Iniciando gunicorn..."
 exec gunicorn app:app "$@"

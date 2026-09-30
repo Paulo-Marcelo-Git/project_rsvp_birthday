@@ -40,6 +40,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     ports:
       - "127.0.0.1:3000:8000"
+      - "127.0.0.1:5678:5678"
     depends_on:
       db:
         condition: service_healthy
