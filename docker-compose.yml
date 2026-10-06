@@ -119,6 +119,8 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
     volumes:
       - backup_data:/backups
+      # somente leitura: o backup nunca altera os uploads de produção
+      - uploads_data:/uploads:ro
     depends_on:
       db:
         condition: service_healthy

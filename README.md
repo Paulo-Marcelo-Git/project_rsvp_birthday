@@ -326,6 +326,23 @@ Para verificar as migrations no banco restaurado:
 docker exec rsvp_backend env DB_NAME=rsvp_restore_test python -m alembic upgrade head
 ```
 
+### Uploads (imagens e vídeos dos convites)
+
+O backup diário também gera `comemore_uploads_YYYYMMDD_HHMMSS.tar.gz` em `/backups`, com a mesma retenção (`BACKUP_RETENTION_DAYS`).
+
+Testar um restore (em diretório temporário, sem tocar produção):
+
+    docker exec rsvp_backup sh /restore-uploads.sh /backups/comemore_uploads_XYZ.tar.gz
+
+Restaurar **em produção** (sobrescreve o volume — faça um backup manual antes):
+
+    docker compose stop backend worker
+    docker run --rm -v project_rsvp_birthday_uploads_data:/uploads -v project_rsvp_birthday_backup_data:/backups:ro \
+      alpine sh -c 'tar -xzf /backups/comemore_uploads_XYZ.tar.gz -C /uploads'
+    docker compose start backend worker
+
+(Confirme os nomes reais dos volumes com `docker volume ls | grep rsvp`.)
+
 ---
 
 ## Uploads de Mídia

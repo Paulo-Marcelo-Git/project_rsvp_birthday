@@ -22,5 +22,13 @@ mysqldump \
 SIZE=$(du -sh "${BACKUP_DIR}/${FILENAME}" | cut -f1)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup salvo: ${FILENAME} (${SIZE})"
 
-DELETED=$(find "$BACKUP_DIR" -name 'comemore_*.sql.gz' -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
+UPLOADS_DIR=${UPLOADS_DIR:-/uploads}
+UPLOADS_FILE="comemore_uploads_${TIMESTAMP}.tar.gz"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Iniciando backup dos uploads (${UPLOADS_DIR})..."
+tar -czf "${BACKUP_DIR}/${UPLOADS_FILE}" -C "$UPLOADS_DIR" .
+UPLOADS_SIZE=$(du -sh "${BACKUP_DIR}/${UPLOADS_FILE}" | cut -f1)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup de uploads salvo: ${UPLOADS_FILE} (${UPLOADS_SIZE})"
+
+DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_uploads_*.tar.gz' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
