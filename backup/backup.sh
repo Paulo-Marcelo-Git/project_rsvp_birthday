@@ -26,9 +26,28 @@ UPLOADS_DIR=${UPLOADS_DIR:-/uploads}
 UPLOADS_FILE="comemore_uploads_${TIMESTAMP}.tar.gz"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Iniciando backup dos uploads (${UPLOADS_DIR})..."
-tar -czf "${BACKUP_DIR}/${UPLOADS_FILE}" -C "$UPLOADS_DIR" .
-UPLOADS_SIZE=$(du -sh "${BACKUP_DIR}/${UPLOADS_FILE}" | cut -f1)
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup de uploads salvo: ${UPLOADS_FILE} (${UPLOADS_SIZE})"
+# Grava em nome temporário e só renomeia em caso de sucesso: nunca fica um
+# arquivo truncado com nome de backup válido.
+UPLOADS_TMP="${BACKUP_DIR}/${UPLOADS_FILE}.tmp"
+TAR_RC=0
+tar -czf "$UPLOADS_TMP" -C "$UPLOADS_DIR" . || TAR_RC=$?
+if [ "$TAR_RC" -ge 2 ]; then
+  rm -f "$UPLOADS_TMP"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERRO: tar dos uploads falhou (código ${TAR_RC}); backup de uploads NÃO gerado" >&2
+else
+  if [ "$TAR_RC" -eq 1 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] AVISO: arquivos mudaram durante a leitura (tar código 1); arquivo mantido"
+  fi
+  mv "$UPLOADS_TMP" "${BACKUP_DIR}/${UPLOADS_FILE}"
+  UPLOADS_SIZE=$(du -sh "${BACKUP_DIR}/${UPLOADS_FILE}" | cut -f1)
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup de uploads salvo: ${UPLOADS_FILE} (${UPLOADS_SIZE})"
+fi
 
+# Retenção roda sempre (mesmo se o tar falhou) para não encher o volume de backup.
 DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_uploads_*.tar.gz' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
+
+# Falha real do tar => código de saída != 0 (depois da retenção)
+if [ "$TAR_RC" -ge 2 ]; then
+  exit "$TAR_RC"
+fi
