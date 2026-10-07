@@ -563,3 +563,37 @@ def test_invalidate_password_reset_tokens_marca_pendentes_como_usados():
     assert "SET used = 1" in sql
     assert "used = 0" in sql
     assert params["uid"] == 42
+
+
+# ── eventos: get_event / list_events (Fase 2) ─────────────────────────────────
+
+def test_get_event_filtra_tenant_id():
+    conn = _conn(fetchone={'id': 5, 'tenant_id': 1, 'owner_user_id': 1, 'title': 'X',
+                           'theme': 'default', 'media_url': None, 'status': 'draft'})
+    ev = repo.get_event(conn, 1, 5)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'tenant_id = :tid' in sql
+    assert _last_params(conn) == {'eid': 5, 'tid': 1}
+    assert ev['media_url'] is None and ev['owner_user_id'] == 1
+
+
+def test_get_event_inexistente_retorna_none():
+    conn = _conn(fetchone=None)
+    assert repo.get_event(conn, 1, 999) is None
+
+
+def test_list_events_sem_owner_nao_filtra_responsavel():
+    conn = _conn(all_rows=[])
+    repo.list_events(conn, 1)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'owner_user_id = :owner' not in sql
+    assert _last_params(conn) == {'tid': 1}
+
+
+def test_list_events_com_owner_filtra_responsavel_e_traz_media():
+    conn = _conn(all_rows=[])
+    repo.list_events(conn, 1, owner_user_id=2)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'e.owner_user_id = :owner' in sql
+    assert 'e.media_url' in sql
+    assert _last_params(conn) == {'tid': 1, 'owner': 2}

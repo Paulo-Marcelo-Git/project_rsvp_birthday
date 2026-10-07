@@ -173,6 +173,20 @@ def get_default_event_id(conn, tenant_id: int, owner_user_id: int | None = None)
     return int(row["id"]) if row else None
 
 
+def get_event(conn, tenant_id: int, event_id: int) -> dict | None:
+    """Busca evento por id. SEMPRE filtra tenant_id. Ponto único usado pelas
+    rotas para validar posse do evento (junto com _can_manage_event no app)."""
+    row = conn.execute(
+        text("""
+            SELECT id, tenant_id, owner_user_id, title, theme, media_url, status
+            FROM events
+            WHERE id = :eid AND tenant_id = :tid
+        """),
+        {"eid": event_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    return dict(row) if row else None
+
+
 def get_event_texts(conn, tenant_id: int, event_id: int) -> dict:
     """
     Retorna textos do evento para renderizar templates de convite e configuração.
@@ -265,17 +279,24 @@ def create_default_event(
     return int(row["id"])
 
 
-def list_events(conn, tenant_id: int) -> list[dict]:
-    """Lista todos os eventos do tenant, mais recente primeiro."""
+def list_events(conn, tenant_id: int, owner_user_id: int | None = None) -> list[dict]:
+    """Lista eventos do tenant, mais recente primeiro. Se owner_user_id for
+    informado, só os eventos dos quais esse usuário é responsável (visão de member)."""
+    params = {"tid": tenant_id}
+    owner_sql = ""
+    if owner_user_id is not None:
+        owner_sql = " AND e.owner_user_id = :owner"
+        params["owner"] = owner_user_id
     rows = conn.execute(
-        text("""
-            SELECT id, tenant_id, title, status, theme, event_date, created_at,
+        text(f"""
+            SELECT e.id, e.tenant_id, e.owner_user_id, e.title, e.status, e.theme,
+                   e.media_url, e.event_date, e.created_at,
                    (SELECT COUNT(*) FROM invitees i WHERE i.event_id = e.id) AS total_invitees
             FROM events e
-            WHERE tenant_id = :tid
-            ORDER BY created_at DESC
+            WHERE e.tenant_id = :tid{owner_sql}
+            ORDER BY e.created_at DESC, e.id DESC
         """),
-        {"tid": tenant_id},
+        params,
     ).mappings().all()
     return [dict(r) for r in rows]
 
