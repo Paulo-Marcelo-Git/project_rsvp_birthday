@@ -8,12 +8,22 @@ FILENAME="comemore_${TIMESTAMP}.sql.gz"
 
 mkdir -p "$BACKUP_DIR"
 
+# Credenciais via arquivo de opções (fora do `ps`), removido ao sair.
+umask 077
+CNF=$(mktemp)
+trap 'rm -f "$CNF"' EXIT
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+{
+  printf '[client]\n'
+  printf 'user="%s"\n' "$(esc "$DB_USER")"
+  printf 'password="%s"\n' "$(esc "$DB_PASSWORD")"
+  printf 'host="%s"\n' "$(esc "$DB_HOST")"
+} > "$CNF"
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Iniciando backup de ${DB_NAME}..."
 
 mysqldump \
-  -h "$DB_HOST" \
-  -u "$DB_USER" \
-  -p"$DB_PASSWORD" \
+  --defaults-extra-file="$CNF" \
   --single-transaction \
   --routines \
   --triggers \
@@ -44,7 +54,7 @@ else
 fi
 
 # Retenção roda sempre (mesmo se o tar falhou) para não encher o volume de backup.
-DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_uploads_*.tar.gz' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
+DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_uploads_*.tar.gz' -o -name 'comemore_uploads_*.tar.gz.tmp' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
 
 # Falha real do tar => código de saída != 0 (depois da retenção)
