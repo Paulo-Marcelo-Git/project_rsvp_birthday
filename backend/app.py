@@ -229,6 +229,15 @@ def tenant_admin_required(f):
     return decorated
 
 
+def _can_manage_event(event: dict | None) -> bool:
+    """tenant_admin gerencia qualquer evento do próprio tenant; member só os
+    eventos dos quais é responsável. `event` deve vir de repo.get_event /
+    repo.list_events (já filtrados por tenant_id)."""
+    if not event:
+        return False
+    return current_user.is_tenant_admin or event.get("owner_user_id") == current_user.db_id
+
+
 def superadmin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -946,13 +955,8 @@ def exportar_convidados_xlsx():
         event_id_param = None
 
     with engine.connect() as conn:
-        if event_id_param:
-            valid = conn.execute(
-                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_param, "tid": tid},
-            ).fetchone()
-            if not valid:
-                event_id_param = None
+        if event_id_param and not _can_manage_event(repo.get_event(conn, tid, event_id_param)):
+            event_id_param = None
         result = repo.get_invitees(
             conn, tid, owner_user_id=owner_uid, search=search,
             event_id=event_id_param, limit=10000
@@ -1058,14 +1062,7 @@ def add_convidado():
         repo.lock_tenant_for_update(conn, tid)
         event_id = None
         if event_id_form:
-            valid = conn.execute(
-                text("SELECT id, owner_user_id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_form, "tid": tid},
-            ).mappings().fetchone()
-            if valid and (
-                current_user.is_tenant_admin
-                or valid["owner_user_id"] == current_user.db_id
-            ):
+            if _can_manage_event(repo.get_event(conn, tid, event_id_form)):
                 event_id = event_id_form
         if event_id is None:
             owner_filter = None if current_user.is_tenant_admin else current_user.db_id
@@ -1298,11 +1295,7 @@ def set_tema():
     except (ValueError, TypeError):
         abort(400)
     with engine.connect() as conn:
-        valid = conn.execute(
-            text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-            {"eid": event_id, "tid": tid},
-        ).fetchone()
-        if not valid:
+        if not repo.get_event(conn, tid, event_id):
             abort(404)
         repo.set_event_theme(conn, tid, event_id, theme)
         conn.commit()

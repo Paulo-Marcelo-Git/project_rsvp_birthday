@@ -227,3 +227,14 @@ def test_exportar_xlsx_event_id_invalido_e_ignorado(admin_client, db):
     )
     resp = admin_client.get('/admin/exportar_xlsx?event_id=999')
     assert resp.status_code == 200
+
+
+# ── Task 3: SQL de events só via repo.get_event ─────────────────────────────────
+
+def test_set_tema_evento_de_outro_tenant_retorna_404(admin_client, db):
+    conn = setup_db(db, qresult(fetchone=None))   # repo.get_event → None
+    resp = admin_client.post('/admin/set_tema', data={'theme': 'girl', 'event_id': '77'})
+    assert resp.status_code == 404
+    sql = str(conn.execute.call_args_list[0][0][0])
+    assert 'owner_user_id' in sql   # assinatura do SELECT de repo.get_event
+    assert conn.execute.call_count == 1  # nenhum UPDATE
