@@ -5,7 +5,7 @@ Usa mocks de DB (sem MySQL real), seguindo o padrão de test_admin.py.
 """
 import datetime
 
-from tests.conftest import qresult, setup_db, STATS_ROW, TEXTS_ROW, DEFAULT_EVENT_ROW
+from tests.conftest import qresult, setup_db, STATS_ROW, TEXTS_ROW, DEFAULT_EVENT_ROW, EVENT_ROW, respostas_db
 
 _LIMITS_FREE = {'max_events': 2, 'max_invitees': 50, 'max_members': 1}
 _LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
@@ -132,55 +132,55 @@ def test_criar_evento_titulo_vazio(admin_client, db):
 
 # ── /admin/respostas?event_id= ──────────────────────────────────────────────────
 
-def test_respostas_com_event_id_param(admin_client, db):
-    """respostas aceita ?event_id= válido e filtra por ele."""
-    setup_db(
-        db,
-        qresult(fetchone={'id': 5}),           # validar event_id pertence ao tenant
-        qresult(all_rows=[]),                   # repo.get_invitees (filtrado por event_id=5)
-        qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
-        # event_id_param=5 → get_default_event_id NÃO é chamado
-        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
-        qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
-        qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
-        qresult(all_rows=[_EVENT_ROW]),         # repo.list_events
-    )
-    resp = admin_client.get('/admin/respostas?event_id=5')
-    assert resp.status_code == 200
+def test_respostas_sem_event_id_redireciona_para_evento_mais_recente(admin_client, db):
+    setup_db(db, qresult(all_rows=[{**EVENT_ROW, 'id': 7}, {**EVENT_ROW, 'id': 3}]))
+    resp = admin_client.get('/admin/respostas')
+    assert resp.status_code == 302
+    assert 'event_id=7' in resp.headers['Location']
 
 
-def test_respostas_event_id_invalido_e_ignorado(admin_client, db):
-    """event_id que não pertence ao tenant é ignorado (fallback para default)."""
-    setup_db(
-        db,
-        qresult(fetchone=None),                 # validar event_id → None (não pertence ao tenant)
-        qresult(all_rows=[]),                   # repo.get_invitees (event_id_param=None)
-        qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
-        qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id (fallback)
-        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
-        qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
-        qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
-        qresult(all_rows=[]),                   # repo.list_events
-    )
+def test_respostas_event_id_de_outro_tenant_redireciona_para_evento_proprio(admin_client, db):
+    setup_db(db, qresult(all_rows=[EVENT_ROW]))   # 999 não está na lista do tenant
     resp = admin_client.get('/admin/respostas?event_id=999')
-    assert resp.status_code == 200
+    assert resp.status_code == 302
+    assert 'event_id=1' in resp.headers['Location']
 
 
-def test_respostas_event_id_nao_numerico_ignorado(admin_client, db):
-    """event_id não numérico (ex: 'abc') é silenciosamente ignorado."""
-    setup_db(
-        db,
-        # event_id_param=None (parse fallback) → sem query de validação
-        qresult(all_rows=[]),                   # repo.get_invitees
-        qresult(fetchone=STATS_ROW),            # repo.count_invitees_by_response
-        qresult(fetchone=DEFAULT_EVENT_ROW),    # repo.get_default_event_id
-        qresult(fetchone={'theme': 'default'}), # repo.get_event_theme
-        qresult(fetchone=TEXTS_ROW),            # repo.get_event_texts
-        qresult(fetchone=_LIMITS_NONE),         # repo.get_plan_limits
-        qresult(all_rows=[]),                   # repo.list_events
-    )
+def test_respostas_event_id_nao_numerico_redireciona(admin_client, db):
+    setup_db(db, qresult(all_rows=[EVENT_ROW]))
     resp = admin_client.get('/admin/respostas?event_id=abc')
+    assert resp.status_code == 302
+    assert 'event_id=1' in resp.headers['Location']
+
+
+def test_respostas_redirect_preserva_busca_com_espaco(admin_client, db):
+    setup_db(db, qresult(all_rows=[EVENT_ROW]))
+    resp = admin_client.get('/admin/respostas?search=ana%20maria')
+    loc = resp.headers['Location']
+    assert resp.status_code == 302
+    assert 'event_id=1' in loc
+    assert 'search=ana+maria' in loc or 'search=ana%20maria' in loc
+
+
+def test_respostas_com_event_id_valido_filtra_convidados_pelo_evento(admin_client, db):
+    conn = respostas_db(db)
+    resp = admin_client.get('/admin/respostas?event_id=1')
     assert resp.status_code == 200
+    invitees_params = conn.execute.call_args_list[1][0][1]
+    assert invitees_params['event_id'] == 1
+
+
+def test_respostas_member_lista_so_eventos_proprios(member_client, db):
+    conn = setup_db(db, qresult(all_rows=[]))
+    member_client.get('/admin/respostas')
+    assert conn.execute.call_args_list[0][0][1]['owner'] == 2
+
+
+def test_respostas_sem_eventos_mostra_estado_vazio_para_member(member_client, db):
+    setup_db(db, qresult(all_rows=[]))
+    resp = member_client.get('/admin/respostas')
+    assert resp.status_code == 200
+    assert 'Nenhum evento atribuído a você' in resp.data.decode('utf-8')
 
 
 # ── /admin/set_tema ─────────────────────────────────────────────────────────────
@@ -238,3 +238,9 @@ def test_set_tema_evento_de_outro_tenant_retorna_404(admin_client, db):
     sql = str(conn.execute.call_args_list[0][0][0])
     assert 'owner_user_id' in sql   # assinatura do SELECT de repo.get_event
     assert conn.execute.call_count == 1  # nenhum UPDATE
+
+
+def test_app_nao_monta_sql_de_events():
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parent.parent.joinpath('app.py').read_text(encoding='utf-8')
+    assert 'FROM events' not in src

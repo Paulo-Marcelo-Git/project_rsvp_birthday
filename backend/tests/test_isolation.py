@@ -264,7 +264,8 @@ class TestTenantIsolation:
     def test_respostas_tenant_a_nao_ve_convidado_b(self, live_app):
         """GET /admin/respostas como tenant A não deve exibir nome de convidado B."""
         client = _client_as(live_app, _UID_A)
-        resp = client.get("/admin/respostas")
+        # sem event_id → 302 para o evento mais recente do PRÓPRIO tenant
+        resp = client.get("/admin/respostas", follow_redirects=True)
         assert resp.status_code == 200, f"Esperado 200, obteve {resp.status_code}"
         body = resp.data.decode("utf-8")
         assert _NAME_A in body, f"Tenant A deveria ver '{_NAME_A}'"
@@ -273,7 +274,8 @@ class TestTenantIsolation:
     def test_respostas_tenant_b_nao_ve_convidado_a(self, live_app):
         """GET /admin/respostas como tenant B não deve exibir nome de convidado A."""
         client = _client_as(live_app, _UID_B)
-        resp = client.get("/admin/respostas")
+        # sem event_id → 302 para o evento mais recente do PRÓPRIO tenant
+        resp = client.get("/admin/respostas", follow_redirects=True)
         assert resp.status_code == 200, f"Esperado 200, obteve {resp.status_code}"
         body = resp.data.decode("utf-8")
         assert _NAME_B in body, f"Tenant B deveria ver '{_NAME_B}'"

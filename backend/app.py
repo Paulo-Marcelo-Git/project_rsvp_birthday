@@ -855,33 +855,31 @@ def respostas():
     owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
-        if event_id_param:
-            valid = conn.execute(
-                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_param, "tid": tid},
-            ).mappings().fetchone()
-            if not valid:
-                event_id_param = None
+        eventos = repo.list_events(conn, tid, owner_user_id=owner_uid)
+        if not eventos:
+            return render_template("admin_sem_evento.html", is_tenant_admin=is_admin)
+        # A tela trabalha SEMPRE com um único evento: lista, contadores,
+        # textos, tema, imagem e "adicionar convidado" referem-se ao mesmo.
+        event = next((e for e in eventos if e["id"] == event_id_param), None)
+        if event is None:
+            return redirect(url_for("respostas", event_id=eventos[0]["id"], search=search or None))
+        event_id = event["id"]
         convidados_raw = repo.get_invitees(
             conn, tid,
             owner_user_id=owner_uid,
             search=search,
-            event_id=event_id_param,
+            event_id=event_id,
             limit=per_page,
             offset=offset,
         )
         counts = repo.count_invitees_by_response(
-            conn, tid, owner_user_id=owner_uid, search=search, event_id=event_id_param
+            conn, tid, owner_user_id=owner_uid, search=search, event_id=event_id
         )
-        event_id = event_id_param or repo.get_default_event_id(conn, tid)
-        if event_id is None:
-            flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
-            return redirect(url_for("admin_usuarios"))
-        event_theme = repo.get_event_theme(conn, tid, event_id) if event_id else "default"
         texts = repo.get_event_texts(conn, tid, event_id)
-        current_event_title = texts.get("title", "Evento")
         limits = repo.get_plan_limits(conn, tid)
-        eventos = repo.list_events(conn, tid)
+
+    event_theme = event["theme"] or "default"
+    current_event_title = event["title"]
 
     can_manage_members = (
         limits["max_members"] is None or limits["max_members"] > 1
@@ -927,6 +925,7 @@ def respostas():
         is_tenant_admin=is_admin,
         can_manage_members=can_manage_members,
         event_id=event_id,
+        event=event,
         eventos=eventos,
         event_theme=event_theme,
     )
@@ -1142,11 +1141,11 @@ def edit_convidado(id):
     if file and file.filename:
         if not allowed_file(file.filename):
             flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
-            return redirect(url_for("respostas"))
+            return redirect(url_for("respostas", event_id=guest["event_id"]))
         new_media = save_uploaded_file(file)
         if new_media is None:
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for("respostas"))
+            return redirect(url_for("respostas", event_id=guest["event_id"]))
 
     update_fields = dict(
         name=name, email=email, phone=phone, observation=msg, response=response_db
@@ -1160,7 +1159,7 @@ def edit_convidado(id):
 
     logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
     flash("Convidado atualizado com sucesso!", "success")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=guest["event_id"]))
 
 
 @app.route("/admin/convidados/<int:id>/delete", methods=["POST"])
@@ -1206,7 +1205,7 @@ def delete_convidado(id):
         f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'."
     )
     flash("Convidado excluído com sucesso.", "warning")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=res["event_id"]))
 
 
 @app.route("/admin/textos", methods=["POST"])

@@ -1,6 +1,7 @@
 from tests.conftest import (
     qresult, setup_db,
     GUEST_ROW, STATS_ROW, DEFAULT_EVENT_ROW, TEXTS_ROW,
+    respostas_db,
 )
 
 _LIMITS_FREE = {'max_events': 2, 'max_invitees': 50, 'max_members': 1}
@@ -12,17 +13,8 @@ _COUNT_ONE   = {'n': 1}    # at max_members for free plan
 
 
 def _respostas_db(db, guests=None, limits=None):
-    """Configura as 7 queries que respostas() executa via repo (sem event_id_param)."""
-    return setup_db(
-        db,
-        qresult(all_rows=guests or []),                    # repo.get_invitees
-        qresult(fetchone=STATS_ROW),                        # repo.count_invitees_by_response
-        qresult(fetchone=DEFAULT_EVENT_ROW),                # repo.get_default_event_id
-        qresult(fetchone={'theme': 'default'}),             # repo.get_event_theme
-        qresult(fetchone=TEXTS_ROW),                        # repo.get_event_texts
-        qresult(fetchone=limits or _LIMITS_NONE),           # repo.get_plan_limits
-        qresult(all_rows=[]),                               # repo.list_events
-    )
+    """Mocka as queries de GET /admin/respostas?event_id=1."""
+    return respostas_db(db, guests=guests, limits=limits)
 
 
 # ── respostas ─────────────────────────────────────────────────────────────────
@@ -36,7 +28,7 @@ def test_respostas_exige_login(client):
 def test_respostas_carrega_para_admin(admin_client, db):
     _respostas_db(db)
 
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
 
     assert resp.status_code == 200
 
@@ -44,7 +36,7 @@ def test_respostas_carrega_para_admin(admin_client, db):
 def test_respostas_exibe_convidado(admin_client, db):
     _respostas_db(db, guests=[GUEST_ROW])
 
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
 
     assert resp.status_code == 200
     assert b'Maria Silva' in resp.data
@@ -53,7 +45,7 @@ def test_respostas_exibe_convidado(admin_client, db):
 def test_respostas_busca_por_nome(admin_client, db):
     _respostas_db(db)
 
-    resp = admin_client.get('/admin/respostas?search=maria')
+    resp = admin_client.get('/admin/respostas?event_id=1&search=maria')
 
     assert resp.status_code == 200
 
@@ -61,7 +53,7 @@ def test_respostas_busca_por_nome(admin_client, db):
 def test_respostas_esconde_botao_usuarios_free(admin_client, db):
     """Free plan (max_members=1): botão Usuários NÃO aparece no painel principal."""
     _respostas_db(db, limits=_LIMITS_FREE)
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
     assert resp.status_code == 200
     assert b'/admin/usuarios' not in resp.data
 
@@ -69,7 +61,7 @@ def test_respostas_esconde_botao_usuarios_free(admin_client, db):
 def test_respostas_mostra_botao_usuarios_ilimitado(admin_client, db):
     """Business plan (max_members=None): botão Usuários aparece no painel principal."""
     _respostas_db(db, limits=_LIMITS_NONE)
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
     assert resp.status_code == 200
     assert b'/admin/usuarios' in resp.data
 
@@ -242,7 +234,7 @@ def test_add_convidado_sem_nome_nao_salva(admin_client, db):
 # ── excluir convidado ─────────────────────────────────────────────────────────
 
 def test_delete_convidado_remove_registro(admin_client, db):
-    guest = {'name': 'Ana', 'media_url': None, 'event_owner_user_id': None}
+    guest = {'name': 'Ana', 'media_url': None, 'event_owner_user_id': None, 'event_id': 1}
     setup_db(db,
              qresult(fetchone=guest),  # repo.get_invitee
              qresult())                 # repo.delete_invitee
@@ -263,7 +255,7 @@ def test_delete_convidado_inexistente_retorna_404(admin_client, db):
 # ── editar convidado ──────────────────────────────────────────────────────────
 
 def test_edit_convidado_atualiza_registro(admin_client, db):
-    guest = {'event_owner_user_id': None}
+    guest = {'event_owner_user_id': None, 'event_id': 1}
     conn = setup_db(db,
                     qresult(fetchone=guest),  # repo.get_invitee
                     qresult())                 # repo.update_invitee
@@ -352,3 +344,21 @@ def test_exportar_xlsx_retorna_arquivo(admin_client, db):
 
     assert resp.status_code == 200
     assert 'spreadsheetml' in resp.content_type
+
+
+def test_edit_convidado_volta_para_o_evento_do_convidado(admin_client, db):
+    setup_db(db,
+             qresult(fetchone={**GUEST_ROW, 'event_id': 4}),  # repo.get_invitee
+             qresult())                                        # repo.update_invitee
+    resp = admin_client.post('/admin/convidados/1/edit', data={'name': 'Maria', 'response': ''})
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']
+
+
+def test_delete_convidado_volta_para_o_evento_do_convidado(admin_client, db):
+    setup_db(db,
+             qresult(fetchone={**GUEST_ROW, 'event_id': 4}),  # repo.get_invitee
+             qresult())                                        # repo.delete_invitee
+    resp = admin_client.post('/admin/convidados/1/delete')
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']
