@@ -4,8 +4,9 @@ e para a modificação de /admin/respostas com ?event_id=.
 Usa mocks de DB (sem MySQL real), seguindo o padrão de test_admin.py.
 """
 import datetime
+import io
 
-from tests.conftest import qresult, setup_db, STATS_ROW, TEXTS_ROW, DEFAULT_EVENT_ROW, EVENT_ROW, respostas_db
+from tests.conftest import JPEG_BYTES, qresult, setup_db, STATS_ROW, TEXTS_ROW, DEFAULT_EVENT_ROW, EVENT_ROW, respostas_db
 
 _LIMITS_FREE = {'max_events': 2, 'max_invitees': 50, 'max_members': 1}
 _LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
@@ -59,7 +60,7 @@ def test_criar_evento_exige_login(client):
     assert '/login' in resp.headers['Location']
 
 
-def test_criar_evento_sucesso(admin_client, db):
+def test_criar_evento_sucesso(admin_client, db, upload_dir):
     """Admin pode criar evento quando abaixo do limite."""
     setup_db(
         db,
@@ -69,13 +70,14 @@ def test_criar_evento_sucesso(admin_client, db):
         qresult(),                             # INSERT events
         qresult(fetchone={'id': 99}),          # SELECT LAST_INSERT_ID()
     )
-    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Nova Festa'})
+    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Nova Festa', 'media_file': (io.BytesIO(JPEG_BYTES), 'convite.jpg')},
+                             content_type='multipart/form-data')
     # Deve redirecionar para respostas com event_id=99
     assert resp.status_code == 302
     assert 'event_id=99' in resp.headers['Location']
 
 
-def test_criar_evento_trava_tenant_antes_do_count(admin_client, db):
+def test_criar_evento_trava_tenant_antes_do_count(admin_client, db, upload_dir):
     """Item #6 (corrida TOCTOU): a primeira query da transação deve travar
     a linha do tenant (FOR UPDATE), antes do count+insert — serializa
     requisições concorrentes do mesmo tenant contra o limite do plano."""
@@ -87,13 +89,14 @@ def test_criar_evento_trava_tenant_antes_do_count(admin_client, db):
         qresult(),                              # INSERT events
         qresult(fetchone={'id': 99}),           # SELECT LAST_INSERT_ID()
     )
-    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Nova Festa'})
+    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Nova Festa', 'media_file': (io.BytesIO(JPEG_BYTES), 'convite.jpg')},
+                             content_type='multipart/form-data')
     assert resp.status_code == 302
     first_sql = str(conn.execute.call_args_list[0][0][0])
     assert "FOR UPDATE" in first_sql
 
 
-def test_criar_evento_bloqueia_limite_plano(admin_client, db):
+def test_criar_evento_bloqueia_limite_plano(admin_client, db, upload_dir):
     """Free plan: max_events=2, já tem 2 → bloqueado com mensagem de plano/limite."""
     setup_db(
         db,
@@ -106,7 +109,8 @@ def test_criar_evento_bloqueia_limite_plano(admin_client, db):
     )
     resp = admin_client.post(
         '/admin/eventos/criar',
-        data={'title': 'Extra'},
+        data={'title': 'Extra', 'media_file': (io.BytesIO(JPEG_BYTES), 'convite.jpg')},
+        content_type='multipart/form-data',
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -301,3 +305,59 @@ def test_add_convidado_event_id_invalido_no_erro_nao_quebra(admin_client, db):
     resp = admin_client.post('/admin/convidados/add', data={'name': '', 'event_id': 'abc'})
     assert resp.status_code == 302
     assert resp.headers['Location'].endswith('/admin/respostas')
+
+
+# ── Task 12: imagem obrigatória na criação ──────────────────────────────────────
+
+import app as app_module
+
+
+def test_criar_evento_sem_imagem_recusa(admin_client, db, upload_dir):
+    # redirect → admin_eventos (list_events não-vazio: com lista vazia, a Task 18 redireciona de novo)
+    conn = setup_db(db, qresult(all_rows=[_EVENT_ROW]), qresult(fetchone=_LIMITS_NONE))
+    resp = admin_client.post('/admin/eventos/criar', data={'title': 'Sem Foto'},
+                             follow_redirects=True)
+    assert 'A imagem do convite é obrigatória.' in resp.data.decode('utf-8')
+    assert not any('INSERT INTO events' in str(c[0][0]) for c in conn.execute.call_args_list)
+
+
+def test_criar_evento_com_conteudo_invalido_recusa(admin_client, db, upload_dir):
+    conn = setup_db(db, qresult(all_rows=[]), qresult(fetchone=_LIMITS_NONE))
+    admin_client.post('/admin/eventos/criar',
+                      data={'title': 'X', 'media_file': (io.BytesIO(b'<html>'), 'x.jpg')},
+                      content_type='multipart/form-data')
+    assert not any('INSERT INTO events' in str(c[0][0]) for c in conn.execute.call_args_list)
+    assert list(upload_dir.iterdir()) == []
+
+
+def test_criar_evento_grava_media_url_no_insert(admin_client, db, upload_dir):
+    conn = setup_db(db, qresult(), qresult(fetchone=_LIMITS_NONE), qresult(fetchone={'n': 0}),
+                    qresult(), qresult(fetchone={'id': 42}))
+    admin_client.post('/admin/eventos/criar',
+                      data={'title': 'Com Foto', 'media_file': (io.BytesIO(JPEG_BYTES), 'c.jpg')},
+                      content_type='multipart/form-data')
+    insert_params = conn.execute.call_args_list[3][0][1]
+    saved = [p.name for p in upload_dir.iterdir()]
+    assert insert_params['media_url'] == saved[0]
+
+
+def test_criar_evento_falha_no_insert_remove_arquivo(admin_client, db, upload_dir, monkeypatch):
+    setup_db(db, qresult(), qresult(fetchone=_LIMITS_NONE), qresult(fetchone={'n': 0}))
+    def boom(*a, **k):
+        raise RuntimeError('db caiu')
+    monkeypatch.setattr(app_module.repo, 'create_event', boom)
+    import pytest
+    with pytest.raises(RuntimeError):
+        admin_client.post('/admin/eventos/criar',
+                          data={'title': 'X', 'media_file': (io.BytesIO(JPEG_BYTES), 'c.jpg')},
+                          content_type='multipart/form-data')
+    assert list(upload_dir.iterdir()) == []
+
+
+def test_criar_evento_no_limite_nao_salva_arquivo(admin_client, db, upload_dir):
+    setup_db(db, qresult(), qresult(fetchone=_LIMITS_FREE), qresult(fetchone={'n': 2}),
+             qresult(all_rows=[]), qresult(fetchone=_LIMITS_FREE))
+    admin_client.post('/admin/eventos/criar',
+                      data={'title': 'X', 'media_file': (io.BytesIO(JPEG_BYTES), 'c.jpg')},
+                      content_type='multipart/form-data')
+    assert list(upload_dir.iterdir()) == []

@@ -304,7 +304,8 @@ def list_events(conn, tenant_id: int, owner_user_id: int | None = None) -> list[
 
 
 def create_event(
-    conn, tenant_id: int, title: str, *, owner_user_id: int | None = None
+    conn, tenant_id: int, title: str, *, owner_user_id: int | None = None,
+    media_url: str | None = None,
 ) -> int:
     """Cria novo evento para o tenant. Retorna event_id."""
     import secrets as _sec
@@ -317,12 +318,13 @@ def create_event(
         text("""
             INSERT INTO events
                 (tenant_id, owner_user_id, title, event_type, slug, status,
-                 question_text, yes_text, no_text, extra_texts)
+                 question_text, yes_text, no_text, extra_texts, media_url)
             VALUES
                 (:tid, :owner, :title, 'aniversario', :slug, 'draft',
-                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
+                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra, :media_url)
         """),
-        {"tid": tenant_id, "owner": owner_user_id, "title": title, "slug": slug, "extra": extra},
+        {"tid": tenant_id, "owner": owner_user_id, "title": title, "slug": slug,
+         "extra": extra, "media_url": media_url},
     )
     row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
     return int(row["id"])

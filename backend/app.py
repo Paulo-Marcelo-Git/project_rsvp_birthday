@@ -1484,6 +1484,41 @@ def admin_eventos():
     )
 
 
+def _create_event_with_media(title: str, file) -> tuple[int | None, str | None]:
+    """Cria evento do tenant do usuário atual com imagem obrigatória.
+    Ordem: valida → trava tenant e checa limite → salva arquivo → INSERT →
+    commit. Falha depois de salvar remove o arquivo. Retorna (event_id, None)
+    ou (None, mensagem_de_erro)."""
+    if not title:
+        return None, "Nome do evento é obrigatório."
+    if not file or not file.filename:
+        return None, "A imagem do convite é obrigatória."
+    if not validate_media_content(file):
+        return None, _INVALID_MEDIA_MSG
+    tid = current_user.tenant_id
+    with engine.connect() as conn:
+        repo.lock_tenant_for_update(conn, tid)
+        limits = repo.get_plan_limits(conn, tid)
+        total = repo.count_events_for_tenant(conn, tid)
+        if limits["max_events"] is not None and total >= limits["max_events"]:
+            return None, (
+                f"Seu plano permite até {limits['max_events']} evento(s). "
+                "Faça upgrade para criar mais."
+            )
+        filename = save_uploaded_file(file)
+        if filename is None:
+            return None, "Erro ao salvar arquivo. Tente novamente."
+        try:
+            eid = repo.create_event(
+                conn, tid, title, owner_user_id=current_user.db_id, media_url=filename
+            )
+            conn.commit()
+        except Exception:
+            _remove_upload(filename)
+            raise
+    return eid, None
+
+
 @app.route("/admin/eventos/criar", methods=["POST"])
 @login_required
 def criar_evento():
@@ -1496,6 +1531,10 @@ def criar_evento():
         name: title
         type: string
         required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
     responses:
       302:
         description: Redireciona para o novo evento ou para /admin/eventos com mensagem de erro
@@ -1505,23 +1544,10 @@ def criar_evento():
     if not current_user.is_tenant_admin:
         abort(403)
     title = request.form.get("title", "").strip()
-    if not title:
-        flash("Nome do evento é obrigatório.", "danger")
+    eid, error = _create_event_with_media(title, request.files.get("media_file"))
+    if error:
+        flash(error, "danger")
         return redirect(url_for("admin_eventos"))
-    tid = current_user.tenant_id
-    with engine.connect() as conn:
-        repo.lock_tenant_for_update(conn, tid)
-        limits = repo.get_plan_limits(conn, tid)
-        total = repo.count_events_for_tenant(conn, tid)
-        if limits["max_events"] is not None and total >= limits["max_events"]:
-            flash(
-                f"Seu plano permite até {limits['max_events']} evento(s). "
-                "Faça upgrade para criar mais.",
-                "danger",
-            )
-            return redirect(url_for("admin_eventos"))
-        eid = repo.create_event(conn, tid, title, owner_user_id=current_user.db_id)
-        conn.commit()
     flash(f'Evento "{title}" criado com sucesso!', "success")
     return redirect(url_for("respostas", event_id=eid))
 
