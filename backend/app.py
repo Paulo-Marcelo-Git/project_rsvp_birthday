@@ -1136,16 +1136,22 @@ def add_convidado():
 
     with engine.connect() as conn:
         repo.lock_tenant_for_update(conn, tid)
-        event_id = None
+        event = None
         if event_id_form:
-            if _can_manage_event(repo.get_event(conn, tid, event_id_form)):
-                event_id = event_id_form
-        if event_id is None:
+            candidate = repo.get_event(conn, tid, event_id_form)
+            if _can_manage_event(candidate):
+                event = candidate
+        if event is None:
             owner_filter = None if current_user.is_tenant_admin else current_user.db_id
-            event_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
-        if event_id is None:
+            fallback_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
+            event = repo.get_event(conn, tid, fallback_id) if fallback_id else None
+        if event is None:
             flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
             return redirect(url_for("respostas"))
+        event_id = event["id"]
+        if not event["media_url"]:
+            flash("Envie a imagem do convite antes de adicionar convidados.", "danger")
+            return redirect(url_for("respostas", event_id=event_id))
         limits = repo.get_plan_limits(conn, tid)
         current_count = repo.count_invitees_for_event(conn, tid, event_id)
         if not repo.within_limit(current_count, limits["max_invitees"]):

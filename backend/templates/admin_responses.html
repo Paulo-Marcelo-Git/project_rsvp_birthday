@@ -46,7 +46,8 @@
       {% if is_tenant_admin %}
         <button class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#modalTextos">Textos</button>
       {% endif %}
-      <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd">+ Convidado</button>
+      <button id="btn-add-convidado" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAdd"
+              {% if not event.media_url %}disabled title="Envie a imagem do convite primeiro"{% endif %}>+ Convidado</button>
       <a href="{{ url_for('exportar_convidados_xlsx', search=search, event_id=event_id) }}" class="btn btn-sm btn-success">📥 Exportar Excel</a>
     </div>
   </div>
@@ -63,7 +64,7 @@
         {% endif %}
         <div class="small text-muted">Imagem padrão do convite. Convidados com imagem própria continuam com a deles.</div>
       {% else %}
-        <div class="alert alert-warning mb-0">Este evento ainda não tem imagem do convite.</div>
+        <div class="alert alert-warning mb-0">Este evento ainda não tem imagem do convite. Envie a imagem do convite para poder adicionar convidados.</div>
       {% endif %}
       <form action="{{ url_for('upload_event_media', event_id=event.id) }}" method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center ms-auto">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
