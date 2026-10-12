@@ -364,6 +364,29 @@ def save_uploaded_file(file):
     return safe
 
 
+def _remove_upload(filename: str | None) -> None:
+    """Remove o arquivo de UPLOAD_FOLDER. Ausência não é erro; nome que não
+    passa no secure_filename é ignorado (nunca sai da pasta de uploads)."""
+    if not filename:
+        return
+    safe = secure_filename(filename)
+    if not safe or safe != filename:
+        return
+    try:
+        os.remove(os.path.join(app.config["UPLOAD_FOLDER"], safe))
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.error(f"Falha ao remover upload '{safe}': {e}")
+
+
+def _delete_media_if_unreferenced(conn, filename: str | None) -> None:
+    """Apaga do disco só quando nenhum convidado/evento referencia mais o
+    arquivo. Chamar DEPOIS do commit que removeu a referência."""
+    if filename and repo.count_media_references(conn, filename) == 0:
+        _remove_upload(filename)
+
+
 
 # Rotas
 def _build_password_reset_url(conn, user_id: int, base_url: str | None = None) -> str:
@@ -1094,16 +1117,11 @@ def add_convidado():
     phone = request.form.get("phone") or None
     msg = request.form.get("custom_message") or None
 
-    media_filename = None
     file = request.files.get("media_file")
-    if file and file.filename:
-        if not validate_media_content(file):
-            flash(_INVALID_MEDIA_MSG, "danger")
-            return redirect(url_for("respostas"))
-        media_filename = save_uploaded_file(file)
-        if media_filename is None:
-            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for("respostas"))
+    has_file = bool(file and file.filename)
+    if has_file and not validate_media_content(file):
+        flash(_INVALID_MEDIA_MSG, "danger")
+        return redirect(url_for("respostas"))
 
     tid = current_user.tenant_id
     token = secrets.token_urlsafe(16)[:22]
@@ -1133,11 +1151,20 @@ def add_convidado():
                 "danger",
             )
             return redirect(url_for("respostas", event_id=event_id))
-        repo.add_invitee(
-            conn, tid, event_id, name, token,
-            phone=phone, email=email, observation=msg, media_url=media_filename,
-        )
-        conn.commit()
+        # Arquivo só vai para o disco depois de todas as recusas possíveis.
+        media_filename = save_uploaded_file(file) if has_file else None
+        if has_file and media_filename is None:
+            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
+            return redirect(url_for("respostas", event_id=event_id))
+        try:
+            repo.add_invitee(
+                conn, tid, event_id, name, token,
+                phone=phone, email=email, observation=msg, media_url=media_filename,
+            )
+            conn.commit()
+        except Exception:
+            _remove_upload(media_filename)
+            raise
 
     logger.info(f"Convidado adicionado: '{name}' por '{current_user.username}'.")
     flash(f'Convidado "{name}" adicionado com sucesso!', "success")
@@ -1181,6 +1208,7 @@ def edit_convidado(id):
         abort(404)
     if not current_user.is_tenant_admin and guest["event_owner_user_id"] != current_user.db_id:
         abort(403)
+    old_media = guest["media_url"]
 
     name = request.form.get("name", "").strip()
     email = request.form.get("email") or None
@@ -1209,8 +1237,14 @@ def edit_convidado(id):
         update_fields["media_url"] = new_media
 
     with engine.connect() as conn:
-        repo.update_invitee(conn, tid, id, **update_fields)
-        conn.commit()
+        try:
+            repo.update_invitee(conn, tid, id, **update_fields)
+            conn.commit()
+        except Exception:
+            _remove_upload(new_media)
+            raise
+        if new_media and old_media and old_media != new_media:
+            _delete_media_if_unreferenced(conn, old_media)
 
     logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
     flash("Convidado atualizado com sucesso!", "success")
@@ -1249,12 +1283,7 @@ def delete_convidado(id):
     with engine.connect() as conn:
         repo.delete_invitee(conn, tid, id)
         conn.commit()
-
-    if res["media_url"]:
-        try:
-            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_url"]))
-        except FileNotFoundError:
-            pass
+        _delete_media_if_unreferenced(conn, res["media_url"])
 
     logger.info(
         f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'."

@@ -597,3 +597,11 @@ def test_list_events_com_owner_filtra_responsavel_e_traz_media():
     assert 'e.owner_user_id = :owner' in sql
     assert 'e.media_url' in sql
     assert _last_params(conn) == {'tid': 1, 'owner': 2}
+
+
+def test_count_media_references_soma_invitees_e_events():
+    conn = _conn(fetchone={'n': 2})
+    assert repo.count_media_references(conn, 'abc.jpg') == 2
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
+    assert _last_params(conn) == {'fn': 'abc.jpg'}

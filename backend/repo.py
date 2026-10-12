@@ -731,6 +731,19 @@ def get_media_tenant(conn, filename: str) -> int | None:
     return row["tenant_id"] if row else None
 
 
+def count_media_references(conn, filename: str) -> int:
+    """Quantas linhas (invitees + events) ainda referenciam o arquivo. Global
+    de propósito: filename é UUID único, mesmo padrão de get_media_tenant."""
+    row = conn.execute(
+        text("""
+            SELECT (SELECT COUNT(*) FROM invitees WHERE media_url = :fn)
+                 + (SELECT COUNT(*) FROM events   WHERE media_url = :fn) AS n
+        """),
+        {"fn": filename},
+    ).mappings().fetchone()
+    return int(row["n"] or 0)
+
+
 # ── planos e limites (4A/4B) ──────────────────────────────────────────────────
 
 def lock_tenant_for_update(conn, tenant_id: int) -> None:

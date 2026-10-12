@@ -255,7 +255,7 @@ def test_delete_convidado_inexistente_retorna_404(admin_client, db):
 # ── editar convidado ──────────────────────────────────────────────────────────
 
 def test_edit_convidado_atualiza_registro(admin_client, db):
-    guest = {'event_owner_user_id': None, 'event_id': 1}
+    guest = {'event_owner_user_id': None, 'event_id': 1, 'media_url': None}
     conn = setup_db(db,
                     qresult(fetchone=guest),  # repo.get_invitee
                     qresult())                 # repo.update_invitee
