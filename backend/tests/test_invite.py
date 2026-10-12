@@ -106,3 +106,19 @@ def test_convite_sem_nenhuma_imagem_abre_so_com_texto(client, db):
     assert 'class="media-box"' not in body
     assert 'imagen.jpg' not in body
     assert TEXTS_ROW['question_text'] in body
+
+
+# ── Fix CP4: botão de som do vídeo ────────────────────────────────────────────
+
+def test_convite_video_tem_script_do_botao_de_som(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.mp4')
+    assert 'id="soundToggle"' in body
+    assert 'aria-label="Alternar som"' in body
+    assert "getElementById('soundToggle')" in body
+    assert "addEventListener('click'" in body
+    assert 'video.muted = !video.muted' in body
+
+
+def test_convite_imagem_nao_renderiza_botao_de_som(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.jpg')
+    assert 'id="soundToggle"' not in body

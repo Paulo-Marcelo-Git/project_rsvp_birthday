@@ -248,7 +248,7 @@
       {% if lower.endswith('.mp4') %}
       <video id="inviteVideo" class="media" src="{{ media_src }}" autoplay muted loop playsinline preload="metadata">
       </video>
-      <button id="soundToggle" class="sound-toggle" type="button">🔇</button>
+      <button id="soundToggle" class="sound-toggle" type="button" aria-label="Alternar som" title="Alternar som">🔇</button>
       <div class="sound-hint">Toque para ativar o som</div>
       {% else %}
       <img class="media" src="{{ media_src }}" alt="Convite">
@@ -282,6 +282,33 @@
 
     <a href="{{ url_for('login') }}" class="admin-link">Área Administrativa</a>
   </div>
+  <script>
+    (function () {
+      const video  = document.getElementById('inviteVideo');
+      const toggle = document.getElementById('soundToggle');
+      const hint   = document.querySelector('.sound-hint');
+      if (!video || !toggle) return;
+
+      function setIcon(){ toggle.textContent = video.muted ? '🔇' : '🔊'; }
+      setIcon();
+
+      toggle.addEventListener('click', async () => {
+        try {
+          if (video.paused) { await video.play().catch(() => {}); }
+          video.muted = !video.muted;
+          if (video.paused) { await video.play().catch(() => {}); }
+        } finally { setIcon(); }
+      });
+
+      document.addEventListener('visibilitychange', async () => {
+        if (!document.hidden && video.muted && video.paused) {
+          try { await video.play(); } catch(e){}
+        }
+      });
+
+      if (hint) { setTimeout(() => hint.remove(), 3000); }
+    })();
+  </script>
 </body>
 
 </html>
