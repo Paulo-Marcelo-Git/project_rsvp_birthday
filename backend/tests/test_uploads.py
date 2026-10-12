@@ -154,3 +154,59 @@ def test_invite_armazena_token_na_sessao(client, db):
 
     with client.session_transaction() as sess:
         assert sess.get("invite_token") == token
+
+
+# ── Task 6: validação de conteúdo ─────────────────────────────────────────────
+
+from werkzeug.datastructures import FileStorage
+from tests.conftest import JPEG_BYTES, PNG_BYTES, MP4_BYTES
+
+
+def _fs(data: bytes, name: str) -> FileStorage:
+    return FileStorage(stream=io.BytesIO(data), filename=name)
+
+
+@pytest.mark.parametrize('data,name', [
+    (JPEG_BYTES, 'foto.jpg'), (JPEG_BYTES, 'foto.jpeg'), (JPEG_BYTES, 'FOTO.JPG'),
+    (PNG_BYTES, 'img.png'), (MP4_BYTES, 'video.mp4'), (MP4_BYTES, 'video.Mp4'),
+])
+def test_validate_media_content_aceita_arquivos_reais(data, name):
+    import app as app_module
+    f = _fs(data, name)
+    assert app_module.validate_media_content(f) is True
+    assert f.stream.tell() == 0   # stream restaurado para o save()
+
+
+@pytest.mark.parametrize('data,name', [
+    (b'<html><script>alert(1)</script>', 'falso.jpg'),
+    (JPEG_BYTES, 'trocado.png'),
+    (PNG_BYTES, 'trocado.mp4'),
+    (b'', 'vazio.jpg'),
+    (b'GIF89a', 'anim.gif'),
+    (JPEG_BYTES, 'semextensao'),
+])
+def test_validate_media_content_rejeita_conteudo_divergente(data, name):
+    import app as app_module
+    assert app_module.validate_media_content(_fs(data, name)) is False
+
+
+def test_add_convidado_rejeita_jpg_com_conteudo_html(admin_client, db, upload_dir):
+    resp = admin_client.post(
+        '/admin/convidados/add',
+        data={'name': 'Ana', 'media_file': (io.BytesIO(b'<html>'), 'x.jpg')},
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 302
+    assert list(upload_dir.iterdir()) == []
+    assert db.connect.call_count == 0
+
+
+def test_respostas_tem_header_nosniff(client):
+    resp = client.get('/login')
+    assert resp.headers.get('X-Content-Type-Options') == 'nosniff'
+
+
+def test_uploads_tem_header_nosniff(admin_client, db, upload_file):
+    setup_db(db, qresult(fetchone=_make_media_row(tenant_id=1)))
+    resp = admin_client.get(f"/uploads/{FILENAME}")
+    assert resp.headers.get('X-Content-Type-Options') == 'nosniff'

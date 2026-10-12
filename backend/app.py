@@ -155,6 +155,27 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+# Assinatura (magic bytes) esperada por extensão. A extensão sozinha não
+# basta: o arquivo é servido ao público pela rota /uploads.
+_MEDIA_SIGNATURES = {
+    "jpg":  lambda head: head.startswith(b"\xff\xd8\xff"),
+    "jpeg": lambda head: head.startswith(b"\xff\xd8\xff"),
+    "png":  lambda head: head.startswith(b"\x89PNG\r\n\x1a\n"),
+    "mp4":  lambda head: len(head) >= 8 and head[4:8] == b"ftyp",
+}
+
+
+def validate_media_content(file) -> bool:
+    """True se a extensão é permitida E o conteúdo bate com ela. Restaura o
+    stream na posição 0 para o save() posterior."""
+    if not file or not file.filename or not allowed_file(file.filename):
+        return False
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    head = file.stream.read(12)
+    file.stream.seek(0)
+    return _MEDIA_SIGNATURES[ext](head)
+
+
 @app.context_processor
 def inject_version():
     return dict(app_version=app.config["APP_VERSION"])
@@ -320,6 +341,14 @@ def restrict_super_admin_to_panel():
         and request.endpoint not in _SUPER_ADMIN_EXTRA_ALLOWED_ENDPOINTS
     ):
         return redirect(url_for("superadmin"))
+
+
+@app.after_request
+def set_security_headers(response):
+    # Impede o navegador de "adivinhar" um tipo diferente do declarado
+    # (ex.: tratar um upload como HTML).
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
 
 
 # Helpers
@@ -1068,7 +1097,7 @@ def add_convidado():
     media_filename = None
     file = request.files.get("media_file")
     if file and file.filename:
-        if not allowed_file(file.filename):
+        if not validate_media_content(file):
             flash(_INVALID_MEDIA_MSG, "danger")
             return redirect(url_for("respostas"))
         media_filename = save_uploaded_file(file)
@@ -1165,7 +1194,7 @@ def edit_convidado(id):
     new_media = None
     file = request.files.get("media_file")
     if file and file.filename:
-        if not allowed_file(file.filename):
+        if not validate_media_content(file):
             flash(_INVALID_MEDIA_MSG, "danger")
             return redirect(url_for("respostas", event_id=guest["event_id"]))
         new_media = save_uploaded_file(file)
