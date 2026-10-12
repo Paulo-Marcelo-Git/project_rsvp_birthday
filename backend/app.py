@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from dotenv import load_dotenv
 from flasgger import Swagger
@@ -88,6 +88,29 @@ def ratelimit_handler(e):
     return render_template("429.html", retry_after=retry), 429
 
 
+def _safe_back_url(default_endpoint: str = "respostas") -> str:
+    """Volta para a página de origem SÓ se o Referer for deste host e um path
+    absoluto local (sem '//', que o navegador trataria como outro host) —
+    evita open redirect via cabeçalho controlado pelo cliente."""
+    ref = request.referrer
+    if ref:
+        parsed = urlparse(ref)
+        if (
+            parsed.scheme in ("http", "https")
+            and parsed.netloc == request.host
+            and parsed.path.startswith("/")
+            and not parsed.path.startswith("//")
+        ):
+            return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    return url_for(default_endpoint)
+
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    flash("Arquivo maior que 50MB. Envie um arquivo menor.", "danger")
+    return redirect(_safe_back_url())
+
+
 swagger = Swagger(
     app,
     config={
@@ -119,6 +142,7 @@ swagger = Swagger(
 )
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
+_INVALID_MEDIA_MSG = "Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 50MB)."
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/app/uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -1043,7 +1067,7 @@ def add_convidado():
     file = request.files.get("media_file")
     if file and file.filename:
         if not allowed_file(file.filename):
-            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
+            flash(_INVALID_MEDIA_MSG, "danger")
             return redirect(url_for("respostas"))
         media_filename = save_uploaded_file(file)
         if media_filename is None:
@@ -1140,7 +1164,7 @@ def edit_convidado(id):
     file = request.files.get("media_file")
     if file and file.filename:
         if not allowed_file(file.filename):
-            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
+            flash(_INVALID_MEDIA_MSG, "danger")
             return redirect(url_for("respostas", event_id=guest["event_id"]))
         new_media = save_uploaded_file(file)
         if new_media is None:
@@ -1218,6 +1242,10 @@ def update_textos():
     tags: [Textos]
     parameters:
       - in: formData
+        name: event_id
+        type: integer
+        required: true
+      - in: formData
         name: question_text
         type: string
       - in: formData
@@ -1246,16 +1274,20 @@ def update_textos():
         "post_no_text": request.form.get("post_no_text") or "",
     }
     tid = current_user.tenant_id
+    try:
+        event_id = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        event_id = 0
     with engine.connect() as conn:
-        event_id = repo.get_default_event_id(conn, tid)
-        if event_id is None:
-            flash("Nenhum evento encontrado. Não é possível salvar os textos.", "danger")
+        event = repo.get_event(conn, tid, event_id) if event_id else None
+        if not _can_manage_event(event):
+            flash("Evento não encontrado.", "danger")
             return redirect(url_for("respostas"))
-        repo.update_event_texts(conn, tid, event_id, **textos)
+        repo.update_event_texts(conn, tid, event["id"], **textos)
         conn.commit()
-    logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
+    logger.info(f"Textos do evento id={event['id']} atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=event["id"]))
 
 
 @app.route("/admin/set_tema", methods=["POST"])

@@ -244,3 +244,30 @@ def test_app_nao_monta_sql_de_events():
     import pathlib
     src = pathlib.Path(__file__).resolve().parent.parent.joinpath('app.py').read_text(encoding='utf-8')
     assert 'FROM events' not in src
+
+
+# ── Task 5: textos no evento selecionado ────────────────────────────────────────
+
+def test_update_textos_grava_no_evento_informado(admin_client, db):
+    conn = setup_db(
+        db,
+        qresult(fetchone={**EVENT_ROW, 'id': 5}),   # repo.get_event
+        qresult(fetchone={'extra_texts': None}),     # update_event_texts: SELECT extra_texts
+        qresult(),                                   # UPDATE events
+    )
+    resp = admin_client.post('/admin/textos', data={'event_id': '5', 'question_text': 'Vem?'})
+    assert resp.status_code == 302
+    assert 'event_id=5' in resp.headers['Location']
+    update_params = conn.execute.call_args_list[-1][0][1]
+    assert update_params['eid'] == 5
+    assert update_params['question_text'] == 'Vem?'
+    for call in conn.execute.call_args_list:
+        assert 'ORDER BY id DESC' not in str(call[0][0])   # não usa mais get_default_event_id
+
+
+def test_update_textos_evento_invalido_nao_grava(admin_client, db):
+    conn = setup_db(db, qresult(fetchone=None))   # repo.get_event → None
+    resp = admin_client.post('/admin/textos', data={'event_id': '999', 'question_text': 'X'})
+    assert resp.status_code == 302
+    assert conn.execute.call_count == 1
+    conn.commit.assert_not_called()

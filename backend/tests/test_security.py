@@ -74,3 +74,52 @@ def test_formulario_exclusao_usa_data_attribute(admin_client, db):
     assert 'delete-guest-form' in body
     assert 'data-name=' in body
     assert "onsubmit=\"return confirm('Excluir" not in body
+
+
+# ── Task 5: 413 amigável e sem open redirect ──────────────────────────────────
+
+import pytest
+from tests.conftest import flask_app
+
+
+@pytest.fixture
+def tiny_upload_limit(monkeypatch):
+    monkeypatch.setitem(flask_app.config, 'MAX_CONTENT_LENGTH', 10)
+
+
+def test_413_volta_para_pagina_de_origem_com_flash(admin_client, tiny_upload_limit):
+    resp = admin_client.post(
+        '/admin/convidados/add', data={'name': 'x' * 200},
+        headers={'Referer': 'http://localhost/admin/respostas?event_id=1'},
+    )
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/respostas?event_id=1')
+    with admin_client.session_transaction() as sess:
+        assert any('50MB' in msg for _, msg in sess.get('_flashes', []))
+
+
+@pytest.mark.parametrize('referer', [
+    'http://evil.com/admin/respostas',
+    'http://localhost//evil.com/x',
+    'javascript:alert(1)',
+])
+def test_413_nao_redireciona_para_fora(admin_client, tiny_upload_limit, referer):
+    resp = admin_client.post('/admin/convidados/add', data={'name': 'x' * 200},
+                             headers={'Referer': referer})
+    assert resp.status_code == 302
+    loc = resp.headers['Location']
+    assert 'evil.com' not in loc and 'javascript' not in loc
+    assert loc.endswith('/admin/respostas')
+
+
+def test_mensagem_de_arquivo_invalido_diz_50mb(admin_client, db, upload_dir):
+    import io
+    resp = admin_client.post(
+        '/admin/convidados/add',
+        data={'name': 'Ana', 'media_file': (io.BytesIO(b'GIF89a'), 'x.gif')},
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 302
+    with admin_client.session_transaction() as sess:
+        msgs = [m for _, m in sess.get('_flashes', [])]
+    assert 'Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 50MB).' in msgs
