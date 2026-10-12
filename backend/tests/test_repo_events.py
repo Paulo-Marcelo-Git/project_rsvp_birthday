@@ -163,3 +163,18 @@ def test_set_event_theme_rejects_invalid(db_conn, tenant_factory):
     t = tenant_factory(name="TInvalid")
     with pytest.raises(ValueError):
         repo.set_event_theme(db_conn, t["tenant_id"], t["event_id"], "purple")
+
+
+@pytest.mark.integration
+def test_set_event_media_isolado_por_tenant(db_conn, tenant_factory):
+    t1 = tenant_factory(name="TMedia1")
+    t2 = tenant_factory(name="TMedia2")
+    assert repo.set_event_media(db_conn, t1["tenant_id"], t1["event_id"], "a1.jpg") is None
+    db_conn.commit()
+    assert repo.set_event_media(db_conn, t1["tenant_id"], t1["event_id"], "a2.jpg") == "a1.jpg"
+    db_conn.commit()
+    with pytest.raises(LookupError):
+        repo.set_event_media(db_conn, t1["tenant_id"], t2["event_id"], "x.jpg")
+    db_conn.rollback()
+    assert repo.get_event(db_conn, t2["tenant_id"], t2["event_id"])["media_url"] is None
+    assert repo.get_media_tenant(db_conn, "a2.jpg") == t1["tenant_id"]

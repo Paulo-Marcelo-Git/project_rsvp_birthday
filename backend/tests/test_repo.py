@@ -612,3 +612,36 @@ def test_list_referenced_media_une_invitees_e_events():
     assert repo.list_referenced_media(conn) == {'a.jpg', 'b.mp4'}
     sql = str(conn.execute.call_args[0][0])
     assert 'FROM invitees' in sql and 'FROM events' in sql
+
+
+# ── mídia do evento ───────────────────────────────────────────────────────────
+
+def test_get_invitee_by_token_traz_media_do_evento_com_join_por_tenant():
+    conn = _conn(fetchone={'id': 1, 'event_media_url': 'evt.jpg'})
+    row = repo.get_invitee_by_token(conn, 'tok')
+    sql = str(conn.execute.call_args[0][0])
+    assert 'e.media_url AS event_media_url' in sql
+    assert 'e.tenant_id = i.tenant_id' in sql
+    assert row['event_media_url'] == 'evt.jpg'
+
+
+def test_get_media_tenant_procura_tambem_em_events():
+    conn = _conn(fetchone={'tenant_id': 3})
+    assert repo.get_media_tenant(conn, 'evt.jpg') == 3
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
+
+
+def test_set_event_media_devolve_anterior_e_filtra_tenant():
+    conn = _conn(fetchone={'media_url': 'velha.jpg'})
+    assert repo.set_event_media(conn, 1, 5, 'nova.jpg') == 'velha.jpg'
+    update_sql = str(conn.execute.call_args_list[-1][0][0])
+    assert 'UPDATE events SET media_url' in update_sql
+    assert conn.execute.call_args_list[-1][0][1] == {'fn': 'nova.jpg', 'eid': 5, 'tid': 1}
+
+
+def test_set_event_media_evento_de_outro_tenant_levanta():
+    conn = _conn(fetchone=None)
+    with pytest.raises(LookupError):
+        repo.set_event_media(conn, 1, 5, 'nova.jpg')
+    assert conn.execute.call_count == 1   # nenhum UPDATE

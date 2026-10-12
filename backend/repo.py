@@ -62,8 +62,10 @@ def get_invitee_by_token(conn, token: str) -> dict | None:
                    i.responded_at AS response_date,
                    i.media_url,
                    i.phone, i.email,
-                   i.created_at
+                   i.created_at,
+                   e.media_url AS event_media_url
             FROM invitees i
+            JOIN events e ON e.id = i.event_id AND e.tenant_id = i.tenant_id
             WHERE i.token = :token
         """),
         {"token": token},
@@ -348,6 +350,23 @@ def get_event_theme(conn, tenant_id: int, event_id: int) -> str:
     if not row:
         return "default"
     return row["theme"] or "default"
+
+
+def set_event_media(conn, tenant_id: int, event_id: int, filename: str) -> str | None:
+    """Grava a imagem padrão do evento e devolve a anterior (para limpeza
+    após o commit). SEMPRE filtra tenant_id; LookupError se o evento não
+    pertence ao tenant (nada é alterado)."""
+    row = conn.execute(
+        text("SELECT media_url FROM events WHERE id = :eid AND tenant_id = :tid FOR UPDATE"),
+        {"eid": event_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    if not row:
+        raise LookupError(f"evento {event_id} não encontrado no tenant {tenant_id}")
+    conn.execute(
+        text("UPDATE events SET media_url = :fn WHERE id = :eid AND tenant_id = :tid"),
+        {"fn": filename, "eid": event_id, "tid": tenant_id},
+    )
+    return row["media_url"]
 
 
 # ── invitees ──────────────────────────────────────────────────────────────────
@@ -723,9 +742,14 @@ def invalidate_verification_tokens(conn, user_id: int) -> None:
 
 
 def get_media_tenant(conn, filename: str) -> int | None:
-    """Retorna tenant_id do invitee que possui filename, ou None se não existir."""
+    """Retorna tenant_id do convidado OU evento que possui filename, ou None."""
     row = conn.execute(
-        text("SELECT tenant_id FROM invitees WHERE media_url = :fn LIMIT 1"),
+        text("""
+            SELECT tenant_id FROM invitees WHERE media_url = :fn
+            UNION ALL
+            SELECT tenant_id FROM events WHERE media_url = :fn
+            LIMIT 1
+        """),
         {"fn": filename},
     ).mappings().fetchone()
     return row["tenant_id"] if row else None
