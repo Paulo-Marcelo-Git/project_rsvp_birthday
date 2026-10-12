@@ -51,6 +51,28 @@
     </div>
   </div>
 
+  <!-- ===== IMAGEM PADRÃO DO CONVITE (evento) ===== -->
+  <div id="event-media-card" class="content-card mb-3 {% if not event.media_url %}border border-warning{% endif %}">
+    <div class="d-flex flex-wrap align-items-center gap-3">
+      {% if event.media_url %}
+        {% set ev_src = url_for('serve_upload', filename=event.media_url) %}
+        {% if (event.media_url|lower).endswith('.mp4') %}
+          <video src="{{ ev_src }}" muted playsinline preload="metadata" style="max-height:96px;border-radius:8px;"></video>
+        {% else %}
+          <img src="{{ ev_src }}" alt="Imagem do convite" style="max-height:96px;border-radius:8px;">
+        {% endif %}
+        <div class="small text-muted">Imagem padrão do convite. Convidados com imagem própria continuam com a deles.</div>
+      {% else %}
+        <div class="alert alert-warning mb-0">Este evento ainda não tem imagem do convite.</div>
+      {% endif %}
+      <form action="{{ url_for('upload_event_media', event_id=event.id) }}" method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center ms-auto">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="file" name="media_file" accept=".jpg,.jpeg,.png,.mp4" class="form-control form-control-sm" required>
+        <button class="btn btn-sm btn-primary text-nowrap" type="submit">{{ 'Trocar imagem' if event.media_url else 'Enviar imagem' }}</button>
+      </form>
+    </div>
+  </div>
+
   <div class="content-card mb-3">
     <form class="d-flex" method="get" action="{{ url_for('respostas') }}">
       <input type="hidden" name="event_id" value="{{ event_id }}">

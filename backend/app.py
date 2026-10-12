@@ -1399,6 +1399,54 @@ def set_tema():
     return redirect(url_for("respostas", event_id=event_id))
 
 
+@app.route("/admin/eventos/<int:event_id>/imagem", methods=["POST"])
+@login_required
+def upload_event_media(event_id):
+    """
+    Enviar/trocar a imagem padrão do convite do evento
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: path
+        name: event_id
+        type: integer
+        required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/respostas?event_id=<id>
+      404:
+        description: Evento inexistente, de outro tenant ou sem permissão
+    """
+    tid = current_user.tenant_id
+    back = url_for("respostas", event_id=event_id)
+    with engine.connect() as conn:
+        if not _can_manage_event(repo.get_event(conn, tid, event_id)):
+            abort(404)
+        file = request.files.get("media_file")
+        if not validate_media_content(file):
+            flash(_INVALID_MEDIA_MSG, "danger")
+            return redirect(back)
+        filename = save_uploaded_file(file)
+        if filename is None:
+            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
+            return redirect(back)
+        try:
+            previous = repo.set_event_media(conn, tid, event_id, filename)
+            conn.commit()
+        except Exception:
+            _remove_upload(filename)
+            raise
+        if previous and previous != filename:
+            _delete_media_if_unreferenced(conn, previous)
+    logger.info(f"Imagem do evento id={event_id} atualizada por '{current_user.username}'.")
+    flash("Imagem do convite atualizada.", "success")
+    return redirect(back)
+
+
 # ===== Gestão de Eventos =====
 
 
