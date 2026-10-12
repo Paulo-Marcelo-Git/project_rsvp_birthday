@@ -271,3 +271,33 @@ def test_update_textos_evento_invalido_nao_grava(admin_client, db):
     assert resp.status_code == 302
     assert conn.execute.call_count == 1
     conn.commit.assert_not_called()
+
+
+# ── Fix CP3: erros antecipados do add_convidado preservam o evento ─────────────
+
+def test_add_convidado_sem_nome_volta_no_evento_do_form(admin_client, db):
+    setup_db(db)
+    resp = admin_client.post('/admin/convidados/add', data={'name': '', 'event_id': '4'})
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']
+
+
+def test_add_convidado_arquivo_invalido_volta_no_evento_do_form(admin_client, db, upload_dir):
+    import io
+    setup_db(db)
+    resp = admin_client.post(
+        '/admin/convidados/add',
+        data={'name': 'Ana', 'event_id': '4',
+              'media_file': (io.BytesIO(b'nao sou imagem'), 'falso.jpg')},
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']
+    assert list(upload_dir.iterdir()) == []
+
+
+def test_add_convidado_event_id_invalido_no_erro_nao_quebra(admin_client, db):
+    setup_db(db)
+    resp = admin_client.post('/admin/convidados/add', data={'name': '', 'event_id': 'abc'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/respostas')

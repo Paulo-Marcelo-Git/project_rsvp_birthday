@@ -1109,10 +1109,16 @@ def add_convidado():
       403:
         description: Sem permissão
     """
+    try:
+        event_id_form = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        event_id_form = 0
+    back_event_id = event_id_form or None  # url_for omite None
+
     name = request.form.get("name", "").strip()
     if not name:
         flash("Nome é obrigatório.", "danger")
-        return redirect(url_for("respostas"))
+        return redirect(url_for("respostas", event_id=back_event_id))
 
     email = request.form.get("email") or None
     phone = request.form.get("phone") or None
@@ -1122,14 +1128,10 @@ def add_convidado():
     has_file = bool(file and file.filename)
     if has_file and not validate_media_content(file):
         flash(_INVALID_MEDIA_MSG, "danger")
-        return redirect(url_for("respostas"))
+        return redirect(url_for("respostas", event_id=back_event_id))
 
     tid = current_user.tenant_id
     token = secrets.token_urlsafe(16)[:22]
-    try:
-        event_id_form = int(request.form.get("event_id", 0))
-    except (ValueError, TypeError):
-        event_id_form = 0
 
     with engine.connect() as conn:
         repo.lock_tenant_for_update(conn, tid)
