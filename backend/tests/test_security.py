@@ -102,6 +102,8 @@ def test_413_volta_para_pagina_de_origem_com_flash(admin_client, tiny_upload_lim
     'http://evil.com/admin/respostas',
     'http://localhost//evil.com/x',
     'javascript:alert(1)',
+    'http://localhost/\\evil.com',
+    'http://localhost/a\x01b',
 ])
 def test_413_nao_redireciona_para_fora(admin_client, tiny_upload_limit, referer):
     resp = admin_client.post('/admin/convidados/add', data={'name': 'x' * 200},

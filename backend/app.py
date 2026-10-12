@@ -90,7 +90,7 @@ def ratelimit_handler(e):
 
 def _safe_back_url(default_endpoint: str = "respostas") -> str:
     """Volta para a página de origem SÓ se o Referer for deste host e um path
-    absoluto local (sem '//', que o navegador trataria como outro host) —
+    absoluto local (sem '//' nem '\\', que o navegador trataria como outro host) —
     evita open redirect via cabeçalho controlado pelo cliente."""
     ref = request.referrer
     if ref:
@@ -100,6 +100,8 @@ def _safe_back_url(default_endpoint: str = "respostas") -> str:
             and parsed.netloc == request.host
             and parsed.path.startswith("/")
             and not parsed.path.startswith("//")
+            and "\\" not in parsed.path
+            and not any(ord(c) < 32 or ord(c) == 127 for c in ref)
         ):
             return parsed.path + (f"?{parsed.query}" if parsed.query else "")
     return url_for(default_endpoint)
