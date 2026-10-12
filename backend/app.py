@@ -869,7 +869,7 @@ def serve_upload(filename):
     Caminho 1 — usuário autenticado: verifica que o arquivo pertence ao
     tenant do usuário logado.
     Caminho 2 — convidado sem login: valida via session['invite_token'] que
-    o token corresponde a um invitee cujo media_url é este filename.
+    o token corresponde a um invitee cujo media_url **ou** cuja imagem do evento é este filename.
     Sem query string: o token não aparece em logs de servidor.
     """
     safe = secure_filename(filename)
@@ -887,7 +887,8 @@ def serve_upload(filename):
         else:
             invite_token = session.get("invite_token")
             invitee = repo.get_invitee_by_token(conn, invite_token)
-            if not invitee or invitee.get("media_url") != safe:
+            # Convidado acessa só a própria imagem ou a imagem padrão do SEU evento.
+            if not invitee or safe not in (invitee.get("media_url"), invitee.get("event_media_url")):
                 abort(404)
 
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], safe)

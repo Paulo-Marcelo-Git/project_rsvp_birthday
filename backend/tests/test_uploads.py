@@ -210,3 +210,19 @@ def test_uploads_tem_header_nosniff(admin_client, db, upload_file):
     setup_db(db, qresult(fetchone=_make_media_row(tenant_id=1)))
     resp = admin_client.get(f"/uploads/{FILENAME}")
     assert resp.headers.get('X-Content-Type-Options') == 'nosniff'
+
+
+def test_uploads_convidado_acessa_imagem_do_proprio_evento(client, db, upload_file):
+    invitee = {**GUEST_ROW, "media_url": None, "event_media_url": FILENAME}
+    setup_db(db, qresult(fetchone=invitee))
+    with client.session_transaction() as sess:
+        sess["invite_token"] = GUEST_ROW["token"]
+    assert client.get(f"/uploads/{FILENAME}").status_code == 200
+
+
+def test_uploads_convidado_nao_acessa_imagem_de_outro_evento(client, db, upload_file):
+    invitee = {**GUEST_ROW, "media_url": None, "event_media_url": OTHER_TENANT_FILENAME}
+    setup_db(db, qresult(fetchone=invitee))
+    with client.session_transaction() as sess:
+        sess["invite_token"] = GUEST_ROW["token"]
+    assert client.get(f"/uploads/{FILENAME}").status_code == 404

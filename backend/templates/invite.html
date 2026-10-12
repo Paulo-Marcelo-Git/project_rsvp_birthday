@@ -240,9 +240,10 @@
 <body{% if event_theme is defined and event_theme != 'default' %} class="theme-{{ event_theme }}"{% endif %}>
   <div class="invite-container">
 
-    {% if invitee.media_url %}
-    {% set lower = invitee.media_url|lower %}
-    {% set media_src = url_for('serve_upload', filename=invitee.media_url) %}
+    {% set media_file = invitee.media_url or invitee.event_media_url %}
+    {% if media_file %}
+    {% set lower = media_file|lower %}
+    {% set media_src = url_for('serve_upload', filename=media_file) %}
     <div class="media-box">
       {% if lower.endswith('.mp4') %}
       <video id="inviteVideo" class="media" src="{{ media_src }}" autoplay muted loop playsinline preload="metadata">
@@ -252,10 +253,6 @@
       {% else %}
       <img class="media" src="{{ media_src }}" alt="Convite">
       {% endif %}
-    </div>
-    {% else %}
-    <div class="media-box">
-      <img class="media" src="{{ url_for('static', filename='imagen.jpg') }}" alt="Convite">
     </div>
     {% endif %}
 
