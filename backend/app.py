@@ -3,6 +3,7 @@
 import logging
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -1920,6 +1921,32 @@ def _reuse_or_create_superadmin_account(conn, existing, superadmin_email, email_
         must_change_password=True,
     )
     return user_id, username, temp_pass
+
+
+@app.cli.command("cleanup-orphan-uploads")
+@click.option("--apply", "apply_", is_flag=True, help="Remove de fato (default: só lista).")
+@click.option("--min-age-minutes", default=60, show_default=True, type=int,
+              help="Ignora arquivos mais novos que isso (upload em andamento).")
+def cleanup_orphan_uploads(apply_, min_age_minutes):
+    """Lista (ou remove com --apply) arquivos de UPLOAD_FOLDER sem referência no banco."""
+    folder = app.config["UPLOAD_FOLDER"]
+    cutoff = time.time() - min_age_minutes * 60
+    with engine.connect() as conn:
+        referenced = repo.list_referenced_media(conn)
+    orphans = []
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path) or name in referenced:
+            continue
+        if os.path.getmtime(path) > cutoff:
+            continue
+        orphans.append(name)
+    mode = "REMOVENDO" if apply_ else "DRY-RUN (nada foi removido)"
+    click.echo(f"{mode}: {len(orphans)} arquivo(s) órfão(s) em {folder}")
+    for name in orphans:
+        click.echo(f"  {name}")
+        if apply_:
+            _remove_upload(name)
 
 
 @app.cli.command("create-superadmin")

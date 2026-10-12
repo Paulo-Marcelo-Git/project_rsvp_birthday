@@ -744,6 +744,19 @@ def count_media_references(conn, filename: str) -> int:
     return int(row["n"] or 0)
 
 
+def list_referenced_media(conn) -> set[str]:
+    """Todos os filenames referenciados por convidados ou eventos. Global —
+    uso exclusivo do CLI cleanup-orphan-uploads."""
+    rows = conn.execute(
+        text("""
+            SELECT media_url FROM invitees WHERE media_url IS NOT NULL
+            UNION
+            SELECT media_url FROM events WHERE media_url IS NOT NULL
+        """)
+    ).mappings().all()
+    return {r["media_url"] for r in rows}
+
+
 # ── planos e limites (4A/4B) ──────────────────────────────────────────────────
 
 def lock_tenant_for_update(conn, tenant_id: int) -> None:

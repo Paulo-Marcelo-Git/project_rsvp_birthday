@@ -605,3 +605,10 @@ def test_count_media_references_soma_invitees_e_events():
     sql = str(conn.execute.call_args[0][0])
     assert 'FROM invitees' in sql and 'FROM events' in sql
     assert _last_params(conn) == {'fn': 'abc.jpg'}
+
+
+def test_list_referenced_media_une_invitees_e_events():
+    conn = _conn(all_rows=[{'media_url': 'a.jpg'}, {'media_url': 'b.mp4'}])
+    assert repo.list_referenced_media(conn) == {'a.jpg', 'b.mp4'}
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
