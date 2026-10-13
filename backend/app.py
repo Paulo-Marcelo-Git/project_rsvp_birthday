@@ -1304,7 +1304,6 @@ def delete_convidado(id):
 
 @app.route("/admin/textos", methods=["POST"])
 @login_required
-@tenant_admin_required
 def update_textos():
     """
     Atualizar textos do convite
@@ -1333,8 +1332,8 @@ def update_textos():
     responses:
       302:
         description: Redireciona para /admin/respostas
-      403:
-        description: Apenas super admin
+      404:
+        description: Evento não encontrado ou sem permissão
     """
     textos = {
         "question_text": request.form.get("question_text") or "",
@@ -1380,13 +1379,9 @@ def set_tema():
         description: Redireciona para /admin/respostas
       400:
         description: Tema inválido ou event_id inválido
-      403:
-        description: Apenas tenant_admin
       404:
-        description: Evento não encontrado
+        description: Evento não encontrado ou sem permissão
     """
-    if not current_user.is_tenant_admin:
-        abort(403)
     theme = request.form.get("theme", "default")
     if theme not in ("girl", "boy", "default"):
         abort(400)
@@ -1396,7 +1391,7 @@ def set_tema():
     except (ValueError, TypeError):
         abort(400)
     with engine.connect() as conn:
-        if not repo.get_event(conn, tid, event_id):
+        if not _can_manage_event(repo.get_event(conn, tid, event_id)):
             abort(404)
         repo.set_event_theme(conn, tid, event_id, theme)
         conn.commit()
