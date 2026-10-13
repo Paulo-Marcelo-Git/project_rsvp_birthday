@@ -275,13 +275,11 @@ def test_skip_verification_nao_chama_enqueue_email(client, db, monkeypatch):
     # get_user_by_email_global → None (usuário novo)
     # create_tenant retorna id via LAST_INSERT_ID
     # create_tenant_admin_user
-    # create_default_event
     # UPDATE is_active=1
     conn.execute.side_effect = [
         qresult(fetchone=None),
         qresult(fetchone={"id": 99}),
         qresult(fetchone={"id": 10}),
-        MagicMock(),
         MagicMock(),
     ]
     db.connect.return_value.__enter__.return_value = conn

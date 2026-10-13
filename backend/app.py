@@ -529,7 +529,7 @@ def login():
 @app.route("/signup", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def signup():
-    """Cadastro self-service: cria tenant + admin + evento padrão atomicamente."""
+    """Cadastro self-service: cria tenant + tenant_admin atomicamente. O primeiro evento é criado pelo cliente em /admin/primeiro-evento."""
     skip_verification = os.getenv("SKIP_EMAIL_VERIFICATION", "").lower() in (
         "1", "true", "yes"
     )
@@ -597,7 +597,6 @@ def signup():
                     conn, tenant_id, email, password_hash,
                     accepted_terms_at=accepted_terms_at,
                 )
-                repo.create_default_event(conn, tenant_id, nome, owner_user_id=user_id)
                 if skip_verification:
                     conn.execute(
                         text("UPDATE users SET is_active = 1 WHERE id = :uid"),

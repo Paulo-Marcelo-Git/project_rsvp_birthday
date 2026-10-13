@@ -577,10 +577,8 @@ def test_signup_com_aceite_grava_accepted_terms_at(client, db, monkeypatch):
 
     monkeypatch.setenv('SKIP_EMAIL_VERIFICATION', 'true')
     monkeypatch.setattr(app_module.repo, 'create_tenant_admin_user', mock_create)
-    # Também patch create_tenant e create_default_event para não precisar de DB real
+    # Também patch create_tenant para não precisar de DB real
     monkeypatch.setattr(app_module.repo, 'create_tenant', lambda conn, nome: 1)
-    monkeypatch.setattr(app_module.repo, 'create_default_event',
-                        lambda conn, tid, nome, owner_user_id: None)
     monkeypatch.setattr(app_module, 'enqueue_email', lambda *a, **k: None)
 
     resp = client.post('/signup', data={

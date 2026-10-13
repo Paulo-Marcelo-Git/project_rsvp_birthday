@@ -253,34 +253,6 @@ def update_event_texts(conn, tenant_id: int, event_id: int, **texts) -> None:
         )
 
 
-def create_default_event(
-    conn, tenant_id: int, tenant_name: str, *, owner_user_id: int | None = None
-) -> int:
-    """Cria o evento padrão para um novo tenant (usado no signup). Retorna event_id."""
-    import secrets as _sec
-    slug = _sec.token_urlsafe(16)[:22]
-    extra = json.dumps(
-        {"post_yes_text": "Que bom! Te esperamos!", "post_no_text": "Sentiremos sua falta."},
-        ensure_ascii=False,
-    )
-    conn.execute(
-        text("""
-            INSERT INTO events
-                (tenant_id, owner_user_id, title, event_type, slug, status,
-                 question_text, yes_text, no_text, extra_texts)
-            VALUES
-                (:tid, :owner, :title, 'aniversario', :slug, 'draft',
-                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
-        """),
-        {
-            "tid": tenant_id, "owner": owner_user_id,
-            "title": f"Festa de {tenant_name}", "slug": slug, "extra": extra,
-        },
-    )
-    row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
-    return int(row["id"])
-
-
 def list_events(conn, tenant_id: int, owner_user_id: int | None = None) -> list[dict]:
     """Lista eventos do tenant, mais recente primeiro. Se owner_user_id for
     informado, só os eventos dos quais esse usuário é responsável (visão de member)."""

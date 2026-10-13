@@ -95,7 +95,7 @@ def tenant_factory(db_conn):
 
     def _factory(name="TestTenant"):
         tenant_id = repo.create_tenant(db_conn, name)
-        event_id = repo.create_default_event(db_conn, tenant_id, name)
+        event_id = repo.create_event(db_conn, tenant_id, f"Festa de {name}")
         db_conn.commit()
         created.append(tenant_id)
         return {"tenant_id": tenant_id, "event_id": event_id}

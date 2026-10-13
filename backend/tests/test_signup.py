@@ -307,9 +307,6 @@ class TestSignup2C:
                 conn, new_tid, "isolation2c@example.com",
                 generate_password_hash("senha123"),
             )
-            repo.create_default_event(
-                conn, new_tid, "Isolation Signup Tenant 2C", owner_user_id=new_uid
-            )
             conn.commit()
 
         # Novo tenant não deve ver invitees do tenant padrão
