@@ -173,4 +173,5 @@ BACKUP_RETENTION_DAYS=7
 | **4** | **Enforcement de limites por plano + painel super-admin do SaaS** | ✅ |
 | **5** | **Rate limiting (Flask-Limiter), LGPD (/termos + /privacidade + aceite), migration 0005, fixes técnicos** | ✅ |
 | **Deploy** | **Deploy na VPS Hostinger** (ver `DEPLOY_CHECKLIST.md`) | ✅ |
+| **Imagem por evento + member** | **Imagem padrão por evento, member responsável, signup sem evento, uploads seguros** (v1.4.0) | ✅ (aguardando push) |
 | **Beta** | **Beta fechado** — app já está live, falta só convidar usuários reais | 🔜 |
