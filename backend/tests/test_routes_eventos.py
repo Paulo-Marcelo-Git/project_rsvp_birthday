@@ -274,11 +274,53 @@ def test_update_textos_grava_no_evento_informado(admin_client, db):
 
 
 def test_update_textos_evento_invalido_nao_grava(admin_client, db):
-    conn = setup_db(db, qresult(fetchone=None))   # repo.get_event → None
+    conn = setup_db(db, qresult(fetchone=None),         # repo.get_event → None
+                    qresult(fetchone={'n': 1}))         # count_events_for_tenant (tenant tem eventos)
     resp = admin_client.post('/admin/textos', data={'event_id': '999', 'question_text': 'X'})
     assert resp.status_code == 302
-    assert conn.execute.call_count == 1
+    assert conn.execute.call_count == 2                 # get_event + count; nenhum UPDATE
     conn.commit.assert_not_called()
+
+
+def test_update_textos_admin_sem_eventos_vai_direto_para_primeiro_evento(admin_client, db):
+    conn = setup_db(db, qresult(fetchone=None),        # repo.get_event → None
+                    qresult(fetchone={'n': 0}))        # count_events_for_tenant
+    resp = admin_client.post('/admin/textos', data={'event_id': '999', 'question_text': 'X'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/primeiro-evento')
+    with admin_client.session_transaction() as sess:
+        assert not sess.get('_flashes')   # sem "Evento não encontrado."
+    conn.commit.assert_not_called()
+
+
+def test_update_textos_admin_sem_eventos_e_sem_event_id(admin_client, db):
+    setup_db(db, qresult(fetchone={'n': 0}))           # só o count (event_id ausente → sem get_event)
+    resp = admin_client.post('/admin/textos', data={'question_text': 'X'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/primeiro-evento')
+    with admin_client.session_transaction() as sess:
+        assert not sess.get('_flashes')
+
+
+def test_update_textos_admin_evento_invalido_com_eventos_existentes_flash_e_respostas(admin_client, db):
+    conn = setup_db(db, qresult(fetchone=None),        # get_event → None
+                    qresult(fetchone={'n': 2}))        # tenant tem eventos
+    resp = admin_client.post('/admin/textos', data={'event_id': '999', 'question_text': 'X'})
+    assert resp.status_code == 302
+    assert '/admin/respostas' in resp.headers['Location']
+    with admin_client.session_transaction() as sess:
+        assert 'Evento não encontrado.' in [m for _, m in sess.get('_flashes', [])]
+    conn.commit.assert_not_called()
+
+
+def test_update_textos_member_evento_invalido_mantem_comportamento(member_client, db):
+    conn = setup_db(db, qresult(fetchone=None))        # get_event → None; member não consulta count
+    resp = member_client.post('/admin/textos', data={'event_id': '999', 'question_text': 'X'})
+    assert resp.status_code == 302
+    assert '/admin/respostas' in resp.headers['Location']
+    assert conn.execute.call_count == 1
+    with member_client.session_transaction() as sess:
+        assert 'Evento não encontrado.' in [m for _, m in sess.get('_flashes', [])]
 
 
 # ── Fix CP3: erros antecipados do add_convidado preservam o evento ─────────────

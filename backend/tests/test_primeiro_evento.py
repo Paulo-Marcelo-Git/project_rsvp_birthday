@@ -96,3 +96,17 @@ def test_upload_guard_presente_em_respostas(admin_client, db):
     respostas_db(db)
     body = admin_client.get('/admin/respostas?event_id=1').data.decode('utf-8')
     assert _UPLOAD_GUARD_MARKER in body
+
+
+def test_login_tenant_admin_sem_eventos_termina_em_primeiro_evento(client, db):
+    from tests.test_auth import _ACTIVE_ROW, _PW
+    setup_db(db,
+             qresult(fetchone=_ACTIVE_ROW),   # get_user_by_email_global
+             qresult(fetchone={'status': 'active', 'trial_ends_at': None, 'trial_expired': False}),
+             qresult(all_rows=[]))            # respostas: list_events vazio
+    r1 = client.post('/login', data={'email': 'landlord@test.com', 'password': _PW})
+    assert r1.status_code == 302
+    assert '/admin/respostas' in r1.headers['Location']
+    r2 = client.get(r1.headers['Location'])
+    assert r2.status_code == 302
+    assert r2.headers['Location'].endswith('/admin/primeiro-evento')

@@ -1356,6 +1356,9 @@ def update_textos():
     with engine.connect() as conn:
         event = repo.get_event(conn, tid, event_id) if event_id else None
         if not _can_manage_event(event):
+            if (event is None and current_user.is_tenant_admin
+                    and repo.count_events_for_tenant(conn, tid) == 0):
+                return redirect(url_for("primeiro_evento"))
             flash("Evento não encontrado.", "danger")
             return redirect(url_for("respostas"))
         repo.update_event_texts(conn, tid, event["id"], **textos)
