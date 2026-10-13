@@ -371,6 +371,31 @@ def set_event_media(conn, tenant_id: int, event_id: int, filename: str) -> str |
     return row["media_url"]
 
 
+_ASSIGNABLE_ROLES_SQL = "role IN ('tenant_admin', 'member')"
+
+
+def set_event_owner(conn, tenant_id: int, event_id: int, user_id: int) -> bool:
+    """Define o responsável do evento. Só aceita usuário ATIVO do MESMO
+    tenant com role tenant_admin/member (nunca super_admin nem outro tenant).
+    Retorna False sem alterar nada se o usuário for inválido. A posse do
+    evento é validada pela rota com get_event antes."""
+    user = conn.execute(
+        text(f"""
+            SELECT id FROM users
+            WHERE id = :uid AND tenant_id = :tid AND is_active = 1
+              AND {_ASSIGNABLE_ROLES_SQL}
+        """),
+        {"uid": user_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    if not user:
+        return False
+    conn.execute(
+        text("UPDATE events SET owner_user_id = :uid WHERE id = :eid AND tenant_id = :tid"),
+        {"uid": user_id, "eid": event_id, "tid": tenant_id},
+    )
+    return True
+
+
 # ── invitees ──────────────────────────────────────────────────────────────────
 
 def get_invitees(
@@ -538,6 +563,20 @@ def get_users(conn, tenant_id: int) -> list[dict]:
             FROM users
             WHERE tenant_id = :tid
             ORDER BY created_at DESC
+        """),
+        {"tid": tenant_id},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def get_assignable_users(conn, tenant_id: int) -> list[dict]:
+    """Usuários ativos do tenant que podem ser responsáveis por evento."""
+    rows = conn.execute(
+        text(f"""
+            SELECT id, username, email, role
+            FROM users
+            WHERE tenant_id = :tid AND is_active = 1 AND {_ASSIGNABLE_ROLES_SQL}
+            ORDER BY username
         """),
         {"tid": tenant_id},
     ).mappings().all()

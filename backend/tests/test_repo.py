@@ -645,3 +645,26 @@ def test_set_event_media_evento_de_outro_tenant_levanta():
     with pytest.raises(LookupError):
         repo.set_event_media(conn, 1, 5, 'nova.jpg')
     assert conn.execute.call_count == 1   # nenhum UPDATE
+
+
+def test_set_event_owner_recusa_usuario_invalido_sem_update():
+    conn = _conn(fetchone=None)
+    assert repo.set_event_owner(conn, 1, 5, 42) is False
+    assert conn.execute.call_count == 1
+    sql = str(conn.execute.call_args[0][0])
+    assert 'tenant_id = :tid' in sql and 'is_active = 1' in sql
+    assert "role IN ('tenant_admin', 'member')" in sql
+
+
+def test_set_event_owner_valido_faz_update_filtrado_por_tenant():
+    conn = _conn(fetchone={'id': 42})
+    assert repo.set_event_owner(conn, 1, 5, 42) is True
+    assert conn.execute.call_args_list[-1][0][1] == {'uid': 42, 'eid': 5, 'tid': 1}
+
+
+def test_get_assignable_users_filtra_tenant_ativos_e_roles():
+    conn = _conn(all_rows=[])
+    repo.get_assignable_users(conn, 1)
+    sql = str(conn.execute.call_args[0][0])
+    assert "role IN ('tenant_admin', 'member')" in sql and 'is_active = 1' in sql
+    assert _last_params(conn) == {'tid': 1}

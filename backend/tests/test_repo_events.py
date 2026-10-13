@@ -178,3 +178,25 @@ def test_set_event_media_isolado_por_tenant(db_conn, tenant_factory):
     db_conn.rollback()
     assert repo.get_event(db_conn, t2["tenant_id"], t2["event_id"])["media_url"] is None
     assert repo.get_media_tenant(db_conn, "a2.jpg") == t1["tenant_id"]
+
+
+@pytest.mark.integration
+def test_set_event_owner_so_aceita_usuario_ativo_do_mesmo_tenant(db_conn, tenant_factory):
+    from werkzeug.security import generate_password_hash
+    t1 = tenant_factory(name="TOwner1")
+    t2 = tenant_factory(name="TOwner2")
+    pw = generate_password_hash("x" * 12)
+    m1 = repo.add_user(db_conn, t1["tenant_id"], "m1owner", "m1owner@example.com", pw, role="member")
+    m2 = repo.add_user(db_conn, t2["tenant_id"], "m2owner", "m2owner@example.com", pw, role="member")
+    db_conn.execute(text("UPDATE users SET is_active = 1 WHERE id IN (:a, :b)"), {"a": m1, "b": m2})
+    db_conn.commit()
+
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m2) is False   # outro tenant
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m1) is True
+    db_conn.commit()
+    assert repo.get_event(db_conn, t1["tenant_id"], t1["event_id"])["owner_user_id"] == m1
+    assert [e["id"] for e in repo.list_events(db_conn, t1["tenant_id"], owner_user_id=m1)] == [t1["event_id"]]
+
+    db_conn.execute(text("UPDATE users SET is_active = 0 WHERE id = :a"), {"a": m1})
+    db_conn.commit()
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m1) is False   # inativo
