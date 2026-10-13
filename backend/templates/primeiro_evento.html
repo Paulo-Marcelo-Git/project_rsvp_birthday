@@ -1,0 +1,27 @@
+<!-- backend/templates/primeiro_evento.html -->
+{% extends "base.html" %}
+{% block title %}Comemore+ — Primeiro evento{% endblock %}
+
+{% block content %}
+{% include "_topbar.html" %}
+
+<div class="page-wrapper">
+  <div class="content-card mx-auto" style="max-width:520px;">
+    <h5 class="page-title mb-1">Crie seu primeiro evento</h5>
+    <p class="text-muted small mb-4">Dê um nome ao evento e envie a imagem do convite. Ela aparece para todos os convidados que não tiverem imagem própria.</p>
+    <form action="{{ url_for('primeiro_evento') }}" method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label fw-medium">Nome do Evento <span class="text-danger">*</span></label>
+        <input name="title" class="form-control" placeholder="Ex: Festa da Ana" value="{{ title }}" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-medium">Imagem do convite <span class="text-danger">*</span></label>
+        <input type="file" name="media_file" accept=".jpg,.jpeg,.png,.mp4" class="form-control" required>
+        <div class="form-text">JPG, PNG ou MP4, até 50MB.</div>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">Criar evento</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

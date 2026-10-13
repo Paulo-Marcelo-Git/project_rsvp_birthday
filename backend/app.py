@@ -936,6 +936,8 @@ def respostas():
     with engine.connect() as conn:
         eventos = repo.list_events(conn, tid, owner_user_id=owner_uid)
         if not eventos:
+            if is_admin:
+                return redirect(url_for("primeiro_evento"))
             return render_template("admin_sem_evento.html", is_tenant_admin=is_admin)
         # A tela trabalha SEMPRE com um único evento: lista, contadores,
         # textos, tema, imagem e "adicionar convidado" referem-se ao mesmo.
@@ -1145,7 +1147,9 @@ def add_convidado():
             fallback_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
             event = repo.get_event(conn, tid, fallback_id) if fallback_id else None
         if event is None:
-            flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
+            if current_user.is_tenant_admin:
+                return redirect(url_for("primeiro_evento"))
+            flash("Nenhum evento atribuído a você. Peça ao administrador da conta.", "danger")
             return redirect(url_for("respostas"))
         event_id = event["id"]
         if not event["media_url"]:
@@ -1472,6 +1476,8 @@ def admin_eventos():
         )
         limits = repo.get_plan_limits(conn, tid)
         usuarios = repo.get_assignable_users(conn, tid) if is_admin else []
+    if is_admin and not eventos:
+        return redirect(url_for("primeiro_evento"))
     can_create = is_admin and (
         limits["max_events"] is None or len(eventos) < limits["max_events"]
     )
@@ -1554,6 +1560,45 @@ def criar_evento():
         return redirect(url_for("admin_eventos"))
     flash(f'Evento "{title}" criado com sucesso!', "success")
     return redirect(url_for("respostas", event_id=eid))
+
+
+@app.route("/admin/primeiro-evento", methods=["GET", "POST"])
+@login_required
+@tenant_admin_required
+def primeiro_evento():
+    """
+    Criação do primeiro evento (tenant recém-cadastrado, sem eventos)
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: formData
+        name: title
+        type: string
+        required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
+    responses:
+      200:
+        description: Formulário (ou reexibição com erro)
+      302:
+        description: Evento criado → /admin/respostas?event_id=<id>; tenant já tem evento → /admin/respostas
+      403:
+        description: Apenas tenant_admin
+    """
+    with engine.connect() as conn:
+        has_events = repo.count_events_for_tenant(conn, current_user.tenant_id) > 0
+    if has_events:
+        return redirect(url_for("respostas"))
+    title = request.form.get("title", "").strip()
+    if request.method == "POST":
+        eid, error = _create_event_with_media(title, request.files.get("media_file"))
+        if not error:
+            flash(f'Evento "{title}" criado com sucesso!', "success")
+            return redirect(url_for("respostas", event_id=eid))
+        flash(error, "danger")
+    return render_template("primeiro_evento.html", title=title)
 
 
 @app.route("/admin/eventos/<int:event_id>/responsavel", methods=["POST"])

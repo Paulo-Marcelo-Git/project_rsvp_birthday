@@ -50,7 +50,8 @@ def test_admin_eventos_lista_para_admin(admin_client, db):
 def test_admin_eventos_lista_vazia(admin_client, db):
     _eventos_db(db, events=[])
     resp = admin_client.get('/admin/eventos')
-    assert resp.status_code == 200
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/primeiro-evento')
 
 
 # ── /admin/eventos/criar ────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ def test_criar_evento_bloqueia_limite_plano(admin_client, db, upload_dir):
         qresult(fetchone=_LIMITS_FREE),       # get_plan_limits (max_events=2)
         qresult(fetchone={'n': 2}),            # count_events_for_tenant (já no limite)
         # Redirect para admin_eventos — 2 queries extras:
-        qresult(all_rows=[]),                  # admin_eventos: list_events
+        qresult(all_rows=[_EVENT_ROW]),        # admin_eventos: list_events
         qresult(fetchone=_LIMITS_FREE),        # admin_eventos: get_plan_limits
         qresult(all_rows=[]),                  # admin_eventos: get_assignable_users
     )
@@ -125,7 +126,7 @@ def test_criar_evento_titulo_vazio(admin_client, db):
     setup_db(
         db,
         # Redirect imediato antes de qualquer query de DB
-        qresult(all_rows=[]),                  # admin_eventos: list_events
+        qresult(all_rows=[_EVENT_ROW]),        # admin_eventos: list_events
         qresult(fetchone=_LIMITS_NONE),        # admin_eventos: get_plan_limits
         qresult(all_rows=[]),                  # admin_eventos: get_assignable_users
     )
