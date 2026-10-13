@@ -11,21 +11,23 @@ Aplicação web desenvolvida com **Flask**, **MySQL** e **Docker** que permite o
 - Verificação de email obrigatória na criação de conta
 - Convites com link único por convidado
 - Página pública de confirmação (Sim / Não) com campo de observação
-- Upload de mídia personalizada por convidado (imagem ou vídeo)
+- Imagem/vídeo padrão **obrigatória por evento**; o convidado pode ter a própria mídia (precedência: convidado → evento → só texto)
+- Botão de som no convite quando a mídia é vídeo
 - Painel administrativo protegido por login
 - Estatísticas em tempo real (confirmados / recusados / aguardando)
 - Envio direto via WhatsApp com link pré-preenchido
 - Exportação da lista de convidados para Excel (.xlsx)
 - Textos do convite configuráveis pelo painel
-- Gerenciamento de sub-usuários (cada um vê apenas seus próprios convidados)
+- Gerenciamento de membros: cada evento tem um responsável (member) que gerencia os convidados, a imagem, os textos e o tema dos seus eventos
 - Reset de senha self-service por email (link com TTL de 1h)
-- Backup automático diário com retenção configurável
+- Backup automático diário (banco e uploads) com retenção configurável
 - Múltiplos eventos por tenant, cada um com tema visual (padrão / menina / menino)
 - Edição e exclusão de convidados já cadastrados
 - Envio de email assíncrono via fila Redis + RQ (fallback síncrono em dev sem Redis)
 - Rate limiting (login, signup, reset de senha, confirmação de convite) contra abuso
 - Termos de uso e política de privacidade (LGPD), com aceite obrigatório no cadastro
-- Limites de uso por plano (free / pro / business): eventos, convidados e membros
+- Limites de uso por plano (free / pro / business): eventos, convidados (por evento) e membros
+- Trial de 14 dias no plano Free, contado a partir do 1º login
 - Painel super-admin do SaaS: gerenciar plano e status (ativo/suspenso) de cada tenant
 
 ---
@@ -53,6 +55,7 @@ SECRET_KEY=chave_flask_aleatoria
 # Email SMTP — obrigatório em produção (signup falha com erro claro sem isso)
 # Dev local rápido: Gmail App Password. Produção: use Brevo/Resend (ver seção
 # "Configuração de Email Transacional" mais abaixo).
+# EMAIL_FROM (opcional): remetente validado no provedor; fallback = EMAIL_USER.
 EMAIL_SMTP=smtp.gmail.com
 EMAIL_PORTA=587
 EMAIL_USER=seu_email@gmail.com
@@ -71,11 +74,19 @@ REDIS_URL=redis://redis:6379/0
 BACKUP_RETENTION_DAYS=7
 
 # Super-admin do SaaS — acessa /superadmin para gerenciar tenants (plano/status)
-# Este email NÃO pode existir como conta de tenant no banco, senão o acesso é bloqueado.
+# Este email NÃO pode já existir como usuário comum no banco:
+# `flask create-superadmin` recusa (não promove automaticamente um usuário existente).
 # SUPERADMIN_EMAIL=admin@seudominio.com
+
+# Opcionais
+# EMAIL_FROM=noreply@seudominio.com  # remetente validado no provedor; fallback = EMAIL_USER
+# TZ_OFFSET_HOURS=-3                 # default -3 (BRT)
+# LOG_FILE=logs/app.log              # default
+# UPLOAD_FOLDER=/app/uploads         # default (volume uploads_data)
+# DEBUGPY_ENABLED=true               # SOMENTE DEV — troca gunicorn por flask run + debugpy (porta 5678)
 ```
 
-> `EMAIL_PASS` deve ser um **App Password** do Google: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+> No exemplo acima (Gmail, dev local), `EMAIL_PASS` deve ser um **App Password** do Google: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Em produção, `EMAIL_PASS` é a chave SMTP do Brevo/Resend (ver "Configuração de Email Transacional").
 
 ### 3. Subir os containers
 
@@ -93,8 +104,8 @@ docker compose up --build -d
 
 | Role | O que pode fazer |
 |------|-----------------|
-| `tenant_admin` | Acesso total ao tenant: vê todos os convidados, gerencia membros, edita textos |
-| `member` | Vê e gerencia apenas os convidados dos seus próprios eventos |
+| `tenant_admin` | Acesso total ao tenant. Único que cria eventos, define o responsável de cada evento e gerencia membros |
+| `member` | Gerencia os eventos dos quais é responsável (convidados, imagem, textos, tema). Não cria eventos nem define responsável |
 
 O primeiro `tenant_admin` é criado pelo signup self-service (`/signup`).
 Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de convite com link para definir a senha (ou senha temporária em dev sem SMTP).
@@ -105,7 +116,7 @@ Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de con
 
 | Rota | Acesso | Descrição |
 |------|--------|-----------|
-| `/signup` | Público | Criar conta (tenant + tenant_admin + evento padrão) — rate limit 5/hora |
+| `/signup` | Público | Criar conta (tenant + tenant_admin, sem evento; o primeiro evento é criado em `/admin/primeiro-evento`) — rate limit 5/hora |
 | `/login` | Público | Login — rate limit 10/min |
 | `/logout` | Login | Encerra a sessão |
 | `/forgot_password` | Público | Solicitar reset de senha — rate limit 5/hora |
@@ -115,22 +126,26 @@ Novos membros são criados pelo painel (`/admin/usuarios`); recebem email de con
 | `/termos` | Público | Termos de uso (LGPD) |
 | `/privacidade` | Público | Política de privacidade (LGPD) |
 | `/invite/<token>` | Público | Página de confirmação do convidado — rate limit 30/min (GET) / 10/min (POST) |
-| `/uploads/<filename>` | Tenant autenticado ou convidado c/ session | Serve arquivo de upload com validação de posse |
+| `/uploads/<filename>` | Tenant autenticado ou convidado c/ session | Serve arquivo de upload com validação de posse (convidado: a própria mídia **ou** a do seu evento; usuário logado: mídia de convidados e eventos do próprio tenant) |
 | `/admin/respostas` | Login | Lista de respostas com paginação e busca |
 | `/admin/exportar_xlsx` | Login | Download da lista em Excel |
 | `/admin/convidados/add` | Login | Adicionar convidado |
 | `/admin/convidados/<id>/edit` | Login | Editar convidado |
 | `/admin/convidados/<id>/delete` | Login | Excluir convidado |
-| `/admin/textos` | tenant_admin | Editar textos do convite |
-| `/admin/set_tema` | tenant_admin | Define o tema visual do evento (padrão/menina/menino) |
+| `/admin/textos` | tenant_admin ou member responsável pelo evento | Editar textos do convite |
+| `/admin/set_tema` | tenant_admin ou member responsável pelo evento | Define o tema visual do evento (padrão/menina/menino) |
 | `/admin/eventos` | Login | Lista os eventos do tenant |
-| `/admin/eventos/criar` | Login | Cria um novo evento no tenant |
+| `/admin/eventos/criar` | tenant_admin | Cria um novo evento no tenant (imagem obrigatória; respeita `max_events`) |
+| `/admin/primeiro-evento` | tenant_admin | GET/POST — cria o primeiro evento do tenant recém-cadastrado |
+| `/admin/eventos/<id>/imagem` | Quem gerencia o evento (tenant_admin ou member responsável) | POST — envia/troca a imagem padrão do evento |
+| `/admin/eventos/<id>/responsavel` | tenant_admin | POST — define o member responsável pelo evento |
+| `/apidocs` | tenant_admin | Documentação Swagger da API |
 | `/admin/usuarios` | tenant_admin | Gerenciar membros do tenant |
 | `/admin/usuarios/add` | tenant_admin | Convida um novo membro (senha temporária por email) |
 | `/admin/usuarios/<id>/edit` | tenant_admin | Edita dados de um membro |
 | `/admin/usuarios/<id>/reset_senha` | tenant_admin | Reenvia senha temporária a um membro |
 | `/admin/usuarios/<id>/delete` | tenant_admin | Remove um membro do tenant |
-| `/change_password` | Login (member) | Troca de senha obrigatória |
+| `/change_password` | Login | Troca de senha (obrigatória para não-tenant_admin com `must_change_password`) |
 | `/superadmin` | Super-admin do SaaS | Lista todos os tenants do sistema |
 | `/superadmin/tenant/<id>/set_plan` | Super-admin do SaaS | Altera o plano (free/pro/business) de um tenant |
 | `/superadmin/tenant/<id>/suspend` | Super-admin do SaaS | Suspende o acesso de um tenant |
@@ -154,13 +169,13 @@ Schema SaaS multi-tenant:
 
 | Tabela | Descrição |
 |--------|-----------|
-| `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). Tem `plan` (free/pro/business) e `status` (trial/active/suspended/canceled), geridos via `/superadmin`. |
+| `tenants` | Conta do cliente. Raiz da árvore de FK (apagar cascateia tudo = LGPD). Tem `plan` (free/pro/business) e `status` (trial/active/suspended/canceled), geridos via `/superadmin`; `trial_ends_at` (NULL até o 1º login) e `suspended_reason` (trial_expired/manual). |
 | `users` | Usuários com `tenant_id` e `role` (`tenant_admin`/`member`/`super_admin`). Email UNIQUE global. `accepted_terms_at` registra o aceite dos termos no signup. |
-| `events` | N eventos por tenant, com textos do convite e `theme` (padrão/menina/menino) por evento. |
+| `events` | N eventos por tenant, com textos do convite e `theme` (padrão/menina/menino) por evento; `media_url` (imagem padrão, obrigatória na criação) e `owner_user_id` (member responsável). |
 | `invitees` | Convidados com `tenant_id` desnormalizado e `token` UNIQUE global. |
 | `password_reset_tokens` | Tokens de reset com TTL de 1h e flag `used`. |
 | `email_verification_tokens` | Tokens de verificação de email com TTL de 24h e flag `used`. |
-| `plan_limits` | Limites por plano (PK `plan`): `max_events`, `max_invitees`, `max_members` (`NULL` = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(ilimitado). |
+| `plan_limits` | Limites por plano (PK `plan`): `max_events`, `max_invitees` (por evento), `max_members` (`NULL` = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(ilimitado). |
 
 ---
 
@@ -291,7 +306,9 @@ Saída esperada:
 ```
 [2026-06-24 05:00:05] Iniciando backup de rsvp_db...
 [2026-06-24 05:00:06] Backup salvo: comemore_20260624_050005.sql.gz (48K)
-[2026-06-24 05:00:06] Retenção: 0 arquivo(s) removido(s) (>7 dias)
+[2026-06-24 05:00:06] Iniciando backup dos uploads (/uploads)...
+[2026-06-24 05:00:07] Backup de uploads salvo: comemore_uploads_20260624_050006.tar.gz (1.2M)
+[2026-06-24 05:00:07] Retenção: 0 arquivo(s) removido(s) (>7 dias)
 ```
 
 ### Listar backups disponíveis
@@ -347,14 +364,14 @@ Restaurar **em produção** (sobrescreve o volume — faça um backup manual ant
 
 ## Uploads de Mídia
 
-Os arquivos enviados (imagens/vídeos por convidado) são armazenados no volume Docker nomeado `uploads_data`, montado em `/app/uploads` no container.
+Os arquivos enviados (imagem/vídeo padrão de cada evento e mídia por convidado) são armazenados no volume Docker nomeado `uploads_data`, montado em `/app/uploads` no container.
 
 ### Comportamento por ambiente
 
 | Ambiente | Onde ficam os arquivos |
 |----------|----------------------|
 | Produção / Docker | Volume nomeado `uploads_data` — persiste entre rebuilds |
-| Dev local (sem Docker) | `backend/static/uploads/` (fallback do default) |
+| Dev local (sem Docker) | defina `UPLOAD_FOLDER` (default `/app/uploads`) |
 
 ### Confirmar persistência após rebuild
 
@@ -377,11 +394,28 @@ docker cp backend/static/uploads/. rsvp_backend:/app/uploads/
 
 Após a cópia, os arquivos em `static/uploads/` no host podem ser removidos — eles não são mais servidos pelo app.
 
+### Regras de upload
+
+- Extensões permitidas: `jpg`, `jpeg`, `png`, `mp4`; máximo de 50MB.
+- O conteúdo é validado por magic bytes (a extensão sozinha não basta); o arquivo é salvo com nome UUID.
+- Todas as respostas levam `X-Content-Type-Options: nosniff`.
+- Arquivo acima do limite: o navegador bloqueia antes do envio (evita a página 413 crua do nginx) e, se chegar ao app, o 413 vira mensagem de erro com redirecionamento.
+
+### Limpeza de arquivos órfãos
+
+Arquivos em `UPLOAD_FOLDER` sem referência no banco podem ser listados (dry-run por padrão; ignora arquivos com menos de 60 minutos):
+
+```bash
+docker exec rsvp_backend flask cleanup-orphan-uploads
+```
+
+Use `--apply` para remover de fato — só depois de revisar a lista e fazer um backup.
+
 ### Acesso protegido
 
 A rota `/uploads/<filename>` não é pública:
 - **Usuário logado:** o arquivo deve pertencer ao tenant do usuário autenticado
-- **Convidado sem login:** session do Flask valida o token de convite contra o `media_url` do registro (sem expor o token em query string)
+- **Convidado sem login:** session do Flask valida o token de convite contra a mídia do próprio convidado **ou** a imagem padrão do seu evento (sem expor o token em query string)
 - Qualquer outro acesso → 404 (sem vazar existência do arquivo)
 
 ## Fila de Email Assíncrona (Redis + RQ)
@@ -420,13 +454,20 @@ Via **Flask-Limiter**, com storage Redis (mesma instância da fila) e fallback a
 
 Cada tenant tem um `plan` (`free`/`pro`/`business`) e um `status` (`trial`/`active`/`suspended`/`canceled`). Os limites de uso por plano ficam na tabela `plan_limits`:
 
-| Plano | Eventos | Convidados | Membros |
+| Plano | Eventos | Convidados (por evento) | Membros |
 |-------|---------|-----------|---------|
 | `free` | 2 | 50 | 1 |
 | `pro` | 10 | 500 | 5 |
 | `business` | ilimitado | ilimitado | ilimitado |
 
 Ao atingir o limite, a criação de novo evento/convidado/membro é bloqueada com uma mensagem clara — sem exceção silenciosa.
+
+### Trial
+
+- Tenants no plano Free começam em `trial`: o prazo de 14 dias é contado a partir do **primeiro login** (`trial_ends_at` fica NULL até lá).
+- Quando faltam 3 dias ou menos, o login exibe um aviso de expiração.
+- Ao expirar, o tenant é suspenso automaticamente no próximo login (`suspended_reason=trial_expired`) e o login é bloqueado.
+- Upgrade para `pro`/`business` em `/superadmin` reativa automaticamente apenas suspensão por trial expirado. Suspensão manual exige "reativar" no painel, mesmo após o upgrade.
 
 O painel `/superadmin` permite ao operador do SaaS listar todos os tenants e alterar plano/status (suspender, reativar). A conta em si é registrada no banco como `role='super_admin'` — não é mais uma comparação de email a cada request.
 
@@ -443,7 +484,15 @@ docker exec rsvp_backend flask create-superadmin
 
 ---
 
-## Testes de integração
+## Testes
+
+Testes unitários (não precisam de MySQL; o `pytest.ini` deseleciona os marcados `integration` por default):
+
+```bash
+pytest
+```
+
+### Testes de integração
 
 ```bash
 # Valida schema, índices de tenant_id e FKs num banco rsvp_test dedicado

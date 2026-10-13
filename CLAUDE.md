@@ -19,9 +19,11 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | Fase 3B | ✅ Concluída | Volume `uploads_data` em `/app/uploads`, rota `/uploads/<filename>` com isolamento de tenant, session-token para convidados (sem query string) |
 | Fase 3C | ✅ Concluída | `tasks.py` + `queue_utils.py`, RQ em 6 call sites, `redis` + `worker` no Compose, fallback síncrono só quando `REDIS_URL` ausente |
 | Fase 3D | ✅ Concluída | Guia Brevo × Resend, SPF/DKIM/DMARC, valores exatos no `.env.example` |
-| **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` com check de config inválida |
+| **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` por role (`super_admin`) |
 | **Fase 5** | ✅ Concluída | Flask-Limiter (Redis/memory storage), rate limiting em 5 rotas (login/signup/forgot/invite), /termos + /privacidade (LGPD), aceite obrigatório no signup + `accepted_terms_at`, migration 0005, fix `datetime.utcnow()`, supressão warning RQ serializer, integration test fluxo completo |
 | **Deploy** | ✅ Concluída | Live em produção na VPS Hostinger (`https://zapbyte.com.br`), HTTPS via Certbot, CI/CD GitHub Actions → SSH funcionando (deploy automático a cada push em `main`). Fix de bug real: cron do serviço `backup` não herdava env vars do container (`DB_NAME: unbound variable`), backups automáticos silenciosamente quebrados — corrigido gravando `VAR=valor` no topo do crontab |
+| **Super-admin por role** | ✅ Concluída | migration 0006 (ENUM `super_admin` + tenant reservado `Comemore+ System`), `flask create-superadmin`, `superadmin_required` por role, super-admin restrito às rotas do painel (`restrict_super_admin_to_panel`) |
+| **Trial** | ✅ Concluída | Free: 14 dias a partir do 1º login (`repo.TRIAL_DAYS`), aviso (modal) nos últimos 3 dias (`TRIAL_WARNING_DAYS`), suspensão automática ao expirar (`suspended_reason=trial_expired`); migrations 0007 (backfill) e 0008 (`tenants.suspended_reason`); lógica em `repo.start_tenant_trial` + `_check_tenant_access` (`app.py`) |
 | **Imagem por evento + member** | ✅ Concluída | Imagem padrão obrigatória por evento (convidado pode ter a própria), signup sem evento + /admin/primeiro-evento, responsável por evento (member funcional), backup de uploads, validação de conteúdo + nosniff, limpeza de órfãos (CLI cleanup-orphan-uploads), fixes: textos no evento certo, respostas por evento, 413 |
 
 ---
@@ -44,9 +46,11 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Flask-Login + Flask-WTF (CSRF)
 - Redis 7-alpine + RQ 1.16.2 + redis-py 5.0.7 — fila de email assíncrono (`tasks.py` + `queue_utils.py`)
 - Flask-Limiter 3.8.0 — rate limiting com Redis storage + fallback memory://
+- flasgger 0.9.7.1 — Swagger em `/apidocs` (só tenant_admin); openpyxl 3.1.2 — export xlsx; debugpy 1.8.21 — debug remoto (dev only)
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
-- pytest (349 unit tests + 48 integration tests deselected sem MySQL real)
+- Volumes: `db_data`, `backup_data`, `uploads_data`, `redis_data`. O `backup` monta `uploads_data:/uploads:ro` e gera `comemore_uploads_*.tar.gz` com a mesma retenção do dump SQL; `restore-uploads.sh` restaura por default em `/tmp/uploads_restore_test`.
+- pytest (359 unit tests + 50 integration tests deselected sem MySQL real)
 
 ---
 
@@ -74,9 +78,13 @@ project_rsvp_birthday/
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 349 unit tests + 48 integration (marcados @pytest.mark.integration)
+│   └── tests/               # pytest — 359 unit tests + 50 integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh (mysqldump + tar.gz dos uploads, diário via cron)
-├── docs/superpowers/plans/  # Histórico de planos por sub-fase
+├── docs/
+│   ├── superpowers/         # plans/ (histórico por sub-fase) e specs/ — gitignored, só local
+│   ├── smoke-tests/         # roteiros de smoke test e2e
+│   └── design-system/       # design.md, design-guidelines.md, design-components.md
+├── DEPLOY_CHECKLIST.md      # Checklist de deploy na VPS
 ├── .github/workflows/deploy.yml
 ├── .gitattributes           # *.sh text eol=lf — LF forçado em scripts de boot
 ├── docker-compose.yml       # Serviços: db, redis, backend, worker, backup, backend-test
@@ -90,13 +98,13 @@ project_rsvp_birthday/
 
 ## Schema (fonte de verdade: Alembic)
 
-- **`tenants`** — conta do cliente. Raiz da árvore (apagar cascateia tudo = LGPD).
+- **`tenants`** — conta do cliente. Raiz da árvore (apagar cascateia tudo = LGPD). Tem `plan` (free/pro/business), `status` (trial/active/suspended/canceled), `trial_ends_at` (NULL até o 1º login) e `suspended_reason` (trial_expired/manual, migration 0008).
 - **`users`** — `tenant_id` + `role` (`tenant_admin`/`member`/`super_admin`). `email` UNIQUE global; `username` UNIQUE por tenant. Conta `super_admin` mora no tenant reservado `Comemore+ System` (migration 0006), nunca num tenant de cliente real.
 - **`events`** — núcleo do produto. N eventos por tenant. Textos do convite por evento. `slug` aleatório. `media_url` = imagem padrão do convite (obrigatória na criação); `owner_user_id` = responsável (member gerencia só os seus).
 - **`invitees`** — FK para `events` + `tenant_id` desnormalizado (isolamento barato sem JOIN). `token` UNIQUE global.
 - **`password_reset_tokens`** — TTL 1h, flag `used`.
 - **`email_verification_tokens`** — TTL 24h, flag `used`. Usuário nasce `is_active=0`, ativa via link.
-- **`plan_limits`** — PK `plan` ENUM(free/pro/business); limites `max_events`, `max_invitees`, `max_members` (NULL = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(NULL).
+- **`plan_limits`** — PK `plan` ENUM(free/pro/business); limites `max_events`, `max_invitees` (**por evento**), `max_members` (NULL = ilimitado). Seed: free(2, 50, 1), pro(10, 500, 5), business(NULL).
 - **`users.accepted_terms_at`** — nullable DateTime; gravado no signup com timestamp UTC do aceite dos termos (migration 0005).
 
 ---
@@ -104,6 +112,8 @@ project_rsvp_birthday/
 ## Auth
 
 - Login por **email-only** (UNIQUE global resolve o tenant). Sem fallback de username.
+- Login checa o tenant (`_check_tenant_access`): bloqueia `suspended`/`canceled`; no Free inicia o trial no 1º login, suspende ao expirar e avisa nos últimos 3 dias.
+- `/uploads/<filename>`: usuário logado vê só mídia do próprio tenant; convidado (sessão) vê a própria imagem **ou** a imagem do seu evento.
 - Roles: `tenant_admin` (gerencia o tenant) e `member` (gerencia os eventos dos quais é responsável: convidados, imagem, textos, tema; só o tenant_admin cria eventos e define o responsável).
 - Signup cria `tenant` + `tenant_admin` (sem evento) numa **transação atômica** (rollback total se falhar); o primeiro evento é criado em `/admin/primeiro-evento`.
 - Novos membros: senha temporária aleatória (`secrets.token_urlsafe(12)`) + email de convite (TTL 72h).
@@ -135,7 +145,7 @@ EMAIL_PASS=xSMTP-KEY-BREVO
 APP_BASE_URL=https://seudominio.com.br
 
 # Dev only — jamais em produção
-SKIP_EMAIL_VERIFICATION=          # true ativa bypass (default OFF = verificação obrigatória)
+SKIP_EMAIL_VERIFICATION=          # 1/true/yes ativa bypass (default OFF = verificação obrigatória)
 
 # Fila de email assíncrono (RQ)
 REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); presente → só via fila
@@ -144,9 +154,16 @@ REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); present
 BACKUP_RETENTION_DAYS=7
 
 # Super-admin do SaaS — acessa /superadmin para gerenciar tenants
-# ⚠ ATENÇÃO: este email NÃO deve existir como conta de tenant no banco.
-# Se o email pertencer a um tenant_admin, o acesso será bloqueado (config inválida).
+# ⚠ ATENÇÃO: este email NÃO pode já existir como usuário comum no banco.
+# `flask create-superadmin` recusa (não promove automaticamente um usuário existente).
 # SUPERADMIN_EMAIL=admin@seudominio.com
+
+# Opcionais
+# EMAIL_FROM=noreply@seudominio.com  # remetente validado no provedor; fallback = EMAIL_USER
+# TZ_OFFSET_HOURS=-3                 # default -3 (BRT)
+# LOG_FILE=logs/app.log              # default
+# UPLOAD_FOLDER=/app/uploads         # default (volume uploads_data)
+# DEBUGPY_ENABLED=true               # dev only — entrypoint troca gunicorn por flask run + debugpy (porta 5678)
 ```
 
 ---
@@ -155,7 +172,7 @@ BACKUP_RETENTION_DAYS=7
 
 - SQL via `text()` com parâmetros nomeados — sem concatenação.
 - **Todo acesso a `events`/`invitees`/`users` passa pelo `repo.py` com `tenant_id` obrigatório.**
-- Uploads: UUID (`uuid4().hex`) + `secure_filename`; extensões `jpg/jpeg/png/mp4` (máx 50MB).
+- Uploads: UUID (`uuid4().hex`) + `secure_filename`; extensões `jpg/jpeg/png/mp4` com validação de magic bytes (`validate_media_content`), máx 50MB (413 tratado com flash + redirect seguro; guarda no navegador em `base.html`). `X-Content-Type-Options: nosniff` em todas as respostas. Órfãos via `flask cleanup-orphan-uploads [--apply] [--min-age-minutes N]` (dry-run por default; ignora arquivos mais novos que 60 min por default).
 - `slug`/`token` públicos via `secrets.token_urlsafe()`; PKs internas sequenciais.
 - Charset `utf8mb4` (acentos PT-BR e emojis).
 - Versão lida de `VERSION` e injetada via `context_processor`.
