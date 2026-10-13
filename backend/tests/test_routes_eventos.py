@@ -22,12 +22,13 @@ _EVENT_ROW = {
 }
 
 
-def _eventos_db(db, events=None, limits=None):
-    """Mock para admin_eventos: list_events + get_plan_limits."""
+def _eventos_db(db, events=None, limits=None, users=None):
+    """Mock para admin_eventos (admin): list_events + get_plan_limits + get_assignable_users."""
     setup_db(
         db,
-        qresult(all_rows=events if events is not None else [_EVENT_ROW]),  # repo.list_events
-        qresult(fetchone=limits or _LIMITS_NONE),                           # repo.get_plan_limits
+        qresult(all_rows=events if events is not None else [_EVENT_ROW]),
+        qresult(fetchone=limits or _LIMITS_NONE),
+        qresult(all_rows=users or []),
     )
 
 
@@ -106,6 +107,7 @@ def test_criar_evento_bloqueia_limite_plano(admin_client, db, upload_dir):
         # Redirect para admin_eventos — 2 queries extras:
         qresult(all_rows=[]),                  # admin_eventos: list_events
         qresult(fetchone=_LIMITS_FREE),        # admin_eventos: get_plan_limits
+        qresult(all_rows=[]),                  # admin_eventos: get_assignable_users
     )
     resp = admin_client.post(
         '/admin/eventos/criar',
@@ -125,6 +127,7 @@ def test_criar_evento_titulo_vazio(admin_client, db):
         # Redirect imediato antes de qualquer query de DB
         qresult(all_rows=[]),                  # admin_eventos: list_events
         qresult(fetchone=_LIMITS_NONE),        # admin_eventos: get_plan_limits
+        qresult(all_rows=[]),                  # admin_eventos: get_assignable_users
     )
     resp = admin_client.post(
         '/admin/eventos/criar',
@@ -314,7 +317,7 @@ import app as app_module
 
 def test_criar_evento_sem_imagem_recusa(admin_client, db, upload_dir):
     # redirect → admin_eventos (list_events não-vazio: com lista vazia, a Task 18 redireciona de novo)
-    conn = setup_db(db, qresult(all_rows=[_EVENT_ROW]), qresult(fetchone=_LIMITS_NONE))
+    conn = setup_db(db, qresult(all_rows=[_EVENT_ROW]), qresult(fetchone=_LIMITS_NONE), qresult(all_rows=[]))
     resp = admin_client.post('/admin/eventos/criar', data={'title': 'Sem Foto'},
                              follow_redirects=True)
     assert 'A imagem do convite é obrigatória.' in resp.data.decode('utf-8')
@@ -322,7 +325,7 @@ def test_criar_evento_sem_imagem_recusa(admin_client, db, upload_dir):
 
 
 def test_criar_evento_com_conteudo_invalido_recusa(admin_client, db, upload_dir):
-    conn = setup_db(db, qresult(all_rows=[]), qresult(fetchone=_LIMITS_NONE))
+    conn = setup_db(db, qresult(all_rows=[]), qresult(fetchone=_LIMITS_NONE), qresult(all_rows=[]))
     admin_client.post('/admin/eventos/criar',
                       data={'title': 'X', 'media_file': (io.BytesIO(b'<html>'), 'x.jpg')},
                       content_type='multipart/form-data')
@@ -361,3 +364,59 @@ def test_criar_evento_no_limite_nao_salva_arquivo(admin_client, db, upload_dir):
                       data={'title': 'X', 'media_file': (io.BytesIO(JPEG_BYTES), 'c.jpg')},
                       content_type='multipart/form-data')
     assert list(upload_dir.iterdir()) == []
+
+
+# ── Task 15: responsável por evento ─────────────────────────────────────────────
+
+def test_admin_eventos_admin_ve_select_de_responsavel(admin_client, db):
+    _eventos_db(db, events=[{**_EVENT_ROW, 'owner_user_id': 1}],
+                users=[{'id': 1, 'username': 'testadmin', 'email': 'a@x.com', 'role': 'tenant_admin'},
+                       {'id': 2, 'username': 'membertest', 'email': 'm@x.com', 'role': 'member'}])
+    body = admin_client.get('/admin/eventos').data.decode('utf-8')
+    assert '/admin/eventos/1/responsavel' in body
+    assert 'membertest' in body
+
+
+def test_admin_eventos_member_ve_so_atribuidos_sem_criar(member_client, db):
+    conn = setup_db(db, qresult(all_rows=[{**_EVENT_ROW, 'owner_user_id': 2}]),
+                    qresult(fetchone=_LIMITS_NONE))
+    body = member_client.get('/admin/eventos').data.decode('utf-8')
+    assert conn.execute.call_args_list[0][0][1]['owner'] == 2
+    assert '#modalCriar' not in body
+    assert '/responsavel' not in body
+
+
+def test_definir_responsavel_sucesso(admin_client, db, monkeypatch):
+    import app as app_module
+    setup_db(db)
+    calls = []
+    monkeypatch.setattr(app_module.repo, 'get_event', lambda c, t, e: _EVENT_ROW)
+    monkeypatch.setattr(app_module.repo, 'set_event_owner', lambda c, t, e, u: calls.append((t, e, u)) or True)
+    resp = admin_client.post('/admin/eventos/1/responsavel', data={'owner_user_id': '2'})
+    assert resp.status_code == 302
+    assert calls == [(1, 1, 2)]
+
+
+def test_definir_responsavel_usuario_invalido_nao_comita(admin_client, db, monkeypatch):
+    import app as app_module
+    conn = setup_db(db)
+    monkeypatch.setattr(app_module.repo, 'get_event', lambda c, t, e: _EVENT_ROW)
+    monkeypatch.setattr(app_module.repo, 'set_event_owner', lambda *a: False)
+    resp = admin_client.post('/admin/eventos/1/responsavel', data={'owner_user_id': '999'})
+    assert resp.status_code == 302
+    conn.commit.assert_not_called()
+
+
+def test_definir_responsavel_evento_de_outro_tenant_404(admin_client, db, monkeypatch):
+    import app as app_module
+    setup_db(db)
+    monkeypatch.setattr(app_module.repo, 'get_event', lambda c, t, e: None)
+    assert admin_client.post('/admin/eventos/9/responsavel', data={'owner_user_id': '2'}).status_code == 404
+
+
+def test_definir_responsavel_member_403(member_client, db):
+    assert member_client.post('/admin/eventos/1/responsavel', data={'owner_user_id': '2'}).status_code == 403
+
+
+def test_member_nao_cria_evento(member_client, db):
+    assert member_client.post('/admin/eventos/criar', data={'title': 'X'}).status_code == 403

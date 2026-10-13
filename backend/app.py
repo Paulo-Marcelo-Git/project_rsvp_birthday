@@ -1471,19 +1471,23 @@ def admin_eventos():
         description: Redireciona para /login se não autenticado
     """
     tid = current_user.tenant_id
+    is_admin = current_user.is_tenant_admin
     with engine.connect() as conn:
-        eventos = repo.list_events(conn, tid)
+        eventos = repo.list_events(
+            conn, tid, owner_user_id=None if is_admin else current_user.db_id
+        )
         limits = repo.get_plan_limits(conn, tid)
-    can_create = (
-        limits["max_events"] is None
-        or len(eventos) < limits["max_events"]
+        usuarios = repo.get_assignable_users(conn, tid) if is_admin else []
+    can_create = is_admin and (
+        limits["max_events"] is None or len(eventos) < limits["max_events"]
     )
     return render_template(
         "admin_eventos.html",
         eventos=eventos,
         can_create=can_create,
         max_events=limits["max_events"],
-        is_tenant_admin=current_user.is_tenant_admin,
+        is_tenant_admin=is_admin,
+        usuarios=usuarios,
         can_manage_members=(
             limits["max_members"] is None or limits["max_members"] > 1
         ),
@@ -1556,6 +1560,51 @@ def criar_evento():
         return redirect(url_for("admin_eventos"))
     flash(f'Evento "{title}" criado com sucesso!', "success")
     return redirect(url_for("respostas", event_id=eid))
+
+
+@app.route("/admin/eventos/<int:event_id>/responsavel", methods=["POST"])
+@login_required
+@tenant_admin_required
+def definir_responsavel_evento(event_id):
+    """
+    Definir o usuário responsável pelo evento
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: path
+        name: event_id
+        type: integer
+        required: true
+      - in: formData
+        name: owner_user_id
+        type: integer
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/eventos
+      403:
+        description: Apenas tenant_admin
+      404:
+        description: Evento não encontrado no tenant
+    """
+    tid = current_user.tenant_id
+    try:
+        user_id = int(request.form.get("owner_user_id", 0))
+    except (ValueError, TypeError):
+        user_id = 0
+    with engine.connect() as conn:
+        if not repo.get_event(conn, tid, event_id):
+            abort(404)
+        if not user_id or not repo.set_event_owner(conn, tid, event_id, user_id):
+            flash("Usuário inválido para responsável do evento.", "danger")
+            return redirect(url_for("admin_eventos"))
+        conn.commit()
+    logger.info(
+        f"Responsável do evento id={event_id} definido para user_id={user_id} "
+        f"por '{current_user.username}'."
+    )
+    flash("Responsável do evento atualizado.", "success")
+    return redirect(url_for("admin_eventos"))
 
 
 # ===== Gerenciamento de Usuários =====
