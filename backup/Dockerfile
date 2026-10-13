@@ -5,7 +5,8 @@ ENTRYPOINT []
 RUN microdnf install -y cronie && microdnf clean all
 COPY backup.sh /backup.sh
 COPY restore.sh /restore.sh
-RUN chmod +x /backup.sh /restore.sh
+COPY restore-uploads.sh /restore-uploads.sh
+RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh
 # Cron: 05:00 UTC = 02:00 BRT
 # crond não herda as env vars do container (PID 1) — grava DB_NAME/DB_HOST/DB_USER/
 # DB_PASSWORD/BACKUP_DIR/BACKUP_RETENTION_DAYS como linhas VAR=valor no topo do

@@ -70,3 +70,55 @@ def test_convite_resposta_invalida_ignorada(client, db):
     assert conn.execute.call_count == 1
     assert not conn.commit.called
     assert resp.status_code == 302
+
+
+# ── Task 11: precedência de mídia ─────────────────────────────────────────────
+
+from tests.conftest import qresult, setup_db, GUEST_ROW, TEXTS_ROW
+
+
+def _invite(client, db, **media):
+    setup_db(db,
+             qresult(fetchone={**GUEST_ROW, **media}),
+             qresult(fetchone=TEXTS_ROW),
+             qresult(fetchone={'theme': 'default'}))
+    return client.get(f"/invite/{GUEST_ROW['token']}").data.decode('utf-8')
+
+
+def test_convite_usa_imagem_propria_do_convidado(client, db):
+    body = _invite(client, db, media_url='propria.jpg', event_media_url='evento.jpg')
+    assert '/uploads/propria.jpg' in body
+    assert '/uploads/evento.jpg' not in body
+
+
+def test_convite_sem_imagem_propria_usa_a_do_evento(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.jpg')
+    assert '/uploads/evento.jpg' in body
+
+
+def test_convite_video_do_evento_renderiza_video(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.mp4')
+    assert '<video id="inviteVideo"' in body
+
+
+def test_convite_sem_nenhuma_imagem_abre_so_com_texto(client, db):
+    body = _invite(client, db, media_url=None, event_media_url=None)
+    assert 'class="media-box"' not in body
+    assert 'imagen.jpg' not in body
+    assert TEXTS_ROW['question_text'] in body
+
+
+# ── Fix CP4: botão de som do vídeo ────────────────────────────────────────────
+
+def test_convite_video_tem_script_do_botao_de_som(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.mp4')
+    assert 'id="soundToggle"' in body
+    assert 'aria-label="Alternar som"' in body
+    assert "getElementById('soundToggle')" in body
+    assert "addEventListener('click'" in body
+    assert 'video.muted = !video.muted' in body
+
+
+def test_convite_imagem_nao_renderiza_botao_de_som(client, db):
+    body = _invite(client, db, media_url=None, event_media_url='evento.jpg')
+    assert 'id="soundToggle"' not in body

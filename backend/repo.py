@@ -62,8 +62,10 @@ def get_invitee_by_token(conn, token: str) -> dict | None:
                    i.responded_at AS response_date,
                    i.media_url,
                    i.phone, i.email,
-                   i.created_at
+                   i.created_at,
+                   e.media_url AS event_media_url
             FROM invitees i
+            JOIN events e ON e.id = i.event_id AND e.tenant_id = i.tenant_id
             WHERE i.token = :token
         """),
         {"token": token},
@@ -173,6 +175,20 @@ def get_default_event_id(conn, tenant_id: int, owner_user_id: int | None = None)
     return int(row["id"]) if row else None
 
 
+def get_event(conn, tenant_id: int, event_id: int) -> dict | None:
+    """Busca evento por id. SEMPRE filtra tenant_id. Ponto único usado pelas
+    rotas para validar posse do evento (junto com _can_manage_event no app)."""
+    row = conn.execute(
+        text("""
+            SELECT id, tenant_id, owner_user_id, title, theme, media_url, status
+            FROM events
+            WHERE id = :eid AND tenant_id = :tid
+        """),
+        {"eid": event_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    return dict(row) if row else None
+
+
 def get_event_texts(conn, tenant_id: int, event_id: int) -> dict:
     """
     Retorna textos do evento para renderizar templates de convite e configuração.
@@ -237,51 +253,31 @@ def update_event_texts(conn, tenant_id: int, event_id: int, **texts) -> None:
         )
 
 
-def create_default_event(
-    conn, tenant_id: int, tenant_name: str, *, owner_user_id: int | None = None
-) -> int:
-    """Cria o evento padrão para um novo tenant (usado no signup). Retorna event_id."""
-    import secrets as _sec
-    slug = _sec.token_urlsafe(16)[:22]
-    extra = json.dumps(
-        {"post_yes_text": "Que bom! Te esperamos!", "post_no_text": "Sentiremos sua falta."},
-        ensure_ascii=False,
-    )
-    conn.execute(
-        text("""
-            INSERT INTO events
-                (tenant_id, owner_user_id, title, event_type, slug, status,
-                 question_text, yes_text, no_text, extra_texts)
-            VALUES
-                (:tid, :owner, :title, 'aniversario', :slug, 'draft',
-                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
-        """),
-        {
-            "tid": tenant_id, "owner": owner_user_id,
-            "title": f"Festa de {tenant_name}", "slug": slug, "extra": extra,
-        },
-    )
-    row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
-    return int(row["id"])
-
-
-def list_events(conn, tenant_id: int) -> list[dict]:
-    """Lista todos os eventos do tenant, mais recente primeiro."""
+def list_events(conn, tenant_id: int, owner_user_id: int | None = None) -> list[dict]:
+    """Lista eventos do tenant, mais recente primeiro. Se owner_user_id for
+    informado, só os eventos dos quais esse usuário é responsável (visão de member)."""
+    params = {"tid": tenant_id}
+    owner_sql = ""
+    if owner_user_id is not None:
+        owner_sql = " AND e.owner_user_id = :owner"
+        params["owner"] = owner_user_id
     rows = conn.execute(
-        text("""
-            SELECT id, tenant_id, title, status, theme, event_date, created_at,
+        text(f"""
+            SELECT e.id, e.tenant_id, e.owner_user_id, e.title, e.status, e.theme,
+                   e.media_url, e.event_date, e.created_at,
                    (SELECT COUNT(*) FROM invitees i WHERE i.event_id = e.id) AS total_invitees
             FROM events e
-            WHERE tenant_id = :tid
-            ORDER BY created_at DESC
+            WHERE e.tenant_id = :tid{owner_sql}
+            ORDER BY e.created_at DESC, e.id DESC
         """),
-        {"tid": tenant_id},
+        params,
     ).mappings().all()
     return [dict(r) for r in rows]
 
 
 def create_event(
-    conn, tenant_id: int, title: str, *, owner_user_id: int | None = None
+    conn, tenant_id: int, title: str, *, owner_user_id: int | None = None,
+    media_url: str | None = None,
 ) -> int:
     """Cria novo evento para o tenant. Retorna event_id."""
     import secrets as _sec
@@ -294,12 +290,13 @@ def create_event(
         text("""
             INSERT INTO events
                 (tenant_id, owner_user_id, title, event_type, slug, status,
-                 question_text, yes_text, no_text, extra_texts)
+                 question_text, yes_text, no_text, extra_texts, media_url)
             VALUES
                 (:tid, :owner, :title, 'aniversario', :slug, 'draft',
-                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra)
+                 'Você vai comparecer?', 'Sim ✅', 'Não ❌', :extra, :media_url)
         """),
-        {"tid": tenant_id, "owner": owner_user_id, "title": title, "slug": slug, "extra": extra},
+        {"tid": tenant_id, "owner": owner_user_id, "title": title, "slug": slug,
+         "extra": extra, "media_url": media_url},
     )
     row = conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().fetchone()
     return int(row["id"])
@@ -327,6 +324,48 @@ def get_event_theme(conn, tenant_id: int, event_id: int) -> str:
     if not row:
         return "default"
     return row["theme"] or "default"
+
+
+def set_event_media(conn, tenant_id: int, event_id: int, filename: str) -> str | None:
+    """Grava a imagem padrão do evento e devolve a anterior (para limpeza
+    após o commit). SEMPRE filtra tenant_id; LookupError se o evento não
+    pertence ao tenant (nada é alterado)."""
+    row = conn.execute(
+        text("SELECT media_url FROM events WHERE id = :eid AND tenant_id = :tid FOR UPDATE"),
+        {"eid": event_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    if not row:
+        raise LookupError(f"evento {event_id} não encontrado no tenant {tenant_id}")
+    conn.execute(
+        text("UPDATE events SET media_url = :fn WHERE id = :eid AND tenant_id = :tid"),
+        {"fn": filename, "eid": event_id, "tid": tenant_id},
+    )
+    return row["media_url"]
+
+
+_ASSIGNABLE_ROLES_SQL = "role IN ('tenant_admin', 'member')"
+
+
+def set_event_owner(conn, tenant_id: int, event_id: int, user_id: int) -> bool:
+    """Define o responsável do evento. Só aceita usuário ATIVO do MESMO
+    tenant com role tenant_admin/member (nunca super_admin nem outro tenant).
+    Retorna False sem alterar nada se o usuário for inválido. A posse do
+    evento é validada pela rota com get_event antes."""
+    user = conn.execute(
+        text(f"""
+            SELECT id FROM users
+            WHERE id = :uid AND tenant_id = :tid AND is_active = 1
+              AND {_ASSIGNABLE_ROLES_SQL}
+        """),
+        {"uid": user_id, "tid": tenant_id},
+    ).mappings().fetchone()
+    if not user:
+        return False
+    conn.execute(
+        text("UPDATE events SET owner_user_id = :uid WHERE id = :eid AND tenant_id = :tid"),
+        {"uid": user_id, "eid": event_id, "tid": tenant_id},
+    )
+    return True
 
 
 # ── invitees ──────────────────────────────────────────────────────────────────
@@ -496,6 +535,20 @@ def get_users(conn, tenant_id: int) -> list[dict]:
             FROM users
             WHERE tenant_id = :tid
             ORDER BY created_at DESC
+        """),
+        {"tid": tenant_id},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def get_assignable_users(conn, tenant_id: int) -> list[dict]:
+    """Usuários ativos do tenant que podem ser responsáveis por evento."""
+    rows = conn.execute(
+        text(f"""
+            SELECT id, username, email, role
+            FROM users
+            WHERE tenant_id = :tid AND is_active = 1 AND {_ASSIGNABLE_ROLES_SQL}
+            ORDER BY username
         """),
         {"tid": tenant_id},
     ).mappings().all()
@@ -702,12 +755,43 @@ def invalidate_verification_tokens(conn, user_id: int) -> None:
 
 
 def get_media_tenant(conn, filename: str) -> int | None:
-    """Retorna tenant_id do invitee que possui filename, ou None se não existir."""
+    """Retorna tenant_id do convidado OU evento que possui filename, ou None."""
     row = conn.execute(
-        text("SELECT tenant_id FROM invitees WHERE media_url = :fn LIMIT 1"),
+        text("""
+            SELECT tenant_id FROM invitees WHERE media_url = :fn
+            UNION ALL
+            SELECT tenant_id FROM events WHERE media_url = :fn
+            LIMIT 1
+        """),
         {"fn": filename},
     ).mappings().fetchone()
     return row["tenant_id"] if row else None
+
+
+def count_media_references(conn, filename: str) -> int:
+    """Quantas linhas (invitees + events) ainda referenciam o arquivo. Global
+    de propósito: filename é UUID único, mesmo padrão de get_media_tenant."""
+    row = conn.execute(
+        text("""
+            SELECT (SELECT COUNT(*) FROM invitees WHERE media_url = :fn)
+                 + (SELECT COUNT(*) FROM events   WHERE media_url = :fn) AS n
+        """),
+        {"fn": filename},
+    ).mappings().fetchone()
+    return int(row["n"] or 0)
+
+
+def list_referenced_media(conn) -> set[str]:
+    """Todos os filenames referenciados por convidados ou eventos. Global —
+    uso exclusivo do CLI cleanup-orphan-uploads."""
+    rows = conn.execute(
+        text("""
+            SELECT media_url FROM invitees WHERE media_url IS NOT NULL
+            UNION
+            SELECT media_url FROM events WHERE media_url IS NOT NULL
+        """)
+    ).mappings().all()
+    return {r["media_url"] for r in rows}
 
 
 # ── planos e limites (4A/4B) ──────────────────────────────────────────────────

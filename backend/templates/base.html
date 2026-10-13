@@ -86,5 +86,26 @@
       });
     </script>
   {% endif %}
+  <!-- Guarda de upload: nginx devolve 413 cru acima de 55MB; bloqueia antes do envio -->
+  <script data-max-upload-bytes="52428800">
+    (function () {
+      var MAX = Number(document.currentScript.getAttribute('data-max-upload-bytes'));
+      document.addEventListener('submit', function (e) {
+        var inputs = e.target.querySelectorAll('input[type=file][name=media_file]');
+        for (var i = 0; i < inputs.length; i++) {
+          var f = inputs[i].files;
+          for (var j = 0; f && j < f.length; j++) {
+            if (f[j].size > MAX) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              alert('Arquivo muito grande. O limite é 50MB.');
+              return;
+            }
+          }
+        }
+      }, true);
+    })();
+  </script>
+
 </body>
 </html>

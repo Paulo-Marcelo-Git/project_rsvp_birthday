@@ -194,3 +194,39 @@ USER_ROW_FULL = {
     'role': 'member',
     'is_active': 1,
 }
+
+
+import datetime as _dt
+
+EVENT_ROW = {
+    'id': 1, 'tenant_id': 1, 'owner_user_id': 1, 'title': 'Festa Teste',
+    'status': 'draft', 'theme': 'default', 'media_url': 'evento.jpg',
+    'event_date': None, 'created_at': _dt.datetime(2026, 1, 1), 'total_invitees': 0,
+}
+
+LIMITS_NONE = {'max_events': None, 'max_invitees': None, 'max_members': None}
+
+# Amostras mínimas com a assinatura (magic bytes) correta de cada formato.
+JPEG_BYTES = b'\xff\xd8\xff\xe0' + b'\x00' * 32
+PNG_BYTES = b'\x89PNG\r\n\x1a\n' + b'\x00' * 32
+MP4_BYTES = b'\x00\x00\x00\x18ftypmp42' + b'\x00' * 32
+
+
+def respostas_db(db, guests=None, limits=None, events=None):
+    """Mocka as 5 queries de GET /admin/respostas?event_id=1, na ordem:
+    list_events, get_invitees, count_invitees_by_response, get_event_texts, get_plan_limits."""
+    return setup_db(
+        db,
+        qresult(all_rows=events if events is not None else [EVENT_ROW]),
+        qresult(all_rows=guests or []),
+        qresult(fetchone=STATS_ROW),
+        qresult(fetchone=TEXTS_ROW),
+        qresult(fetchone=limits or LIMITS_NONE),
+    )
+
+
+@pytest.fixture
+def upload_dir(tmp_path, monkeypatch):
+    """Aponta UPLOAD_FOLDER para um diretório temporário vazio."""
+    monkeypatch.setitem(flask_app.config, 'UPLOAD_FOLDER', str(tmp_path))
+    return tmp_path

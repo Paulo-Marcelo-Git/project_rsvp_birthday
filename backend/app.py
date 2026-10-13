@@ -3,11 +3,12 @@
 import logging
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from dotenv import load_dotenv
 from flasgger import Swagger
@@ -88,6 +89,31 @@ def ratelimit_handler(e):
     return render_template("429.html", retry_after=retry), 429
 
 
+def _safe_back_url(default_endpoint: str = "respostas") -> str:
+    """Volta para a página de origem SÓ se o Referer for deste host e um path
+    absoluto local (sem '//' nem '\\', que o navegador trataria como outro host) —
+    evita open redirect via cabeçalho controlado pelo cliente."""
+    ref = request.referrer
+    if ref:
+        parsed = urlparse(ref)
+        if (
+            parsed.scheme in ("http", "https")
+            and parsed.netloc == request.host
+            and parsed.path.startswith("/")
+            and not parsed.path.startswith("//")
+            and "\\" not in parsed.path
+            and not any(ord(c) < 32 or ord(c) == 127 for c in ref)
+        ):
+            return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    return url_for(default_endpoint)
+
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    flash("Arquivo maior que 50MB. Envie um arquivo menor.", "danger")
+    return redirect(_safe_back_url())
+
+
 swagger = Swagger(
     app,
     config={
@@ -119,6 +145,7 @@ swagger = Swagger(
 )
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "mp4", "png"}
+_INVALID_MEDIA_MSG = "Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 50MB)."
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/app/uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -127,6 +154,27 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+# Assinatura (magic bytes) esperada por extensão. A extensão sozinha não
+# basta: o arquivo é servido ao público pela rota /uploads.
+_MEDIA_SIGNATURES = {
+    "jpg":  lambda head: head.startswith(b"\xff\xd8\xff"),
+    "jpeg": lambda head: head.startswith(b"\xff\xd8\xff"),
+    "png":  lambda head: head.startswith(b"\x89PNG\r\n\x1a\n"),
+    "mp4":  lambda head: len(head) >= 8 and head[4:8] == b"ftyp",
+}
+
+
+def validate_media_content(file) -> bool:
+    """True se a extensão é permitida E o conteúdo bate com ela. Restaura o
+    stream na posição 0 para o save() posterior."""
+    if not file or not file.filename or not allowed_file(file.filename):
+        return False
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    head = file.stream.read(12)
+    file.stream.seek(0)
+    return _MEDIA_SIGNATURES[ext](head)
 
 
 @app.context_processor
@@ -229,6 +277,15 @@ def tenant_admin_required(f):
     return decorated
 
 
+def _can_manage_event(event: dict | None) -> bool:
+    """tenant_admin gerencia qualquer evento do próprio tenant; member só os
+    eventos dos quais é responsável. `event` deve vir de repo.get_event /
+    repo.list_events (já filtrados por tenant_id)."""
+    if not event:
+        return False
+    return current_user.is_tenant_admin or event.get("owner_user_id") == current_user.db_id
+
+
 def superadmin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -287,6 +344,14 @@ def restrict_super_admin_to_panel():
         return redirect(url_for("superadmin"))
 
 
+@app.after_request
+def set_security_headers(response):
+    # Impede o navegador de "adivinhar" um tipo diferente do declarado
+    # (ex.: tratar um upload como HTML).
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
 # Helpers
 def save_uploaded_file(file):
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -298,6 +363,29 @@ def save_uploaded_file(file):
         logger.error(f"Falha ao salvar arquivo: {e}")
         return None
     return safe
+
+
+def _remove_upload(filename: str | None) -> None:
+    """Remove o arquivo de UPLOAD_FOLDER. Ausência não é erro; nome que não
+    passa no secure_filename é ignorado (nunca sai da pasta de uploads)."""
+    if not filename:
+        return
+    safe = secure_filename(filename)
+    if not safe or safe != filename:
+        return
+    try:
+        os.remove(os.path.join(app.config["UPLOAD_FOLDER"], safe))
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.error(f"Falha ao remover upload '{safe}': {e}")
+
+
+def _delete_media_if_unreferenced(conn, filename: str | None) -> None:
+    """Apaga do disco só quando nenhum convidado/evento referencia mais o
+    arquivo. Chamar DEPOIS do commit que removeu a referência."""
+    if filename and repo.count_media_references(conn, filename) == 0:
+        _remove_upload(filename)
 
 
 
@@ -441,7 +529,7 @@ def login():
 @app.route("/signup", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def signup():
-    """Cadastro self-service: cria tenant + admin + evento padrão atomicamente."""
+    """Cadastro self-service: cria tenant + tenant_admin atomicamente. O primeiro evento é criado pelo cliente em /admin/primeiro-evento."""
     skip_verification = os.getenv("SKIP_EMAIL_VERIFICATION", "").lower() in (
         "1", "true", "yes"
     )
@@ -509,7 +597,6 @@ def signup():
                     conn, tenant_id, email, password_hash,
                     accepted_terms_at=accepted_terms_at,
                 )
-                repo.create_default_event(conn, tenant_id, nome, owner_user_id=user_id)
                 if skip_verification:
                     conn.execute(
                         text("UPDATE users SET is_active = 1 WHERE id = :uid"),
@@ -781,7 +868,7 @@ def serve_upload(filename):
     Caminho 1 — usuário autenticado: verifica que o arquivo pertence ao
     tenant do usuário logado.
     Caminho 2 — convidado sem login: valida via session['invite_token'] que
-    o token corresponde a um invitee cujo media_url é este filename.
+    o token corresponde a um invitee cujo media_url **ou** cuja imagem do evento é este filename.
     Sem query string: o token não aparece em logs de servidor.
     """
     safe = secure_filename(filename)
@@ -799,7 +886,8 @@ def serve_upload(filename):
         else:
             invite_token = session.get("invite_token")
             invitee = repo.get_invitee_by_token(conn, invite_token)
-            if not invitee or invitee.get("media_url") != safe:
+            # Convidado acessa só a própria imagem ou a imagem padrão do SEU evento.
+            if not invitee or safe not in (invitee.get("media_url"), invitee.get("event_media_url")):
                 abort(404)
 
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], safe)
@@ -846,33 +934,33 @@ def respostas():
     owner_uid = None if is_admin else current_user.db_id
 
     with engine.connect() as conn:
-        if event_id_param:
-            valid = conn.execute(
-                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_param, "tid": tid},
-            ).mappings().fetchone()
-            if not valid:
-                event_id_param = None
+        eventos = repo.list_events(conn, tid, owner_user_id=owner_uid)
+        if not eventos:
+            if is_admin:
+                return redirect(url_for("primeiro_evento"))
+            return render_template("admin_sem_evento.html", is_tenant_admin=is_admin)
+        # A tela trabalha SEMPRE com um único evento: lista, contadores,
+        # textos, tema, imagem e "adicionar convidado" referem-se ao mesmo.
+        event = next((e for e in eventos if e["id"] == event_id_param), None)
+        if event is None:
+            return redirect(url_for("respostas", event_id=eventos[0]["id"], search=search or None))
+        event_id = event["id"]
         convidados_raw = repo.get_invitees(
             conn, tid,
             owner_user_id=owner_uid,
             search=search,
-            event_id=event_id_param,
+            event_id=event_id,
             limit=per_page,
             offset=offset,
         )
         counts = repo.count_invitees_by_response(
-            conn, tid, owner_user_id=owner_uid, search=search, event_id=event_id_param
+            conn, tid, owner_user_id=owner_uid, search=search, event_id=event_id
         )
-        event_id = event_id_param or repo.get_default_event_id(conn, tid)
-        if event_id is None:
-            flash("Nenhum evento encontrado para este tenant. Verifique o cadastro.", "danger")
-            return redirect(url_for("admin_usuarios"))
-        event_theme = repo.get_event_theme(conn, tid, event_id) if event_id else "default"
         texts = repo.get_event_texts(conn, tid, event_id)
-        current_event_title = texts.get("title", "Evento")
         limits = repo.get_plan_limits(conn, tid)
-        eventos = repo.list_events(conn, tid)
+
+    event_theme = event["theme"] or "default"
+    current_event_title = event["title"]
 
     can_manage_members = (
         limits["max_members"] is None or limits["max_members"] > 1
@@ -918,6 +1006,7 @@ def respostas():
         is_tenant_admin=is_admin,
         can_manage_members=can_manage_members,
         event_id=event_id,
+        event=event,
         eventos=eventos,
         event_theme=event_theme,
     )
@@ -946,13 +1035,8 @@ def exportar_convidados_xlsx():
         event_id_param = None
 
     with engine.connect() as conn:
-        if event_id_param:
-            valid = conn.execute(
-                text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_param, "tid": tid},
-            ).fetchone()
-            if not valid:
-                event_id_param = None
+        if event_id_param and not _can_manage_event(repo.get_event(conn, tid, event_id_param)):
+            event_id_param = None
         result = repo.get_invitees(
             conn, tid, owner_user_id=owner_uid, search=search,
             event_id=event_id_param, limit=10000
@@ -1027,52 +1111,53 @@ def add_convidado():
       403:
         description: Sem permissão
     """
+    try:
+        event_id_form = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        event_id_form = 0
+    back_event_id = event_id_form or None  # url_for omite None
+
     name = request.form.get("name", "").strip()
     if not name:
         flash("Nome é obrigatório.", "danger")
-        return redirect(url_for("respostas"))
+        return redirect(url_for("respostas", event_id=back_event_id))
 
     email = request.form.get("email") or None
     phone = request.form.get("phone") or None
     msg = request.form.get("custom_message") or None
 
-    media_filename = None
     file = request.files.get("media_file")
-    if file and file.filename:
-        if not allowed_file(file.filename):
-            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
-            return redirect(url_for("respostas"))
-        media_filename = save_uploaded_file(file)
-        if media_filename is None:
-            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for("respostas"))
+    has_file = bool(file and file.filename)
+    if has_file and not validate_media_content(file):
+        flash(_INVALID_MEDIA_MSG, "danger")
+        return redirect(url_for("respostas", event_id=back_event_id))
 
     tid = current_user.tenant_id
     token = secrets.token_urlsafe(16)[:22]
-    try:
-        event_id_form = int(request.form.get("event_id", 0))
-    except (ValueError, TypeError):
-        event_id_form = 0
 
     with engine.connect() as conn:
         repo.lock_tenant_for_update(conn, tid)
-        event_id = None
+        event = None
         if event_id_form:
-            valid = conn.execute(
-                text("SELECT id, owner_user_id FROM events WHERE id = :eid AND tenant_id = :tid"),
-                {"eid": event_id_form, "tid": tid},
-            ).mappings().fetchone()
-            if valid and (
-                current_user.is_tenant_admin
-                or valid["owner_user_id"] == current_user.db_id
-            ):
-                event_id = event_id_form
-        if event_id is None:
+            candidate = repo.get_event(conn, tid, event_id_form)
+            if not _can_manage_event(candidate):
+                # event_id explícito sem permissão: recusa, não cai em outro evento.
+                flash("Evento não encontrado ou sem permissão.", "danger")
+                return redirect(url_for("respostas"))
+            event = candidate
+        if event is None:
             owner_filter = None if current_user.is_tenant_admin else current_user.db_id
-            event_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
-        if event_id is None:
-            flash("Nenhum evento encontrado. Não é possível adicionar convidados.", "danger")
+            fallback_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)
+            event = repo.get_event(conn, tid, fallback_id) if fallback_id else None
+        if event is None:
+            if current_user.is_tenant_admin:
+                return redirect(url_for("primeiro_evento"))
+            flash("Nenhum evento atribuído a você. Peça ao administrador da conta.", "danger")
             return redirect(url_for("respostas"))
+        event_id = event["id"]
+        if not event["media_url"]:
+            flash("Envie a imagem do convite antes de adicionar convidados.", "danger")
+            return redirect(url_for("respostas", event_id=event_id))
         limits = repo.get_plan_limits(conn, tid)
         current_count = repo.count_invitees_for_event(conn, tid, event_id)
         if not repo.within_limit(current_count, limits["max_invitees"]):
@@ -1082,11 +1167,20 @@ def add_convidado():
                 "danger",
             )
             return redirect(url_for("respostas", event_id=event_id))
-        repo.add_invitee(
-            conn, tid, event_id, name, token,
-            phone=phone, email=email, observation=msg, media_url=media_filename,
-        )
-        conn.commit()
+        # Arquivo só vai para o disco depois de todas as recusas possíveis.
+        media_filename = save_uploaded_file(file) if has_file else None
+        if has_file and media_filename is None:
+            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
+            return redirect(url_for("respostas", event_id=event_id))
+        try:
+            repo.add_invitee(
+                conn, tid, event_id, name, token,
+                phone=phone, email=email, observation=msg, media_url=media_filename,
+            )
+            conn.commit()
+        except Exception:
+            _remove_upload(media_filename)
+            raise
 
     logger.info(f"Convidado adicionado: '{name}' por '{current_user.username}'.")
     flash(f'Convidado "{name}" adicionado com sucesso!', "success")
@@ -1130,6 +1224,7 @@ def edit_convidado(id):
         abort(404)
     if not current_user.is_tenant_admin and guest["event_owner_user_id"] != current_user.db_id:
         abort(403)
+    old_media = guest["media_url"]
 
     name = request.form.get("name", "").strip()
     email = request.form.get("email") or None
@@ -1143,13 +1238,13 @@ def edit_convidado(id):
     new_media = None
     file = request.files.get("media_file")
     if file and file.filename:
-        if not allowed_file(file.filename):
-            flash("Arquivo inválido. Use .jpg/.jpeg/.png ou .mp4 (até 20MB).", "danger")
-            return redirect(url_for("respostas"))
+        if not validate_media_content(file):
+            flash(_INVALID_MEDIA_MSG, "danger")
+            return redirect(url_for("respostas", event_id=guest["event_id"]))
         new_media = save_uploaded_file(file)
         if new_media is None:
             flash("Erro ao salvar arquivo. Tente novamente.", "danger")
-            return redirect(url_for("respostas"))
+            return redirect(url_for("respostas", event_id=guest["event_id"]))
 
     update_fields = dict(
         name=name, email=email, phone=phone, observation=msg, response=response_db
@@ -1158,12 +1253,18 @@ def edit_convidado(id):
         update_fields["media_url"] = new_media
 
     with engine.connect() as conn:
-        repo.update_invitee(conn, tid, id, **update_fields)
-        conn.commit()
+        try:
+            repo.update_invitee(conn, tid, id, **update_fields)
+            conn.commit()
+        except Exception:
+            _remove_upload(new_media)
+            raise
+        if new_media and old_media and old_media != new_media:
+            _delete_media_if_unreferenced(conn, old_media)
 
     logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
     flash("Convidado atualizado com sucesso!", "success")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=guest["event_id"]))
 
 
 @app.route("/admin/convidados/<int:id>/delete", methods=["POST"])
@@ -1198,29 +1299,27 @@ def delete_convidado(id):
     with engine.connect() as conn:
         repo.delete_invitee(conn, tid, id)
         conn.commit()
-
-    if res["media_url"]:
-        try:
-            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], res["media_url"]))
-        except FileNotFoundError:
-            pass
+        _delete_media_if_unreferenced(conn, res["media_url"])
 
     logger.info(
         f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'."
     )
     flash("Convidado excluído com sucesso.", "warning")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=res["event_id"]))
 
 
 @app.route("/admin/textos", methods=["POST"])
 @login_required
-@tenant_admin_required
 def update_textos():
     """
     Atualizar textos do convite
     ---
     tags: [Textos]
     parameters:
+      - in: formData
+        name: event_id
+        type: integer
+        required: true
       - in: formData
         name: question_text
         type: string
@@ -1239,8 +1338,8 @@ def update_textos():
     responses:
       302:
         description: Redireciona para /admin/respostas
-      403:
-        description: Apenas super admin
+      404:
+        description: Evento não encontrado ou sem permissão
     """
     textos = {
         "question_text": request.form.get("question_text") or "",
@@ -1250,16 +1349,23 @@ def update_textos():
         "post_no_text": request.form.get("post_no_text") or "",
     }
     tid = current_user.tenant_id
+    try:
+        event_id = int(request.form.get("event_id", 0))
+    except (ValueError, TypeError):
+        event_id = 0
     with engine.connect() as conn:
-        event_id = repo.get_default_event_id(conn, tid)
-        if event_id is None:
-            flash("Nenhum evento encontrado. Não é possível salvar os textos.", "danger")
+        event = repo.get_event(conn, tid, event_id) if event_id else None
+        if not _can_manage_event(event):
+            if (event is None and current_user.is_tenant_admin
+                    and repo.count_events_for_tenant(conn, tid) == 0):
+                return redirect(url_for("primeiro_evento"))
+            flash("Evento não encontrado.", "danger")
             return redirect(url_for("respostas"))
-        repo.update_event_texts(conn, tid, event_id, **textos)
+        repo.update_event_texts(conn, tid, event["id"], **textos)
         conn.commit()
-    logger.info(f"Textos do convite atualizados por '{current_user.username}'.")
+    logger.info(f"Textos do evento id={event['id']} atualizados por '{current_user.username}'.")
     flash("Textos atualizados com sucesso!", "success")
-    return redirect(url_for("respostas"))
+    return redirect(url_for("respostas", event_id=event["id"]))
 
 
 @app.route("/admin/set_tema", methods=["POST"])
@@ -1282,13 +1388,9 @@ def set_tema():
         description: Redireciona para /admin/respostas
       400:
         description: Tema inválido ou event_id inválido
-      403:
-        description: Apenas tenant_admin
       404:
-        description: Evento não encontrado
+        description: Evento não encontrado ou sem permissão
     """
-    if not current_user.is_tenant_admin:
-        abort(403)
     theme = request.form.get("theme", "default")
     if theme not in ("girl", "boy", "default"):
         abort(400)
@@ -1298,11 +1400,7 @@ def set_tema():
     except (ValueError, TypeError):
         abort(400)
     with engine.connect() as conn:
-        valid = conn.execute(
-            text("SELECT id FROM events WHERE id = :eid AND tenant_id = :tid"),
-            {"eid": event_id, "tid": tid},
-        ).fetchone()
-        if not valid:
+        if not _can_manage_event(repo.get_event(conn, tid, event_id)):
             abort(404)
         repo.set_event_theme(conn, tid, event_id, theme)
         conn.commit()
@@ -1310,6 +1408,54 @@ def set_tema():
         f"Tema do evento id={event_id} alterado para '{theme}' por '{current_user.username}'."
     )
     return redirect(url_for("respostas", event_id=event_id))
+
+
+@app.route("/admin/eventos/<int:event_id>/imagem", methods=["POST"])
+@login_required
+def upload_event_media(event_id):
+    """
+    Enviar/trocar a imagem padrão do convite do evento
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: path
+        name: event_id
+        type: integer
+        required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/respostas?event_id=<id>
+      404:
+        description: Evento inexistente, de outro tenant ou sem permissão
+    """
+    tid = current_user.tenant_id
+    back = url_for("respostas", event_id=event_id)
+    with engine.connect() as conn:
+        if not _can_manage_event(repo.get_event(conn, tid, event_id)):
+            abort(404)
+        file = request.files.get("media_file")
+        if not validate_media_content(file):
+            flash(_INVALID_MEDIA_MSG, "danger")
+            return redirect(back)
+        filename = save_uploaded_file(file)
+        if filename is None:
+            flash("Erro ao salvar arquivo. Tente novamente.", "danger")
+            return redirect(back)
+        try:
+            previous = repo.set_event_media(conn, tid, event_id, filename)
+            conn.commit()
+        except Exception:
+            _remove_upload(filename)
+            raise
+        if previous and previous != filename:
+            _delete_media_if_unreferenced(conn, previous)
+    logger.info(f"Imagem do evento id={event_id} atualizada por '{current_user.username}'.")
+    flash("Imagem do convite atualizada.", "success")
+    return redirect(back)
 
 
 # ===== Gestão de Eventos =====
@@ -1329,23 +1475,64 @@ def admin_eventos():
         description: Redireciona para /login se não autenticado
     """
     tid = current_user.tenant_id
+    is_admin = current_user.is_tenant_admin
     with engine.connect() as conn:
-        eventos = repo.list_events(conn, tid)
+        eventos = repo.list_events(
+            conn, tid, owner_user_id=None if is_admin else current_user.db_id
+        )
         limits = repo.get_plan_limits(conn, tid)
-    can_create = (
-        limits["max_events"] is None
-        or len(eventos) < limits["max_events"]
+        usuarios = repo.get_assignable_users(conn, tid) if is_admin else []
+    if is_admin and not eventos:
+        return redirect(url_for("primeiro_evento"))
+    can_create = is_admin and (
+        limits["max_events"] is None or len(eventos) < limits["max_events"]
     )
     return render_template(
         "admin_eventos.html",
         eventos=eventos,
         can_create=can_create,
         max_events=limits["max_events"],
-        is_tenant_admin=current_user.is_tenant_admin,
+        is_tenant_admin=is_admin,
+        usuarios=usuarios,
         can_manage_members=(
             limits["max_members"] is None or limits["max_members"] > 1
         ),
     )
+
+
+def _create_event_with_media(title: str, file) -> tuple[int | None, str | None]:
+    """Cria evento do tenant do usuário atual com imagem obrigatória.
+    Ordem: valida → trava tenant e checa limite → salva arquivo → INSERT →
+    commit. Falha depois de salvar remove o arquivo. Retorna (event_id, None)
+    ou (None, mensagem_de_erro)."""
+    if not title:
+        return None, "Nome do evento é obrigatório."
+    if not file or not file.filename:
+        return None, "A imagem do convite é obrigatória."
+    if not validate_media_content(file):
+        return None, _INVALID_MEDIA_MSG
+    tid = current_user.tenant_id
+    with engine.connect() as conn:
+        repo.lock_tenant_for_update(conn, tid)
+        limits = repo.get_plan_limits(conn, tid)
+        total = repo.count_events_for_tenant(conn, tid)
+        if limits["max_events"] is not None and total >= limits["max_events"]:
+            return None, (
+                f"Seu plano permite até {limits['max_events']} evento(s). "
+                "Faça upgrade para criar mais."
+            )
+        filename = save_uploaded_file(file)
+        if filename is None:
+            return None, "Erro ao salvar arquivo. Tente novamente."
+        try:
+            eid = repo.create_event(
+                conn, tid, title, owner_user_id=current_user.db_id, media_url=filename
+            )
+            conn.commit()
+        except Exception:
+            _remove_upload(filename)
+            raise
+    return eid, None
 
 
 @app.route("/admin/eventos/criar", methods=["POST"])
@@ -1360,6 +1547,10 @@ def criar_evento():
         name: title
         type: string
         required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
     responses:
       302:
         description: Redireciona para o novo evento ou para /admin/eventos com mensagem de erro
@@ -1369,25 +1560,96 @@ def criar_evento():
     if not current_user.is_tenant_admin:
         abort(403)
     title = request.form.get("title", "").strip()
-    if not title:
-        flash("Nome do evento é obrigatório.", "danger")
+    eid, error = _create_event_with_media(title, request.files.get("media_file"))
+    if error:
+        flash(error, "danger")
         return redirect(url_for("admin_eventos"))
-    tid = current_user.tenant_id
-    with engine.connect() as conn:
-        repo.lock_tenant_for_update(conn, tid)
-        limits = repo.get_plan_limits(conn, tid)
-        total = repo.count_events_for_tenant(conn, tid)
-        if limits["max_events"] is not None and total >= limits["max_events"]:
-            flash(
-                f"Seu plano permite até {limits['max_events']} evento(s). "
-                "Faça upgrade para criar mais.",
-                "danger",
-            )
-            return redirect(url_for("admin_eventos"))
-        eid = repo.create_event(conn, tid, title, owner_user_id=current_user.db_id)
-        conn.commit()
     flash(f'Evento "{title}" criado com sucesso!', "success")
     return redirect(url_for("respostas", event_id=eid))
+
+
+@app.route("/admin/primeiro-evento", methods=["GET", "POST"])
+@login_required
+@tenant_admin_required
+def primeiro_evento():
+    """
+    Criação do primeiro evento (tenant recém-cadastrado, sem eventos)
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: formData
+        name: title
+        type: string
+        required: true
+      - in: formData
+        name: media_file
+        type: file
+        required: true
+    responses:
+      200:
+        description: Formulário (ou reexibição com erro)
+      302:
+        description: Evento criado → /admin/respostas?event_id=<id>; tenant já tem evento → /admin/respostas
+      403:
+        description: Apenas tenant_admin
+    """
+    with engine.connect() as conn:
+        has_events = repo.count_events_for_tenant(conn, current_user.tenant_id) > 0
+    if has_events:
+        return redirect(url_for("respostas"))
+    title = request.form.get("title", "").strip()
+    if request.method == "POST":
+        eid, error = _create_event_with_media(title, request.files.get("media_file"))
+        if not error:
+            flash(f'Evento "{title}" criado com sucesso!', "success")
+            return redirect(url_for("respostas", event_id=eid))
+        flash(error, "danger")
+    return render_template("primeiro_evento.html", title=title)
+
+
+@app.route("/admin/eventos/<int:event_id>/responsavel", methods=["POST"])
+@login_required
+@tenant_admin_required
+def definir_responsavel_evento(event_id):
+    """
+    Definir o usuário responsável pelo evento
+    ---
+    tags: [Eventos]
+    parameters:
+      - in: path
+        name: event_id
+        type: integer
+        required: true
+      - in: formData
+        name: owner_user_id
+        type: integer
+        required: true
+    responses:
+      302:
+        description: Redireciona para /admin/eventos
+      403:
+        description: Apenas tenant_admin
+      404:
+        description: Evento não encontrado no tenant
+    """
+    tid = current_user.tenant_id
+    try:
+        user_id = int(request.form.get("owner_user_id", 0))
+    except (ValueError, TypeError):
+        user_id = 0
+    with engine.connect() as conn:
+        if not repo.get_event(conn, tid, event_id):
+            abort(404)
+        if not user_id or not repo.set_event_owner(conn, tid, event_id, user_id):
+            flash("Usuário inválido para responsável do evento.", "danger")
+            return redirect(url_for("admin_eventos"))
+        conn.commit()
+    logger.info(
+        f"Responsável do evento id={event_id} definido para user_id={user_id} "
+        f"por '{current_user.username}'."
+    )
+    flash("Responsável do evento atualizado.", "success")
+    return redirect(url_for("admin_eventos"))
 
 
 # ===== Gerenciamento de Usuários =====
@@ -1836,6 +2098,32 @@ def _reuse_or_create_superadmin_account(conn, existing, superadmin_email, email_
         must_change_password=True,
     )
     return user_id, username, temp_pass
+
+
+@app.cli.command("cleanup-orphan-uploads")
+@click.option("--apply", "apply_", is_flag=True, help="Remove de fato (default: só lista).")
+@click.option("--min-age-minutes", default=60, show_default=True, type=int,
+              help="Ignora arquivos mais novos que isso (upload em andamento).")
+def cleanup_orphan_uploads(apply_, min_age_minutes):
+    """Lista (ou remove com --apply) arquivos de UPLOAD_FOLDER sem referência no banco."""
+    folder = app.config["UPLOAD_FOLDER"]
+    cutoff = time.time() - min_age_minutes * 60
+    with engine.connect() as conn:
+        referenced = repo.list_referenced_media(conn)
+    orphans = []
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path) or name in referenced:
+            continue
+        if os.path.getmtime(path) > cutoff:
+            continue
+        orphans.append(name)
+    mode = "REMOVENDO" if apply_ else "DRY-RUN (nada foi removido)"
+    click.echo(f"{mode}: {len(orphans)} arquivo(s) órfão(s) em {folder}")
+    for name in orphans:
+        click.echo(f"  {name}")
+        if apply_:
+            _remove_upload(name)
 
 
 @app.cli.command("create-superadmin")

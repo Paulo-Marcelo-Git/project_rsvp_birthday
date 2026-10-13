@@ -563,3 +563,108 @@ def test_invalidate_password_reset_tokens_marca_pendentes_como_usados():
     assert "SET used = 1" in sql
     assert "used = 0" in sql
     assert params["uid"] == 42
+
+
+# ── eventos: get_event / list_events (Fase 2) ─────────────────────────────────
+
+def test_get_event_filtra_tenant_id():
+    conn = _conn(fetchone={'id': 5, 'tenant_id': 1, 'owner_user_id': 1, 'title': 'X',
+                           'theme': 'default', 'media_url': None, 'status': 'draft'})
+    ev = repo.get_event(conn, 1, 5)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'tenant_id = :tid' in sql
+    assert _last_params(conn) == {'eid': 5, 'tid': 1}
+    assert ev['media_url'] is None and ev['owner_user_id'] == 1
+
+
+def test_get_event_inexistente_retorna_none():
+    conn = _conn(fetchone=None)
+    assert repo.get_event(conn, 1, 999) is None
+
+
+def test_list_events_sem_owner_nao_filtra_responsavel():
+    conn = _conn(all_rows=[])
+    repo.list_events(conn, 1)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'owner_user_id = :owner' not in sql
+    assert _last_params(conn) == {'tid': 1}
+
+
+def test_list_events_com_owner_filtra_responsavel_e_traz_media():
+    conn = _conn(all_rows=[])
+    repo.list_events(conn, 1, owner_user_id=2)
+    sql = str(conn.execute.call_args[0][0])
+    assert 'e.owner_user_id = :owner' in sql
+    assert 'e.media_url' in sql
+    assert _last_params(conn) == {'tid': 1, 'owner': 2}
+
+
+def test_count_media_references_soma_invitees_e_events():
+    conn = _conn(fetchone={'n': 2})
+    assert repo.count_media_references(conn, 'abc.jpg') == 2
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
+    assert _last_params(conn) == {'fn': 'abc.jpg'}
+
+
+def test_list_referenced_media_une_invitees_e_events():
+    conn = _conn(all_rows=[{'media_url': 'a.jpg'}, {'media_url': 'b.mp4'}])
+    assert repo.list_referenced_media(conn) == {'a.jpg', 'b.mp4'}
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
+
+
+# ── mídia do evento ───────────────────────────────────────────────────────────
+
+def test_get_invitee_by_token_traz_media_do_evento_com_join_por_tenant():
+    conn = _conn(fetchone={'id': 1, 'event_media_url': 'evt.jpg'})
+    row = repo.get_invitee_by_token(conn, 'tok')
+    sql = str(conn.execute.call_args[0][0])
+    assert 'e.media_url AS event_media_url' in sql
+    assert 'e.tenant_id = i.tenant_id' in sql
+    assert row['event_media_url'] == 'evt.jpg'
+
+
+def test_get_media_tenant_procura_tambem_em_events():
+    conn = _conn(fetchone={'tenant_id': 3})
+    assert repo.get_media_tenant(conn, 'evt.jpg') == 3
+    sql = str(conn.execute.call_args[0][0])
+    assert 'FROM invitees' in sql and 'FROM events' in sql
+
+
+def test_set_event_media_devolve_anterior_e_filtra_tenant():
+    conn = _conn(fetchone={'media_url': 'velha.jpg'})
+    assert repo.set_event_media(conn, 1, 5, 'nova.jpg') == 'velha.jpg'
+    update_sql = str(conn.execute.call_args_list[-1][0][0])
+    assert 'UPDATE events SET media_url' in update_sql
+    assert conn.execute.call_args_list[-1][0][1] == {'fn': 'nova.jpg', 'eid': 5, 'tid': 1}
+
+
+def test_set_event_media_evento_de_outro_tenant_levanta():
+    conn = _conn(fetchone=None)
+    with pytest.raises(LookupError):
+        repo.set_event_media(conn, 1, 5, 'nova.jpg')
+    assert conn.execute.call_count == 1   # nenhum UPDATE
+
+
+def test_set_event_owner_recusa_usuario_invalido_sem_update():
+    conn = _conn(fetchone=None)
+    assert repo.set_event_owner(conn, 1, 5, 42) is False
+    assert conn.execute.call_count == 1
+    sql = str(conn.execute.call_args[0][0])
+    assert 'tenant_id = :tid' in sql and 'is_active = 1' in sql
+    assert "role IN ('tenant_admin', 'member')" in sql
+
+
+def test_set_event_owner_valido_faz_update_filtrado_por_tenant():
+    conn = _conn(fetchone={'id': 42})
+    assert repo.set_event_owner(conn, 1, 5, 42) is True
+    assert conn.execute.call_args_list[-1][0][1] == {'uid': 42, 'eid': 5, 'tid': 1}
+
+
+def test_get_assignable_users_filtra_tenant_ativos_e_roles():
+    conn = _conn(all_rows=[])
+    repo.get_assignable_users(conn, 1)
+    sql = str(conn.execute.call_args[0][0])
+    assert "role IN ('tenant_admin', 'member')" in sql and 'is_active = 1' in sql
+    assert _last_params(conn) == {'tid': 1}

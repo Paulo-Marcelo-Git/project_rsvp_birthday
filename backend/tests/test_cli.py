@@ -129,3 +129,36 @@ def test_create_superadmin_reenvia_com_nova_senha_se_incompleto_sem_smtp(db, mon
     assert 'Nada a fazer' not in result.output
     assert 'Senha temporária' in result.output
     conn.commit.assert_called()
+
+
+# ── Task 8: cleanup-orphan-uploads ────────────────────────────────────────────
+
+import os
+import time
+
+import app as app_module
+
+
+def _prepare(upload_dir, monkeypatch):
+    for name in ('ref.jpg', 'orfao_velho.jpg', 'orfao_novo.jpg'):
+        (upload_dir / name).write_bytes(b'x')
+    old = time.time() - 2 * 3600
+    os.utime(upload_dir / 'ref.jpg', (old, old))
+    os.utime(upload_dir / 'orfao_velho.jpg', (old, old))
+    # orfao_novo.jpg fica com mtime de agora (upload "em andamento")
+    monkeypatch.setattr(app_module.repo, 'list_referenced_media', lambda conn: {'ref.jpg'})
+
+
+def test_cleanup_dry_run_lista_e_nao_apaga(db, upload_dir, monkeypatch):
+    _prepare(upload_dir, monkeypatch)
+    result = flask_app.test_cli_runner().invoke(args=['cleanup-orphan-uploads'])
+    assert 'DRY-RUN' in result.output
+    assert 'orfao_velho.jpg' in result.output
+    assert 'orfao_novo.jpg' not in result.output
+    assert sorted(p.name for p in upload_dir.iterdir()) == ['orfao_novo.jpg', 'orfao_velho.jpg', 'ref.jpg']
+
+
+def test_cleanup_apply_apaga_so_orfaos_antigos(db, upload_dir, monkeypatch):
+    _prepare(upload_dir, monkeypatch)
+    flask_app.test_cli_runner().invoke(args=['cleanup-orphan-uploads', '--apply'])
+    assert sorted(p.name for p in upload_dir.iterdir()) == ['orfao_novo.jpg', 'ref.jpg']

@@ -1,6 +1,7 @@
 from tests.conftest import (
     qresult, setup_db,
     GUEST_ROW, STATS_ROW, DEFAULT_EVENT_ROW, TEXTS_ROW,
+    respostas_db, EVENT_ROW,
 )
 
 _LIMITS_FREE = {'max_events': 2, 'max_invitees': 50, 'max_members': 1}
@@ -12,17 +13,8 @@ _COUNT_ONE   = {'n': 1}    # at max_members for free plan
 
 
 def _respostas_db(db, guests=None, limits=None):
-    """Configura as 7 queries que respostas() executa via repo (sem event_id_param)."""
-    return setup_db(
-        db,
-        qresult(all_rows=guests or []),                    # repo.get_invitees
-        qresult(fetchone=STATS_ROW),                        # repo.count_invitees_by_response
-        qresult(fetchone=DEFAULT_EVENT_ROW),                # repo.get_default_event_id
-        qresult(fetchone={'theme': 'default'}),             # repo.get_event_theme
-        qresult(fetchone=TEXTS_ROW),                        # repo.get_event_texts
-        qresult(fetchone=limits or _LIMITS_NONE),           # repo.get_plan_limits
-        qresult(all_rows=[]),                               # repo.list_events
-    )
+    """Mocka as queries de GET /admin/respostas?event_id=1."""
+    return respostas_db(db, guests=guests, limits=limits)
 
 
 # ── respostas ─────────────────────────────────────────────────────────────────
@@ -36,7 +28,7 @@ def test_respostas_exige_login(client):
 def test_respostas_carrega_para_admin(admin_client, db):
     _respostas_db(db)
 
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
 
     assert resp.status_code == 200
 
@@ -44,7 +36,7 @@ def test_respostas_carrega_para_admin(admin_client, db):
 def test_respostas_exibe_convidado(admin_client, db):
     _respostas_db(db, guests=[GUEST_ROW])
 
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
 
     assert resp.status_code == 200
     assert b'Maria Silva' in resp.data
@@ -53,7 +45,7 @@ def test_respostas_exibe_convidado(admin_client, db):
 def test_respostas_busca_por_nome(admin_client, db):
     _respostas_db(db)
 
-    resp = admin_client.get('/admin/respostas?search=maria')
+    resp = admin_client.get('/admin/respostas?event_id=1&search=maria')
 
     assert resp.status_code == 200
 
@@ -61,7 +53,7 @@ def test_respostas_busca_por_nome(admin_client, db):
 def test_respostas_esconde_botao_usuarios_free(admin_client, db):
     """Free plan (max_members=1): botão Usuários NÃO aparece no painel principal."""
     _respostas_db(db, limits=_LIMITS_FREE)
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
     assert resp.status_code == 200
     assert b'/admin/usuarios' not in resp.data
 
@@ -69,7 +61,7 @@ def test_respostas_esconde_botao_usuarios_free(admin_client, db):
 def test_respostas_mostra_botao_usuarios_ilimitado(admin_client, db):
     """Business plan (max_members=None): botão Usuários aparece no painel principal."""
     _respostas_db(db, limits=_LIMITS_NONE)
-    resp = admin_client.get('/admin/respostas')
+    resp = admin_client.get('/admin/respostas?event_id=1')
     assert resp.status_code == 200
     assert b'/admin/usuarios' in resp.data
 
@@ -80,6 +72,7 @@ def test_add_convidado_cria_registro(admin_client, db):
     conn = setup_db(db,
                     qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),   # get_default_event_id
+                    qresult(fetchone=EVENT_ROW),            # get_event do fallback
                     qresult(fetchone=_LIMITS_FREE),         # get_plan_limits
                     qresult(fetchone=_COUNT_ZERO),          # count_invitees_for_event
                     qresult())                              # add_invitee
@@ -91,7 +84,7 @@ def test_add_convidado_cria_registro(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 5
+    assert conn.execute.call_count == 6
     first_sql = str(conn.execute.call_args_list[0][0][0])
     assert "FOR UPDATE" in first_sql
     conn.commit.assert_called_once()
@@ -102,6 +95,7 @@ def test_add_convidado_no_limite_nao_cria(admin_client, db):
     conn = setup_db(db,
                     qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),  # get_default_event_id
+                    qresult(fetchone=EVENT_ROW),           # get_event do fallback
                     qresult(fetchone=_LIMITS_FREE),        # get_plan_limits (max=50)
                     qresult(fetchone=_COUNT_50))           # count_invitees_for_event (=50)
 
@@ -112,7 +106,7 @@ def test_add_convidado_no_limite_nao_cria(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 4   # lock + event_id + limits + count; sem INSERT
+    assert conn.execute.call_count == 5   # lock + event_id + get_event + limits + count; sem INSERT
     conn.commit.assert_not_called()
 
 
@@ -121,6 +115,7 @@ def test_add_convidado_ilimitado_cria(admin_client, db):
     conn = setup_db(db,
                     qresult(),                              # lock_tenant_for_update FOR UPDATE
                     qresult(fetchone=DEFAULT_EVENT_ROW),  # get_default_event_id
+                    qresult(fetchone=EVENT_ROW),           # get_event do fallback
                     qresult(fetchone=_LIMITS_NONE),        # get_plan_limits (unlimited)
                     qresult(fetchone={'n': 9999}),         # count_invitees_for_event
                     qresult())                             # add_invitee
@@ -132,7 +127,7 @@ def test_add_convidado_ilimitado_cria(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 5
+    assert conn.execute.call_count == 6
     conn.commit.assert_called_once()
 
 
@@ -140,7 +135,7 @@ def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
     """Convidado deve ir para o evento indicado no form, não para o mais recente do tenant."""
     conn = setup_db(db,
                     qresult(),                      # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone={'id': 5, 'owner_user_id': 1}),   # valida event_id=5 pertence ao tenant
+                    qresult(fetchone={**EVENT_ROW, 'id': 5, 'owner_user_id': 1}),   # valida event_id=5 pertence ao tenant
                     qresult(fetchone=_LIMITS_FREE),
                     qresult(fetchone=_COUNT_ZERO),
                     qresult())                      # add_invitee
@@ -160,15 +155,16 @@ def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
     conn.commit.assert_called_once()
 
 
-def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
-    """event_id que não pertence ao tenant não deve ser aceito — cai no evento padrão."""
+def _flashes(client):
+    with client.session_transaction() as sess:
+        return [m for _, m in sess.get('_flashes', [])]
+
+
+def test_add_convidado_event_id_de_outro_tenant_nao_insere(admin_client, db):
+    """event_id que não pertence ao tenant é recusado — nada é inserido, sem fallback."""
     conn = setup_db(db,
                     qresult(),                        # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone=None),          # event_id=999 não pertence ao tenant
-                    qresult(fetchone=DEFAULT_EVENT_ROW),  # fallback: get_default_event_id
-                    qresult(fetchone=_LIMITS_FREE),
-                    qresult(fetchone=_COUNT_ZERO),
-                    qresult())                        # add_invitee
+                    qresult(fetchone=None))           # event_id=999 não pertence ao tenant
 
     resp = admin_client.post('/admin/convidados/add', data={
         'name': 'Convidado Tentativa Invasao',
@@ -178,23 +174,18 @@ def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 6
-    insert_params = conn.execute.call_args_list[-1][0][1]
-    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
-    conn.commit.assert_called_once()
+    assert resp.headers['Location'].endswith('/admin/respostas')
+    assert conn.execute.call_count == 2   # lock + get_event; sem fallback nem INSERT
+    conn.commit.assert_not_called()
+    assert 'Evento não encontrado ou sem permissão.' in _flashes(admin_client)
 
 
-def test_add_convidado_member_com_event_id_de_outro_member_usa_default_proprio(member_client, db):
+def test_add_convidado_member_com_event_id_de_outro_member_recusa(member_client, db):
     """IDOR (item #5): member não pode usar o event_id de outro member do
-    mesmo tenant — deve cair no fallback filtrado pelo PRÓPRIO dono, não no
-    evento mais recente do tenant inteiro."""
+    mesmo tenant — recusa sem inserir (nem no próprio evento padrão)."""
     conn = setup_db(db,
                     qresult(),                                          # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone={'id': 7, 'owner_user_id': 99}),  # evento pertence a outro member
-                    qresult(fetchone=DEFAULT_EVENT_ROW),                # fallback: get_default_event_id(owner=2)
-                    qresult(fetchone=_LIMITS_FREE),
-                    qresult(fetchone=_COUNT_ZERO),
-                    qresult())                                          # add_invitee
+                    qresult(fetchone={**EVENT_ROW, 'id': 7, 'owner_user_id': 99}))  # evento de outro member
 
     resp = member_client.post('/admin/convidados/add', data={
         'name': 'Convidado Invasao Member',
@@ -204,16 +195,17 @@ def test_add_convidado_member_com_event_id_de_outro_member_usa_default_proprio(m
     })
 
     assert resp.status_code == 302
-    insert_params = conn.execute.call_args_list[-1][0][1]
-    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
-    conn.commit.assert_called_once()
+    assert resp.headers['Location'].endswith('/admin/respostas')
+    assert conn.execute.call_count == 2
+    conn.commit.assert_not_called()
+    assert 'Evento não encontrado ou sem permissão.' in _flashes(member_client)
 
 
 def test_add_convidado_member_com_event_id_proprio_aceita(member_client, db):
     """Member usando o próprio event_id (owner_user_id == db_id) é aceito normalmente."""
     conn = setup_db(db,
                     qresult(),                                        # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone={'id': 7, 'owner_user_id': 2}),  # evento pertence ao próprio member (db_id=2)
+                    qresult(fetchone={**EVENT_ROW, 'id': 7, 'owner_user_id': 2}),  # evento pertence ao próprio member (db_id=2)
                     qresult(fetchone=_LIMITS_FREE),
                     qresult(fetchone=_COUNT_ZERO),
                     qresult())
@@ -231,6 +223,34 @@ def test_add_convidado_member_com_event_id_proprio_aceita(member_client, db):
     conn.commit.assert_called_once()
 
 
+def test_add_convidado_evento_sem_imagem_e_bloqueado(admin_client, db):
+    conn = setup_db(db,
+                    qresult(),                                                # lock
+                    qresult(fetchone={**EVENT_ROW, 'id': 5, 'media_url': None}))  # get_event
+    resp = admin_client.post('/admin/convidados/add', data={'name': 'Ana', 'event_id': '5'})
+    assert resp.status_code == 302
+    assert 'event_id=5' in resp.headers['Location']
+    assert conn.execute.call_count == 2
+    conn.commit.assert_not_called()
+    with admin_client.session_transaction() as sess:
+        msgs = [m for _, m in sess.get('_flashes', [])]
+    assert 'Envie a imagem do convite antes de adicionar convidados.' in msgs
+
+
+def test_respostas_evento_sem_imagem_desabilita_botao_adicionar(admin_client, db):
+    respostas_db(db, events=[{**EVENT_ROW, 'media_url': None}])
+    body = admin_client.get('/admin/respostas?event_id=1').data.decode('utf-8')
+    assert 'id="btn-add-convidado"' in body
+    assert 'disabled' in body.split('id="btn-add-convidado"')[1].split('>')[0]
+    assert 'Envie a imagem do convite para poder adicionar convidados.' in body
+
+
+def test_respostas_evento_com_imagem_habilita_botao_adicionar(admin_client, db):
+    respostas_db(db)
+    body = admin_client.get('/admin/respostas?event_id=1').data.decode('utf-8')
+    assert 'disabled' not in body.split('id="btn-add-convidado"')[1].split('>')[0]
+
+
 def test_add_convidado_sem_nome_nao_salva(admin_client, db):
     resp = admin_client.post('/admin/convidados/add', data={'name': ''})
 
@@ -242,7 +262,7 @@ def test_add_convidado_sem_nome_nao_salva(admin_client, db):
 # ── excluir convidado ─────────────────────────────────────────────────────────
 
 def test_delete_convidado_remove_registro(admin_client, db):
-    guest = {'name': 'Ana', 'media_url': None, 'event_owner_user_id': None}
+    guest = {'name': 'Ana', 'media_url': None, 'event_owner_user_id': None, 'event_id': 1}
     setup_db(db,
              qresult(fetchone=guest),  # repo.get_invitee
              qresult())                 # repo.delete_invitee
@@ -263,7 +283,7 @@ def test_delete_convidado_inexistente_retorna_404(admin_client, db):
 # ── editar convidado ──────────────────────────────────────────────────────────
 
 def test_edit_convidado_atualiza_registro(admin_client, db):
-    guest = {'event_owner_user_id': None}
+    guest = {'event_owner_user_id': None, 'event_id': 1, 'media_url': None}
     conn = setup_db(db,
                     qresult(fetchone=guest),  # repo.get_invitee
                     qresult())                 # repo.update_invitee
@@ -352,3 +372,21 @@ def test_exportar_xlsx_retorna_arquivo(admin_client, db):
 
     assert resp.status_code == 200
     assert 'spreadsheetml' in resp.content_type
+
+
+def test_edit_convidado_volta_para_o_evento_do_convidado(admin_client, db):
+    setup_db(db,
+             qresult(fetchone={**GUEST_ROW, 'event_id': 4}),  # repo.get_invitee
+             qresult())                                        # repo.update_invitee
+    resp = admin_client.post('/admin/convidados/1/edit', data={'name': 'Maria', 'response': ''})
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']
+
+
+def test_delete_convidado_volta_para_o_evento_do_convidado(admin_client, db):
+    setup_db(db,
+             qresult(fetchone={**GUEST_ROW, 'event_id': 4}),  # repo.get_invitee
+             qresult())                                        # repo.delete_invitee
+    resp = admin_client.post('/admin/convidados/1/delete')
+    assert resp.status_code == 302
+    assert 'event_id=4' in resp.headers['Location']

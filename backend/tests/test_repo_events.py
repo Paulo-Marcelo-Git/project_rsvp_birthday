@@ -95,7 +95,7 @@ def tenant_factory(db_conn):
 
     def _factory(name="TestTenant"):
         tenant_id = repo.create_tenant(db_conn, name)
-        event_id = repo.create_default_event(db_conn, tenant_id, name)
+        event_id = repo.create_event(db_conn, tenant_id, f"Festa de {name}")
         db_conn.commit()
         created.append(tenant_id)
         return {"tenant_id": tenant_id, "event_id": event_id}
@@ -163,3 +163,79 @@ def test_set_event_theme_rejects_invalid(db_conn, tenant_factory):
     t = tenant_factory(name="TInvalid")
     with pytest.raises(ValueError):
         repo.set_event_theme(db_conn, t["tenant_id"], t["event_id"], "purple")
+
+
+@pytest.mark.integration
+def test_set_event_media_isolado_por_tenant(db_conn, tenant_factory):
+    t1 = tenant_factory(name="TMedia1")
+    t2 = tenant_factory(name="TMedia2")
+    assert repo.set_event_media(db_conn, t1["tenant_id"], t1["event_id"], "a1.jpg") is None
+    db_conn.commit()
+    assert repo.set_event_media(db_conn, t1["tenant_id"], t1["event_id"], "a2.jpg") == "a1.jpg"
+    db_conn.commit()
+    with pytest.raises(LookupError):
+        repo.set_event_media(db_conn, t1["tenant_id"], t2["event_id"], "x.jpg")
+    db_conn.rollback()
+    assert repo.get_event(db_conn, t2["tenant_id"], t2["event_id"])["media_url"] is None
+    assert repo.get_media_tenant(db_conn, "a2.jpg") == t1["tenant_id"]
+
+
+@pytest.mark.integration
+def test_set_event_owner_so_aceita_usuario_ativo_do_mesmo_tenant(db_conn, tenant_factory):
+    from werkzeug.security import generate_password_hash
+    t1 = tenant_factory(name="TOwner1")
+    t2 = tenant_factory(name="TOwner2")
+    pw = generate_password_hash("x" * 12)
+    m1 = repo.add_user(db_conn, t1["tenant_id"], "m1owner", "m1owner@example.com", pw, role="member")
+    m2 = repo.add_user(db_conn, t2["tenant_id"], "m2owner", "m2owner@example.com", pw, role="member")
+    db_conn.execute(text("UPDATE users SET is_active = 1 WHERE id IN (:a, :b)"), {"a": m1, "b": m2})
+    db_conn.commit()
+
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m2) is False   # outro tenant
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m1) is True
+    db_conn.commit()
+    assert repo.get_event(db_conn, t1["tenant_id"], t1["event_id"])["owner_user_id"] == m1
+    assert [e["id"] for e in repo.list_events(db_conn, t1["tenant_id"], owner_user_id=m1)] == [t1["event_id"]]
+
+    db_conn.execute(text("UPDATE users SET is_active = 0 WHERE id = :a"), {"a": m1})
+    db_conn.commit()
+    assert repo.set_event_owner(db_conn, t1["tenant_id"], t1["event_id"], m1) is False   # inativo
+
+
+@pytest.mark.integration
+def test_set_event_owner_recusa_super_admin_do_tenant_reservado(db_conn, tenant_factory):
+    from werkzeug.security import generate_password_hash
+    t = tenant_factory(name="TOwnerSA1")
+    sys_tenant = db_conn.execute(
+        text("SELECT id FROM tenants WHERE name = 'Comemore+ System'")
+    ).mappings().fetchone()
+    assert sys_tenant, "migration 0006 deve criar o tenant reservado"
+    sa_id = repo.add_user(db_conn, sys_tenant["id"], "sa_g3_test", "sa_g3_test@example.com",
+                          generate_password_hash("x" * 12), role="super_admin")
+    try:
+        db_conn.execute(text("UPDATE users SET is_active = 1 WHERE id = :a"), {"a": sa_id})
+        db_conn.commit()
+        before = repo.get_event(db_conn, t["tenant_id"], t["event_id"])["owner_user_id"]
+
+        assert repo.set_event_owner(db_conn, t["tenant_id"], t["event_id"], sa_id) is False
+        db_conn.commit()
+        assert repo.get_event(db_conn, t["tenant_id"], t["event_id"])["owner_user_id"] == before
+    finally:
+        db_conn.execute(text("DELETE FROM users WHERE id = :a"), {"a": sa_id})
+        db_conn.commit()
+
+
+@pytest.mark.integration
+def test_set_event_owner_recusa_super_admin_no_proprio_tenant(db_conn, tenant_factory):
+    from werkzeug.security import generate_password_hash
+    t = tenant_factory(name="TOwnerSA2")
+    # cleanup do usuário é feito pelo DELETE FROM users WHERE tenant_id do tenant_factory
+    sa_id = repo.add_user(db_conn, t["tenant_id"], "sa_same_t", "sa_same_t@example.com",
+                          generate_password_hash("x" * 12), role="super_admin")
+    db_conn.execute(text("UPDATE users SET is_active = 1 WHERE id = :a"), {"a": sa_id})
+    db_conn.commit()
+    before = repo.get_event(db_conn, t["tenant_id"], t["event_id"])["owner_user_id"]
+
+    assert repo.set_event_owner(db_conn, t["tenant_id"], t["event_id"], sa_id) is False
+    db_conn.commit()
+    assert repo.get_event(db_conn, t["tenant_id"], t["event_id"])["owner_user_id"] == before
