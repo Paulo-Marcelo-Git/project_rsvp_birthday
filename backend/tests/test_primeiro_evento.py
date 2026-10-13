@@ -70,3 +70,29 @@ def test_primeiro_evento_post_sem_imagem_reexibe_com_erro(admin_client, db, monk
 
 def test_primeiro_evento_member_403(member_client, db):
     assert member_client.get('/admin/primeiro-evento').status_code == 403
+
+
+# ── guarda de 50MB no navegador (nginx devolve 413 cru acima de 55MB) ─────────
+
+_UPLOAD_GUARD_MARKER = 'data-max-upload-bytes="52428800"'
+
+
+def test_upload_guard_presente_em_primeiro_evento(admin_client, db):
+    setup_db(db, qresult(fetchone={'n': 0}))
+    body = admin_client.get('/admin/primeiro-evento').data.decode('utf-8')
+    assert _UPLOAD_GUARD_MARKER in body
+    assert 'Arquivo muito grande. O limite é 50MB.' in body
+
+
+def test_upload_guard_presente_em_admin_eventos(admin_client, db):
+    from tests.test_routes_eventos import _eventos_db
+    _eventos_db(db)
+    body = admin_client.get('/admin/eventos').data.decode('utf-8')
+    assert _UPLOAD_GUARD_MARKER in body
+
+
+def test_upload_guard_presente_em_respostas(admin_client, db):
+    from tests.conftest import respostas_db
+    respostas_db(db)
+    body = admin_client.get('/admin/respostas?event_id=1').data.decode('utf-8')
+    assert _UPLOAD_GUARD_MARKER in body
