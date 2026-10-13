@@ -1140,8 +1140,11 @@ def add_convidado():
         event = None
         if event_id_form:
             candidate = repo.get_event(conn, tid, event_id_form)
-            if _can_manage_event(candidate):
-                event = candidate
+            if not _can_manage_event(candidate):
+                # event_id explícito sem permissão: recusa, não cai em outro evento.
+                flash("Evento não encontrado ou sem permissão.", "danger")
+                return redirect(url_for("respostas"))
+            event = candidate
         if event is None:
             owner_filter = None if current_user.is_tenant_admin else current_user.db_id
             fallback_id = repo.get_default_event_id(conn, tid, owner_user_id=owner_filter)

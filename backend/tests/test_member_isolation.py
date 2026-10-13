@@ -89,3 +89,17 @@ def test_member_ve_controles_de_textos_e_tema_no_proprio_evento(member_client, d
     body = member_client.get('/admin/respostas?event_id=7').data.decode('utf-8')
     assert 'data-bs-target="#modalTextos"' in body
     assert 'name="theme"' in body
+
+
+def test_member_add_convidado_evento_alheio_nao_insere(member_client, db, monkeypatch):
+    conn = setup_db(db, qresult())  # lock_tenant_for_update
+    _stub_event(monkeypatch, ALHEIO)
+    monkeypatch.setattr(app_module.repo, 'add_invitee', lambda *a, **k: pytest.fail('inseriu em evento alheio'))
+    monkeypatch.setattr(app_module.repo, 'get_default_event_id', lambda *a, **k: pytest.fail('caiu no fallback'))
+    resp = member_client.post('/admin/convidados/add', data={'event_id': '8', 'name': 'X'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/respostas')
+    conn.commit.assert_not_called()
+    with member_client.session_transaction() as sess:
+        msgs = [m for _, m in sess.get('_flashes', [])]
+    assert 'Evento não encontrado ou sem permissão.' in msgs

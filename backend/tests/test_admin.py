@@ -155,16 +155,16 @@ def test_add_convidado_usa_event_id_do_form_quando_valido(admin_client, db):
     conn.commit.assert_called_once()
 
 
-def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
-    """event_id que não pertence ao tenant não deve ser aceito — cai no evento padrão."""
+def _flashes(client):
+    with client.session_transaction() as sess:
+        return [m for _, m in sess.get('_flashes', [])]
+
+
+def test_add_convidado_event_id_de_outro_tenant_nao_insere(admin_client, db):
+    """event_id que não pertence ao tenant é recusado — nada é inserido, sem fallback."""
     conn = setup_db(db,
                     qresult(),                        # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone=None),          # event_id=999 não pertence ao tenant
-                    qresult(fetchone=DEFAULT_EVENT_ROW),  # fallback: get_default_event_id
-                    qresult(fetchone=EVENT_ROW),          # get_event do fallback
-                    qresult(fetchone=_LIMITS_FREE),
-                    qresult(fetchone=_COUNT_ZERO),
-                    qresult())                        # add_invitee
+                    qresult(fetchone=None))           # event_id=999 não pertence ao tenant
 
     resp = admin_client.post('/admin/convidados/add', data={
         'name': 'Convidado Tentativa Invasao',
@@ -174,24 +174,18 @@ def test_add_convidado_event_id_de_outro_tenant_usa_default(admin_client, db):
     })
 
     assert resp.status_code == 302
-    assert conn.execute.call_count == 7
-    insert_params = conn.execute.call_args_list[-1][0][1]
-    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
-    conn.commit.assert_called_once()
+    assert resp.headers['Location'].endswith('/admin/respostas')
+    assert conn.execute.call_count == 2   # lock + get_event; sem fallback nem INSERT
+    conn.commit.assert_not_called()
+    assert 'Evento não encontrado ou sem permissão.' in _flashes(admin_client)
 
 
-def test_add_convidado_member_com_event_id_de_outro_member_usa_default_proprio(member_client, db):
+def test_add_convidado_member_com_event_id_de_outro_member_recusa(member_client, db):
     """IDOR (item #5): member não pode usar o event_id de outro member do
-    mesmo tenant — deve cair no fallback filtrado pelo PRÓPRIO dono, não no
-    evento mais recente do tenant inteiro."""
+    mesmo tenant — recusa sem inserir (nem no próprio evento padrão)."""
     conn = setup_db(db,
                     qresult(),                                          # lock_tenant_for_update FOR UPDATE
-                    qresult(fetchone={**EVENT_ROW, 'id': 7, 'owner_user_id': 99}),  # evento pertence a outro member
-                    qresult(fetchone=DEFAULT_EVENT_ROW),                # fallback: get_default_event_id(owner=2)
-                    qresult(fetchone={**EVENT_ROW, 'owner_user_id': 2}),  # get_event do fallback
-                    qresult(fetchone=_LIMITS_FREE),
-                    qresult(fetchone=_COUNT_ZERO),
-                    qresult())                                          # add_invitee
+                    qresult(fetchone={**EVENT_ROW, 'id': 7, 'owner_user_id': 99}))  # evento de outro member
 
     resp = member_client.post('/admin/convidados/add', data={
         'name': 'Convidado Invasao Member',
@@ -201,9 +195,10 @@ def test_add_convidado_member_com_event_id_de_outro_member_usa_default_proprio(m
     })
 
     assert resp.status_code == 302
-    insert_params = conn.execute.call_args_list[-1][0][1]
-    assert insert_params['eid'] == DEFAULT_EVENT_ROW['id']
-    conn.commit.assert_called_once()
+    assert resp.headers['Location'].endswith('/admin/respostas')
+    assert conn.execute.call_count == 2
+    conn.commit.assert_not_called()
+    assert 'Evento não encontrado ou sem permissão.' in _flashes(member_client)
 
 
 def test_add_convidado_member_com_event_id_proprio_aceita(member_client, db):
