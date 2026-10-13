@@ -408,6 +408,20 @@ def test_definir_responsavel_usuario_invalido_nao_comita(admin_client, db, monke
     conn.commit.assert_not_called()
 
 
+def test_definir_responsavel_usuario_invalido_com_repo_real(admin_client, db, monkeypatch):
+    import app as app_module
+    conn = setup_db(db, qresult(fetchone=None))   # SELECT de validação do usuário → sem linha
+    monkeypatch.setattr(app_module.repo, 'get_event', lambda c, t, e: _EVENT_ROW)
+    resp = admin_client.post('/admin/eventos/1/responsavel', data={'owner_user_id': '999'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/admin/eventos')
+    with admin_client.session_transaction() as sess:
+        flashes = [m for _, m in sess.get('_flashes', [])]
+    assert 'Usuário inválido para responsável do evento.' in flashes
+    conn.commit.assert_not_called()
+    assert not any('UPDATE events' in str(c[0][0]) for c in conn.execute.call_args_list)
+
+
 def test_definir_responsavel_evento_de_outro_tenant_404(admin_client, db, monkeypatch):
     import app as app_module
     setup_db(db)
