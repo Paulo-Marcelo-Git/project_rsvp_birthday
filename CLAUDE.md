@@ -22,6 +22,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | **Fase 4** | ✅ Concluída | `plan_limits` + migration 0004, enforcement max_invitees/members, botão Usuários condicional, login bloqueado para tenant suspenso, painel `/superadmin` com set_plan/suspend/reactivate, `superadmin_required` com check de config inválida |
 | **Fase 5** | ✅ Concluída | Flask-Limiter (Redis/memory storage), rate limiting em 5 rotas (login/signup/forgot/invite), /termos + /privacidade (LGPD), aceite obrigatório no signup + `accepted_terms_at`, migration 0005, fix `datetime.utcnow()`, supressão warning RQ serializer, integration test fluxo completo |
 | **Deploy** | ✅ Concluída | Live em produção na VPS Hostinger (`https://zapbyte.com.br`), HTTPS via Certbot, CI/CD GitHub Actions → SSH funcionando (deploy automático a cada push em `main`). Fix de bug real: cron do serviço `backup` não herdava env vars do container (`DB_NAME: unbound variable`), backups automáticos silenciosamente quebrados — corrigido gravando `VAR=valor` no topo do crontab |
+| **Imagem por evento + member** | ✅ Concluída | Imagem padrão obrigatória por evento (convidado pode ter a própria), signup sem evento + /admin/primeiro-evento, responsável por evento (member funcional), backup de uploads, validação de conteúdo + nosniff, limpeza de órfãos (CLI cleanup-orphan-uploads), fixes: textos no evento certo, respostas por evento, 413 |
 
 ---
 
@@ -45,7 +46,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Flask-Limiter 3.8.0 — rate limiting com Redis storage + fallback memory://
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
-- pytest (179 unit tests + 45 integration tests deselected sem MySQL real)
+- pytest (349 unit tests + 48 integration tests deselected sem MySQL real)
 
 ---
 
@@ -62,17 +63,19 @@ project_rsvp_birthday/
 │   │   └── versions/
 │   │       ├── 0001_initial_saas_schema.py
 │   │       ├── 0002_seed_default_tenant.py
-│   │       ├── 0003_email_verification_tokens.py
+│   │       ├── 0003_add_email_verification_tokens.py
 │   │       ├── 0004_plan_limits.py
 │   │       ├── 0005_accepted_terms_at.py
-│   │       └── 0006_super_admin_role.py
+│   │       ├── 0006_super_admin_role.py
+│   │       ├── 0007_trial_expiration_backfill.py
+│   │       └── 0008_tenant_suspended_reason.py
 │   ├── Dockerfile
 │   ├── entrypoint.sh        # Roda `alembic upgrade head` antes do gunicorn (*.sh text eol=lf via .gitattributes)
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 179 unit tests + integration (marcados @pytest.mark.integration)
-├── backup/                  # Dockerfile + backup.sh + restore.sh (mysqldump diário via cron)
+│   └── tests/               # pytest — 349 unit tests + 48 integration (marcados @pytest.mark.integration)
+├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh (mysqldump + tar.gz dos uploads, diário via cron)
 ├── docs/superpowers/plans/  # Histórico de planos por sub-fase
 ├── .github/workflows/deploy.yml
 ├── .gitattributes           # *.sh text eol=lf — LF forçado em scripts de boot
@@ -89,7 +92,7 @@ project_rsvp_birthday/
 
 - **`tenants`** — conta do cliente. Raiz da árvore (apagar cascateia tudo = LGPD).
 - **`users`** — `tenant_id` + `role` (`tenant_admin`/`member`/`super_admin`). `email` UNIQUE global; `username` UNIQUE por tenant. Conta `super_admin` mora no tenant reservado `Comemore+ System` (migration 0006), nunca num tenant de cliente real.
-- **`events`** — núcleo do produto. N eventos por tenant. Textos do convite por evento. `slug` aleatório.
+- **`events`** — núcleo do produto. N eventos por tenant. Textos do convite por evento. `slug` aleatório. `media_url` = imagem padrão do convite (obrigatória na criação); `owner_user_id` = responsável (member gerencia só os seus).
 - **`invitees`** — FK para `events` + `tenant_id` desnormalizado (isolamento barato sem JOIN). `token` UNIQUE global.
 - **`password_reset_tokens`** — TTL 1h, flag `used`.
 - **`email_verification_tokens`** — TTL 24h, flag `used`. Usuário nasce `is_active=0`, ativa via link.
@@ -101,8 +104,8 @@ project_rsvp_birthday/
 ## Auth
 
 - Login por **email-only** (UNIQUE global resolve o tenant). Sem fallback de username.
-- Roles: `tenant_admin` (gerencia o tenant) e `member` (vê só os eventos que criou).
-- Signup cria `tenant` + `tenant_admin` + evento default numa **transação atômica** (rollback total se falhar).
+- Roles: `tenant_admin` (gerencia o tenant) e `member` (gerencia os eventos dos quais é responsável: convidados, imagem, textos, tema; só o tenant_admin cria eventos e define o responsável).
+- Signup cria `tenant` + `tenant_admin` (sem evento) numa **transação atômica** (rollback total se falhar); o primeiro evento é criado em `/admin/primeiro-evento`.
 - Novos membros: senha temporária aleatória (`secrets.token_urlsafe(12)`) + email de convite (TTL 72h).
 - `SKIP_EMAIL_VERIFICATION=true` (dev only, default OFF) — ausência da var = verificação obrigatória.
 - Sem `AdminUser` por env var, sem `DEFAULT_PASSWORD` hardcoded.
