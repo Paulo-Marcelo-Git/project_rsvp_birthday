@@ -33,6 +33,12 @@ services:
     build: ./backend
     container_name: rsvp_backend
     restart: always
+    # stdout do container (docker logs): limite por tamanho; sem dado pessoal (PR-0)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     user: "1002:1002"
     env_file:
       - .env
@@ -59,6 +65,11 @@ services:
     build: ./backend
     container_name: rsvp_worker
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env
     environment:
@@ -117,10 +128,14 @@ services:
     environment:
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      LOG_DIR: /logs
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-5}
     volumes:
       - backup_data:/backups
       # somente leitura: o backup nunca altera os uploads de produção
       - uploads_data:/uploads:ro
+      # leitura e escrita: purge-logs.sh apaga os logs diários antigos do app
+      - ./logs:/logs
     depends_on:
       db:
         condition: service_healthy
