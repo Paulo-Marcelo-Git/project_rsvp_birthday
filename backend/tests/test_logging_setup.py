@@ -47,6 +47,11 @@ def test_import_do_app_configura_arquivo_diario_e_stdout(tmp_path):
     assert "joao@exemplo.com" not in out.stderr and "TOKSUB1" not in out.stderr
 
 
+def test_flask_limiter_nao_loga_ip_em_info():
+    """O limite estourado é logado em INFO com a chave (IP); o logger fica em WARNING."""
+    assert logging.getLogger("flask-limiter").getEffectiveLevel() == logging.WARNING
+
+
 def test_engine_esconde_parametros_sql_em_excecoes():
     """create_engine(hide_parameters=True): IntegrityError/OperationalError do
     banco não carregam nome/e-mail/telefone/observação no texto."""

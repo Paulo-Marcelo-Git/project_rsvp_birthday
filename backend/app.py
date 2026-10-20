@@ -58,6 +58,8 @@ with open(os.path.join(os.path.dirname(__file__), "..", "VERSION")) as _f:
 # mais de LOG_RETENTION_DAYS dias é do purge-logs.sh no container backup.
 log_path = os.getenv("LOG_FILE", "logs/app.log")
 logging.basicConfig(level=logging.INFO, handlers=build_log_handlers(log_path))
+# Flask-Limiter loga em INFO "ratelimit ... (<IP do cliente>) exceeded": IP é dado pessoal (LGPD).
+logging.getLogger("flask-limiter").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
