@@ -399,7 +399,7 @@ def test_check_tenant_access_suspenso_bloqueia(monkeypatch):
                                              'trial_ends_at': None, 'trial_expired': False,
                                              'trial_days_remaining': None, 'suspended_reason': 'manual'})
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is True
 
 
@@ -411,7 +411,7 @@ def test_check_tenant_access_trial_primeiro_login_nao_bloqueia(monkeypatch):
                                              'trial_days_remaining': None, 'suspended_reason': None})
     monkeypatch.setattr(app_module.repo, 'start_tenant_trial', lambda conn, tid: ends_at)
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is False
         flashes = list(get_flashed_messages(category_filter=["trial_modal"]))
         assert any('14 dias' in m for m in flashes)
@@ -424,7 +424,7 @@ def test_check_tenant_access_trial_expirado_bloqueia(monkeypatch):
                                              'trial_days_remaining': -900, 'suspended_reason': None})
     monkeypatch.setattr(app_module.repo, 'set_tenant_status', lambda *a, **kw: None)
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is True
 
 
@@ -434,7 +434,7 @@ def test_check_tenant_access_pro_nunca_bloqueia_mesmo_expirado(monkeypatch):
                                              'trial_ends_at': datetime(2020, 1, 1), 'trial_expired': True,
                                              'trial_days_remaining': -900, 'suspended_reason': None})
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is False
         flashes = list(get_flashed_messages(category_filter=["trial_modal"]))
         assert flashes == []
@@ -446,7 +446,7 @@ def test_check_tenant_access_ativo_nao_bloqueia(monkeypatch):
                                              'trial_ends_at': None, 'trial_expired': False,
                                              'trial_days_remaining': None, 'suspended_reason': None})
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is False
 
 
@@ -459,7 +459,7 @@ def test_check_tenant_access_status_desconhecido_bloqueia(monkeypatch):
                                              'trial_ends_at': None, 'trial_expired': False,
                                              'trial_days_remaining': None, 'suspended_reason': None})
     with app_module.app.test_request_context():
-        blocked = app_module._check_tenant_access(MagicMock(), 1, 'x@test.com')
+        blocked = app_module._check_tenant_access(MagicMock(), 1, 42)
         assert blocked is True
 
 

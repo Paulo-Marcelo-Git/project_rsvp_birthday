@@ -45,7 +45,7 @@ from werkzeug.utils import secure_filename
 
 import repo
 import tasks
-from log_utils import build_log_handlers
+from log_utils import build_log_handlers, exc_label, mask_email
 from queue_utils import enqueue_email
 
 load_dotenv()
@@ -362,7 +362,7 @@ def save_uploaded_file(file):
     try:
         file.save(save_path)
     except OSError as e:
-        logger.error(f"Falha ao salvar arquivo: {e}")
+        logger.error(f"Falha ao salvar arquivo: {exc_label(e)}")
         return None
     return safe
 
@@ -380,7 +380,7 @@ def _remove_upload(filename: str | None) -> None:
     except FileNotFoundError:
         pass
     except OSError as e:
-        logger.error(f"Falha ao remover upload '{safe}': {e}")
+        logger.error(f"Falha ao remover upload '{safe}': {exc_label(e)}")
 
 
 def _delete_media_if_unreferenced(conn, filename: str | None) -> None:
@@ -408,7 +408,7 @@ def _build_password_reset_url(conn, user_id: int, base_url: str | None = None) -
     return f"{base_url}/reset_password/{token}"
 
 
-def _check_tenant_access(conn, tenant_id, email) -> bool:
+def _check_tenant_access(conn, tenant_id, user_id) -> bool:
     """Verifica se o tenant do usuário pode logar e conduz o ciclo de vida
     do trial (Free-only): inicia a contagem no primeiro login, expira e
     suspende quando o prazo passou, ou avisa quando está perto de expirar.
@@ -418,7 +418,9 @@ def _check_tenant_access(conn, tenant_id, email) -> bool:
     status = info["status"] if info else None
 
     if status == "suspended":
-        logger.warning(f"Login bloqueado (tenant suspenso): '{email}'.")
+        logger.warning(
+            f"Login bloqueado (tenant suspenso): user_id={user_id} tenant_id={tenant_id}."
+        )
         flash(
             "Sua conta está suspensa. "
             "Entre em contato com o suporte.",
@@ -439,7 +441,9 @@ def _check_tenant_access(conn, tenant_id, email) -> bool:
         elif info["trial_expired"]:
             repo.set_tenant_status(conn, tenant_id, "suspended", reason="trial_expired")
             conn.commit()
-            logger.warning(f"Login bloqueado (trial expirado): '{email}'.")
+            logger.warning(
+                f"Login bloqueado (trial expirado): user_id={user_id} tenant_id={tenant_id}."
+            )
             flash(
                 "Seu período de teste expirou. Entre em contato "
                 "com o suporte para continuar usando o Comemore+.",
@@ -461,7 +465,10 @@ def _check_tenant_access(conn, tenant_id, email) -> bool:
         # Deny-by-default: 'canceled' ou qualquer status desconhecido
         # futuro bloqueia — sem isso caía no `return False` implícito e
         # passava como se a conta estivesse ativa.
-        logger.warning(f"Login bloqueado (status desconhecido/cancelado '{status}'): '{email}'.")
+        logger.warning(
+            f"Login bloqueado (status desconhecido/cancelado '{status}'): "
+            f"user_id={user_id} tenant_id={tenant_id}."
+        )
         flash("Sua conta não está mais ativa. Entre em contato com o suporte.", "danger")
         return True
 
@@ -502,7 +509,7 @@ def login():
                 # permitiria enumerar emails cadastrados e quais já
                 # verificaram a conta. Quem esqueceu de verificar usa
                 # /resend-verification por conta própria.
-                logger.warning(f"Login bloqueado (email não verificado): '{email}'.")
+                logger.warning(f"Login bloqueado (email não verificado): user_id={row['id']}.")
             elif row and row.get("is_active"):
                 candidate = DbUser(
                     row["id"], row["username"], row["password_hash"],
@@ -510,20 +517,23 @@ def login():
                     email=row.get("email"),
                 )
                 if candidate.check_password(password):
-                    if _check_tenant_access(conn, row["tenant_id"], email):
+                    if _check_tenant_access(conn, row["tenant_id"], row["id"]):
                         return render_template("login.html")
                     user = candidate
 
         if user:
             session.permanent = True
             login_user(user)
-            logger.info(f"Login bem-sucedido: '{email}'.")
+            logger.info(f"Login bem-sucedido: user_id={user.db_id} tenant_id={user.tenant_id}.")
             flash("Login realizado com sucesso.", "success")
             if user.is_super_admin:
                 return redirect(url_for("superadmin"))
             return redirect(url_for("respostas"))
 
-        logger.warning(f"Tentativa de login inválida: '{email}'.")
+        if row:
+            logger.warning(f"Tentativa de login inválida: user_id={row['id']}.")
+        else:
+            logger.warning(f"Tentativa de login inválida: email={mask_email(email)}.")
         flash("Email ou senha inválidos.", "danger")
     return render_template("login.html")
 
@@ -610,7 +620,7 @@ def signup():
                 token = repo.create_email_verification_token(conn, user_id)
                 conn.commit()
             except Exception as e:
-                logger.error(f"Erro ao criar conta para '{email}': {e}")
+                logger.error(f"Erro ao criar conta: {exc_label(e)}")
                 flash("Erro ao criar conta. Tente novamente mais tarde.", "danger")
                 return render_template("signup.html")
 
@@ -843,7 +853,9 @@ def invite(token):
                 )
                 conn.commit()
                 logger.info(
-                    f"Resposta: {result['name']} -> {response} | Obs: {observacao}"
+                    f"Resposta registrada: invitee_id={result['id']} "
+                    f"event_id={result['event_id']} tenant_id={result['tenant_id']} "
+                    f"resposta={response}"
                 )
             return redirect(url_for("invite", token=token))
 
@@ -1184,7 +1196,10 @@ def add_convidado():
             _remove_upload(media_filename)
             raise
 
-    logger.info(f"Convidado adicionado: '{name}' por '{current_user.username}'.")
+    logger.info(
+        f"Convidado adicionado: event_id={event_id} tenant_id={tid} "
+        f"por user_id={current_user.db_id}."
+    )
     flash(f'Convidado "{name}" adicionado com sucesso!', "success")
     return redirect(url_for("respostas", event_id=event_id))
 
@@ -1264,7 +1279,7 @@ def edit_convidado(id):
         if new_media and old_media and old_media != new_media:
             _delete_media_if_unreferenced(conn, old_media)
 
-    logger.info(f"Convidado id={id} atualizado por '{current_user.username}'.")
+    logger.info(f"Convidado id={id} atualizado por user_id={current_user.db_id}.")
     flash("Convidado atualizado com sucesso!", "success")
     return redirect(url_for("respostas", event_id=guest["event_id"]))
 
@@ -1304,7 +1319,8 @@ def delete_convidado(id):
         _delete_media_if_unreferenced(conn, res["media_url"])
 
     logger.info(
-        f"Convidado '{res['name']}' (id={id}) excluído por '{current_user.username}'."
+        f"Convidado id={id} (event_id={res['event_id']}) excluído "
+        f"por user_id={current_user.db_id}."
     )
     flash("Convidado excluído com sucesso.", "warning")
     return redirect(url_for("respostas", event_id=res["event_id"]))
@@ -1365,7 +1381,7 @@ def update_textos():
             return redirect(url_for("respostas"))
         repo.update_event_texts(conn, tid, event["id"], **textos)
         conn.commit()
-    logger.info(f"Textos do evento id={event['id']} atualizados por '{current_user.username}'.")
+    logger.info(f"Textos do evento id={event['id']} atualizados por user_id={current_user.db_id}.")
     flash("Textos atualizados com sucesso!", "success")
     return redirect(url_for("respostas", event_id=event["id"]))
 
@@ -1407,7 +1423,7 @@ def set_tema():
         repo.set_event_theme(conn, tid, event_id, theme)
         conn.commit()
     logger.info(
-        f"Tema do evento id={event_id} alterado para '{theme}' por '{current_user.username}'."
+        f"Tema do evento id={event_id} alterado para '{theme}' por user_id={current_user.db_id}."
     )
     return redirect(url_for("respostas", event_id=event_id))
 
@@ -1455,7 +1471,7 @@ def upload_event_media(event_id):
             raise
         if previous and previous != filename:
             _delete_media_if_unreferenced(conn, previous)
-    logger.info(f"Imagem do evento id={event_id} atualizada por '{current_user.username}'.")
+    logger.info(f"Imagem do evento id={event_id} atualizada por user_id={current_user.db_id}.")
     flash("Imagem do convite atualizada.", "success")
     return redirect(back)
 
@@ -1648,7 +1664,7 @@ def definir_responsavel_evento(event_id):
         conn.commit()
     logger.info(
         f"Responsável do evento id={event_id} definido para user_id={user_id} "
-        f"por '{current_user.username}'."
+        f"por user_id={current_user.db_id}."
     )
     flash("Responsável do evento atualizado.", "success")
     return redirect(url_for("admin_eventos"))
@@ -1755,7 +1771,7 @@ def add_usuario():
                 must_change_password=True,
             )
             conn.commit()
-        logger.info(f"Usuário '{username}' criado por '{current_user.username}'.")
+        logger.info(f"Usuário id={new_user_id} criado por user_id={current_user.db_id}.")
 
         if os.getenv("EMAIL_SMTP") and os.getenv("EMAIL_USER"):
             with engine.connect() as conn:
@@ -1831,7 +1847,7 @@ def edit_usuario(id):
                 username=new_username, email=new_email, whatsapp=new_whatsapp,
             )
             conn.commit()
-        logger.info(f"Usuário id={id} atualizado por '{current_user.username}'.")
+        logger.info(f"Usuário id={id} atualizado por user_id={current_user.db_id}.")
         flash(f'Usuário "{new_username}" atualizado.', "success")
     except Exception:
         flash("Erro: nome de usuário ou email já existe.", "danger")
@@ -1879,9 +1895,7 @@ def reset_senha_usuario(id):
             must_change_password=True,
         )
         conn.commit()
-    logger.info(
-        f"Senha de '{user['username']}' (id={id}) resetada por '{current_user.username}'."
-    )
+    logger.info(f"Senha do usuário id={id} resetada por user_id={current_user.db_id}.")
 
     if email_configured and user.get("email"):
         with engine.connect() as conn:
@@ -1942,8 +1956,9 @@ def change_password():
             )
             conn.commit()
 
+        user_id = current_user.db_id
         login_user(load_user(current_user.id))
-        logger.info(f"Usuário '{current_user.username}' alterou sua senha.")
+        logger.info(f"Usuário id={user_id} alterou sua senha.")
         flash("Senha alterada com sucesso!", "success")
         return redirect(url_for("respostas"))
 
@@ -1979,9 +1994,7 @@ def delete_usuario(id):
         repo.delete_user(conn, tid, id)
         conn.commit()
 
-    logger.info(
-        f"Usuário '{user['username']}' (id={id}) excluído por '{current_user.username}'."
-    )
+    logger.info(f"Usuário id={id} excluído por user_id={current_user.db_id}.")
     flash(
         f'Usuário "{user["username"]}" excluído.',
         "warning",
