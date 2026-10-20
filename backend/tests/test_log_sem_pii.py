@@ -9,8 +9,10 @@ Também varre o código-fonte (AST) proibindo dado pessoal em chamadas logger.*.
 import ast
 import io
 import logging
+import smtplib
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pymysql
 import pytest
@@ -18,6 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
 import app as app_module
+import queue_utils
+import tasks
 from tests.conftest import _MEMBER_DBUSER, EVENT_ROW, LIMITS_NONE, PNG_BYTES
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -311,7 +315,7 @@ _FORBIDDEN_KEYS = {"name", "username", "email", "phone", "whatsapp", "observatio
                    "custom_message", "token"}
 _SANITIZERS = {"mask_email", "mask_url", "mask_token_paths", "exc_label"}
 
-LOGGED_FILES = ["app.py"]
+LOGGED_FILES = ["app.py", "tasks.py", "queue_utils.py"]
 
 
 def _unsafe(node):
@@ -368,3 +372,92 @@ def test_varredura_detecta_os_padroes_proibidos(tmp_path):
         encoding="utf-8",
     )
     assert [line for line, _ in _violations("amostra.py", tmp_path)] == [1, 2, 3, 4, 5, 6]
+
+
+# ── L6: envio de e-mail (tasks.py) ────────────────────────────────────────────
+
+EMAIL_TO = "destinatário.real@exemplo.com.br"
+RESET_URL = "https://zapbyte.com.br/reset_password/TokResetPr0Abc"
+VERIFY_URL = "https://zapbyte.com.br/verify-email/TokVerifyPr0Def"
+
+_EMAIL_CALLS = [
+    ("reset", lambda: tasks.send_reset_email(EMAIL_TO, USERNAME, RESET_URL)),
+    ("verificação", lambda: tasks.send_verification_email(EMAIL_TO, VERIFY_URL)),
+    ("convite", lambda: tasks.send_member_invite_email(EMAIL_TO, MEMBER_NAME, RESET_URL)),
+]
+
+
+@pytest.fixture
+def smtp_env(monkeypatch):
+    monkeypatch.setenv("EMAIL_SMTP", "smtp.exemplo.test")
+    monkeypatch.setenv("EMAIL_PORTA", "587")
+    monkeypatch.setenv("EMAIL_USER", "bot-login")
+    monkeypatch.setenv("EMAIL_PASS", "placeholder-nao-e-segredo")
+    monkeypatch.delenv("EMAIL_FROM", raising=False)
+
+
+@pytest.mark.parametrize("tipo, enviar", _EMAIL_CALLS)
+def test_email_enviado_loga_destino_mascarado(smtp_env, logs, tipo, enviar):
+    with patch("smtplib.SMTP", return_value=MagicMock()):
+        enviar()
+    assert f"Email de {tipo} enviado (destino=d***@exemplo.com.br)." in logs.text
+    _assert_sem_pii(logs, EMAIL_TO, USERNAME, MEMBER_NAME, "TokResetPr0Abc", "TokVerifyPr0Def")
+
+
+@pytest.mark.parametrize("tipo, enviar", _EMAIL_CALLS)
+def test_falha_smtp_loga_so_o_tipo_da_excecao(smtp_env, logs, tipo, enviar):
+    """SMTPRecipientsRefused ecoa o endereço no str() — só o tipo pode ir pro log."""
+    smtp = MagicMock()
+    smtp.sendmail.side_effect = smtplib.SMTPRecipientsRefused(
+        {EMAIL_TO: (550, f"5.1.1 <{EMAIL_TO}>: user unknown".encode())}
+    )
+    with patch("smtplib.SMTP", return_value=smtp):
+        enviar()
+    assert (f"Falha ao enviar email de {tipo} (destino=d***@exemplo.com.br): "
+            "SMTPRecipientsRefused") in logs.text
+    _assert_sem_pii(logs, EMAIL_TO, USERNAME, MEMBER_NAME, "TokResetPr0Abc", "TokVerifyPr0Def")
+
+
+# ── L7/L8: queue_utils ────────────────────────────────────────────────────────
+
+def test_falha_definitiva_do_job_loga_so_o_tipo(logs):
+    job = MagicMock()
+    job.id = "job-pr0-1"
+    job.func_name = "tasks.send_reset_email"
+    erro = smtplib.SMTPRecipientsRefused({EMAIL_TO: (550, b"user unknown")})
+    queue_utils._on_email_failure(job, MagicMock(), type(erro), erro, None)
+    assert ("[Email] Job 'job-pr0-1' (tasks.send_reset_email) falhou definitivamente "
+            "após todas as tentativas: SMTPRecipientsRefused") in logs.text
+    _assert_sem_pii(logs, EMAIL_TO)
+
+
+def test_url_do_redis_logada_sem_credencial(monkeypatch, logs):
+    monkeypatch.setattr(queue_utils, "_queue", None)
+    monkeypatch.setenv("REDIS_URL", "redis://:placeholder-sem-valor@redis:6379/0")
+    assert queue_utils._get_queue() is not None
+    assert "Fila RQ conectada: redis://***@redis:6379/0" in logs.text
+    _assert_sem_pii(logs, "placeholder-sem-valor")
+
+
+# ── L10/L11: job RQ sem argumentos na descrição e com TTLs curtos ────────────
+
+def test_enqueue_email_descricao_sem_argumentos_e_ttls(monkeypatch):
+    from rq import Queue
+
+    mock_queue = MagicMock()
+    monkeypatch.setattr(queue_utils, "_get_queue", lambda: mock_queue)
+    queue_utils.enqueue_email(tasks.send_reset_email, EMAIL_TO, USERNAME, RESET_URL)
+
+    args, kwargs = mock_queue.enqueue.call_args
+    assert kwargs["description"] == "send_reset_email"
+    assert kwargs["failure_ttl"] == 5 * 24 * 60 * 60
+    assert kwargs["result_ttl"] == 60
+
+    # O próprio RQ 1.16.2 separa essas chaves dos argumentos da função:
+    parsed = Queue.parse_args(*args, **kwargs)
+    f, _timeout, description, result_ttl, _ttl, failure_ttl = parsed[:6]
+    func_args, func_kwargs = parsed[-2], parsed[-1]
+    assert f is tasks.send_reset_email
+    assert (description, result_ttl, failure_ttl) == ("send_reset_email", 60, 432000)
+    assert func_args == (EMAIL_TO, USERNAME, RESET_URL)
+    assert func_kwargs == {}

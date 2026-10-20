@@ -11,6 +11,8 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from log_utils import mask_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,14 +127,17 @@ def send_reset_email(to_address: str, username: str, reset_url: str) -> None:
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_addr, to_address, msg.as_string())
-            logger.info(f"Email de reset enviado para '{to_address}'.")
+            logger.info(f"Email de reset enviado (destino={mask_email(to_address)}).")
         finally:
             try:
                 server.quit()
             except Exception:
                 pass
     except Exception as e:
-        logger.error(f"Falha ao enviar email de reset para '{to_address}': {e}")
+        logger.error(
+            f"Falha ao enviar email de reset (destino={mask_email(to_address)}): "
+            f"{type(e).__name__}"
+        )
 
 
 def send_verification_email(to_address: str, verify_url: str) -> bool:
@@ -236,7 +241,7 @@ def send_verification_email(to_address: str, verify_url: str) -> bool:
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_addr, to_address, msg.as_string())
-            logger.info(f"Email de verificação enviado para '{to_address}'.")
+            logger.info(f"Email de verificação enviado (destino={mask_email(to_address)}).")
             return True
         finally:
             try:
@@ -244,7 +249,10 @@ def send_verification_email(to_address: str, verify_url: str) -> bool:
             except Exception:
                 pass
     except Exception as e:
-        logger.error(f"Falha ao enviar email de verificação para '{to_address}': {e}")
+        logger.error(
+            f"Falha ao enviar email de verificação (destino={mask_email(to_address)}): "
+            f"{type(e).__name__}"
+        )
         return False
 
 
@@ -348,7 +356,7 @@ def send_member_invite_email(to_address: str, username: str, reset_url: str) -> 
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_addr, to_address, msg.as_string())
-            logger.info(f"Email de convite enviado para '{to_address}'.")
+            logger.info(f"Email de convite enviado (destino={mask_email(to_address)}).")
             return True
         finally:
             try:
@@ -356,5 +364,8 @@ def send_member_invite_email(to_address: str, username: str, reset_url: str) -> 
             except Exception:
                 pass
     except Exception as e:
-        logger.error(f"Falha ao enviar email de convite para '{to_address}': {e}")
+        logger.error(
+            f"Falha ao enviar email de convite (destino={mask_email(to_address)}): "
+            f"{type(e).__name__}"
+        )
         return False
