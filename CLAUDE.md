@@ -177,6 +177,7 @@ BACKUP_RETENTION_DAYS=7
 - Charset `utf8mb4` (acentos PT-BR e emojis).
 - Versão lida de `VERSION` e injetada via `context_processor`.
 - `*.sh text eol=lf` no `.gitattributes` — LF forçado, CRLF quebra container Linux.
+- **Testes: sempre `bash scripts/test.sh [args do pytest]`** (ou `bash scripts/test.sh --scratch <dir> [args]` para cópia scratch com `<dir>/repo` e `<dir>/uploads`). O script já está liberado nas permissões; nunca monte comando composto (`S=...; cd ... && UPLOAD_FOLDER=... timeout ... pytest | tail`), que exige aprovação manual. Vale também para subagentes. Caminhos de teste relativos à raiz (`backend/tests/test_x.py`) no Python do host; no fallback Docker o cwd é `backend/` (`tests/test_x.py`).
 
 ---
 
