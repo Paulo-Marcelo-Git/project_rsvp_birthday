@@ -45,6 +45,7 @@ from werkzeug.utils import secure_filename
 
 import repo
 import tasks
+from log_utils import build_log_handlers
 from queue_utils import enqueue_email
 
 load_dotenv()
@@ -52,13 +53,11 @@ load_dotenv()
 with open(os.path.join(os.path.dirname(__file__), "..", "VERSION")) as _f:
     APP_VERSION = _f.read().strip()
 
+# Um arquivo por dia (logs/app-AAAA-MM-DD.log) + stdout, ambos com máscara de
+# e-mail/token como rede de segurança (PR-0, LGPD). A limpeza dos arquivos com
+# mais de LOG_RETENTION_DAYS dias é do purge-logs.sh no container backup.
 log_path = os.getenv("LOG_FILE", "logs/app.log")
-os.makedirs(os.path.dirname(log_path), exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler(log_path), logging.StreamHandler()],
-)
+logging.basicConfig(level=logging.INFO, handlers=build_log_handlers(log_path))
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -193,6 +192,9 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_timeout=10,
     connect_args={"connect_timeout": 5},
+    # Exceções do SQLAlchemy não carregam os valores dos parâmetros (nome,
+    # e-mail, telefone, observação) — evita dado pessoal em traceback/log.
+    hide_parameters=True,
     future=True,
 )
 
