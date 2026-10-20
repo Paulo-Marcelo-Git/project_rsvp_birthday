@@ -15,6 +15,7 @@ request.path): mascara e-mails e tokens no texto final de cada linha.
 import logging
 import os
 import re
+import sys
 from datetime import date
 from urllib.parse import urlsplit, urlunsplit
 
@@ -115,19 +116,42 @@ class DailyFileHandler(logging.FileHandler):
         self._clock = clock or date.today
         self._current_day = self._clock()
         os.makedirs(directory, exist_ok=True)
-        super().__init__(self._path_for(self._current_day), mode="a", encoding=encoding, delay=True)
+        # Abre já na construção (delay=False): problema de permissão/disco
+        # derruba o boot (visível), não um request no meio da operação.
+        super().__init__(self._path_for(self._current_day), mode="a", encoding=encoding, delay=False)
 
     def _path_for(self, day: date) -> str:
         return os.path.join(self.directory, f"{self.prefix}-{day.isoformat()}.log")
 
+    @staticmethod
+    def _report_failure(exc: BaseException | None) -> None:
+        """Uma linha fixa em stderr, só com o tipo da exceção. Nunca o record
+        (msg/args crus furariam a máscara do RedactingFormatter)."""
+        label = type(exc).__name__ if exc is not None else "erro"
+        try:
+            sys.stderr.write(f"[log] falha ao gravar arquivo de log: {label}\n")
+        except Exception:
+            pass
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        # O padrão imprime record.msg/args crus; aqui só a linha fixa.
+        self._report_failure(sys.exc_info()[1])
+
     def emit(self, record: logging.LogRecord) -> None:
-        day = self._clock()
-        if day != self._current_day:
-            self._current_day = day
-            if self.stream is not None:
-                self.stream.close()
-                self.stream = None
-            self.baseFilename = os.path.abspath(self._path_for(day))
+        # Falha ao trocar/abrir o arquivo nunca pode virar exceção no request.
+        try:
+            day = self._clock()
+            if day != self._current_day:
+                self._current_day = day
+                if self.stream is not None:
+                    self.stream.close()
+                    self.stream = None
+                self.baseFilename = os.path.abspath(self._path_for(day))
+            if self.stream is None:
+                self.stream = self._open()
+        except OSError as exc:
+            self._report_failure(exc)
+            return
         super().emit(record)
 
 

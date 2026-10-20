@@ -1,5 +1,6 @@
 """Testes dos helpers de log sem dado pessoal (backend/log_utils.py — PR-0)."""
 import logging
+import shutil
 import sys
 import threading
 from datetime import date
@@ -164,10 +165,52 @@ def test_daily_handler_grava_no_arquivo_do_dia(tmp_path):
     assert (tmp_path / "logs" / "app-2026-10-19.log").read_text(encoding="utf-8") == "linha 1\n"
 
 
-def test_daily_handler_nao_cria_arquivo_sem_log(tmp_path):
+def test_daily_handler_cria_arquivo_do_dia_na_construcao(tmp_path):
+    """Contrato (F1): abre o arquivo no __init__ (eager) para que problema de
+    permissão/disco apareça no boot, não dentro de um request."""
     h = _handler(tmp_path, _Clock(date(2026, 10, 19)))
     h.close()
-    assert list(tmp_path.iterdir()) == []
+    assert [p.name for p in tmp_path.iterdir()] == ["app-2026-10-19.log"]
+    assert (tmp_path / "app-2026-10-19.log").read_text(encoding="utf-8") == ""
+
+
+def test_daily_handler_falha_ao_abrir_na_virada_nao_levanta_nem_vaza_texto(tmp_path, capsys):
+    clock = _Clock(date(2026, 10, 19))
+    logs = tmp_path / "logs"
+    h = _handler(logs, clock)
+    try:
+        shutil.rmtree(logs)
+        clock.d = date(2026, 10, 20)
+        h.handle(_rec("login de joao@exemplo.com /invite/TOKSECRETO"))  # não pode levantar
+    finally:
+        h.close()
+    err = capsys.readouterr().err
+    assert "[log] falha ao gravar arquivo de log:" in err
+    assert "joao@exemplo.com" not in err and "TOKSECRETO" not in err and "login de" not in err
+
+
+def test_daily_handler_falha_de_escrita_nao_imprime_o_record(tmp_path, capsys):
+    h = _handler(tmp_path, _Clock(date(2026, 10, 19)))
+
+    class _StreamCheio:
+        def write(self, _):
+            raise OSError(28, "No space left on device")
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    h.stream.close()
+    h.stream = _StreamCheio()
+    try:
+        h.handle(_rec("segredo maria@exemplo.com"))  # não pode levantar
+    finally:
+        h.close()
+    err = capsys.readouterr().err
+    assert "[log] falha ao gravar arquivo de log:" in err
+    assert "maria@exemplo.com" not in err and "segredo" not in err
 
 
 def test_daily_handler_troca_de_arquivo_quando_a_data_muda(tmp_path):
