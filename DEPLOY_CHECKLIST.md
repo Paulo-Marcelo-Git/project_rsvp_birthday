@@ -107,11 +107,17 @@ Tudo aqui é verificado **antes** de subir qualquer coisa para a VPS.
 - [ ] `[BLOQUEADOR]` A aplicação não loga e-mail, telefone, senha, token de convite, token de verificação nem `SECRET_KEY`. Verificação após rodar os testes localmente (mostra só a **contagem**, sem imprimir os dados):
 
   ```bash
-  grep -cE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' logs/app.log   # e-mails → esperado 0
-  grep -cE '/invite/[A-Za-z0-9_-]{8,}|verify-email/[A-Za-z0-9_.-]{8,}' logs/app.log  # tokens → esperado 0
+  grep -cE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' logs/app-*.log   # e-mails → esperado 0
+  grep -cE '/invite/[A-Za-z0-9_-]{8,}|verify-email/[A-Za-z0-9_.-]{8,}' logs/app-*.log  # tokens → esperado 0
   ```
 
-  Atenção: o access log do gunicorn/nginx registra URLs. Se o token de convite está na URL (`/invite/<token>`), ele vai aparecer no access log. Aceite isso conscientemente (log com retenção curta e acesso restrito) ou configure o formato de log para mascarar o caminho.
+  Nota: o access log do gunicorn agora mascara o token no caminho (`/invite/***`, `/verify-email/***`, `/reset_password/***`). Se usar access log do nginx, ele continua registrando a URL completa: mascare o formato lá também ou mantenha retenção curta e acesso restrito.
+
+- [ ] `[BLOQUEADOR]` Pré-deploy do PR-0: o diretório `logs/` precisa ser gravável pelo uid 1002 do backend (a app abre `logs/app-AAAA-MM-DD.log` no boot e falha na subida se não puder):
+
+  ```bash
+  stat -c '%u:%g %a' logs   # gravável pelo uid 1002 (ex.: 1002:1002 755)
+  ```
 
 ### 1.5 Dependências e imagem
 
@@ -1211,22 +1217,7 @@ O objetivo é saber que algo quebrou **antes** do cliente reclamar.
 
 - [ ] `[RECOMENDADO]` **Erros da aplicação**: Sentry (plano gratuito) com `send_default_pii=False` e filtragem de e-mail/telefone antes do envio.
 - [ ] `[RECOMENDADO]` **Cota de e-mail**: conferir no painel da Brevo se o uso diário está longe do limite de 300.
-- [ ] `[RECOMENDADO]` Rotação do `logs/app.log` com logrotate no host:
-
-  ```bash
-  sudo nano /etc/logrotate.d/comemore
-  ```
-
-  ```
-  /srv/projects/project_rsvp_birthday/logs/*.log {
-      daily
-      rotate 14
-      compress
-      missingok
-      notifempty
-      copytruncate
-  }
-  ```
+- [ ] `[ATENÇÃO]` **Não usar logrotate em `logs/`.** A app já grava um arquivo por dia (`logs/app-AAAA-MM-DD.log`) e a retenção é do `purge-logs.sh` (container `backup`, `LOG_RETENTION_DAYS`, default 5). O logrotate geraria `app-AAAA-MM-DD.log.1.gz`, que o purge não apaga e furaria a retenção de 5 dias.
 
 ---
 
@@ -1257,7 +1248,7 @@ O objetivo é saber que algo quebrou **antes** do cliente reclamar.
 - [ ] `[BLOQUEADOR]` Logs sem dados pessoais (verificado na seção 1.4; repetir em produção após o smoke test):
 
   ```bash
-  grep -cE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' logs/app.log   # 0
+  grep -cE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' logs/app-*.log   # 0
   ```
 
 - [ ] `[BLOQUEADOR]` Backups com dados pessoais saem da VPS **criptografados** (seção 12.3) e têm retenção definida (7 dias local, 30 dias externo).

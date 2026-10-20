@@ -50,7 +50,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
 - Volumes: `db_data`, `backup_data`, `uploads_data`, `redis_data`. O `backup` monta `uploads_data:/uploads:ro` e gera `comemore_uploads_*.tar.gz` com a mesma retenção do dump SQL; `restore-uploads.sh` restaura por default em `/tmp/uploads_restore_test`.
-- pytest (359 unit tests + 50 integration tests deselected sem MySQL real)
+- pytest (453 unit tests + 50 integration tests deselected sem MySQL real)
 
 ---
 
@@ -80,7 +80,7 @@ project_rsvp_birthday/
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 359 unit tests + 50 integration (marcados @pytest.mark.integration)
+│   └── tests/               # pytest — 453 unit tests + 50 integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh + purge-logs.sh (mysqldump + tar.gz dos uploads + limpeza dos logs, diário via cron)
 ├── docs/
 │   ├── superpowers/         # plans/ (histórico por sub-fase) e specs/ — gitignored, só local
