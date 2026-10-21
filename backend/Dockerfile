@@ -10,16 +10,8 @@ RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt \
  && chmod +x entrypoint.sh
 
-# Deixa todos os args do gunicorn em uma única env (sem brigar com JSON)
-ENV GUNICORN_CMD_ARGS="\
--w 2 \
---threads 4 \
--k gthread \
--b 0.0.0.0:8000 \
---timeout 120 \
---graceful-timeout 30 \
---keep-alive 5 \
---access-logfile - \
---access-logformat '%(t)s | %(p)s | %(m)s %(U)s | status=%(s)s | resp_time=%(L)s sec | size=%(B)s bytes'"
+# Args do gunicorn (workers, threads, bind, timeouts, access log com tokens
+# mascarados) ficam em gunicorn.conf.py, carregado pelo entrypoint.sh.
+# Não use a env de args do gunicorn aqui: ela sobrescreveria o arquivo.
 
 CMD ["./entrypoint.sh"]

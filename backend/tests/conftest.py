@@ -1,4 +1,5 @@
 import os
+import tempfile
 import pytest
 from unittest.mock import MagicMock, patch
 from werkzeug.security import generate_password_hash
@@ -13,6 +14,8 @@ os.environ.update({
     'DB_NAME': 'test_db',
     'SECRET_KEY': 'test-secret-key-for-pytest-only!!',
 })
+# O import do app abre o arquivo de log na construção: manda para tmp, não para o repo.
+os.environ.setdefault('LOG_FILE', os.path.join(tempfile.mkdtemp(prefix='rsvp-test-logs-'), 'app.log'))
 
 # Patch do engine antes de importar o app (evita tentativa de conexão MySQL)
 _mock_engine = MagicMock()

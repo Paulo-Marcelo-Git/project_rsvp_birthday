@@ -50,7 +50,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
 - Volumes: `db_data`, `backup_data`, `uploads_data`, `redis_data`. O `backup` monta `uploads_data:/uploads:ro` e gera `comemore_uploads_*.tar.gz` com a mesma retenção do dump SQL; `restore-uploads.sh` restaura por default em `/tmp/uploads_restore_test`.
-- pytest (359 unit tests + 50 integration tests deselected sem MySQL real)
+- pytest (453 unit tests + 50 integration tests deselected sem MySQL real)
 
 ---
 
@@ -63,6 +63,8 @@ project_rsvp_birthday/
 │   ├── repo.py              # TODA query com tenant_id obrigatório
 │   ├── tasks.py             # Funções de email (send_*) — sem Flask/SQLAlchemy, pickle-safe para RQ
 │   ├── queue_utils.py       # enqueue_email(): fallback síncrono se REDIS_URL ausente
+│   ├── log_utils.py         # Máscaras (e-mail/URL/token), RedactingFormatter, DailyFileHandler (logs/app-AAAA-MM-DD.log)
+│   ├── gunicorn.conf.py     # Args do gunicorn + logger_class que mascara tokens no access log
 │   ├── alembic/             # Migrations versionadas (fonte de verdade do schema)
 │   │   └── versions/
 │   │       ├── 0001_initial_saas_schema.py
@@ -78,8 +80,8 @@ project_rsvp_birthday/
 │   ├── requirements.txt
 │   ├── static/
 │   ├── templates/
-│   └── tests/               # pytest — 359 unit tests + 50 integration (marcados @pytest.mark.integration)
-├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh (mysqldump + tar.gz dos uploads, diário via cron)
+│   └── tests/               # pytest — 453 unit tests + 50 integration (marcados @pytest.mark.integration)
+├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh + purge-logs.sh (mysqldump + tar.gz dos uploads + limpeza dos logs, diário via cron)
 ├── docs/
 │   ├── superpowers/         # plans/ (histórico por sub-fase) e specs/ — gitignored, só local
 │   ├── smoke-tests/         # roteiros de smoke test e2e
@@ -161,7 +163,8 @@ BACKUP_RETENTION_DAYS=7
 # Opcionais
 # EMAIL_FROM=noreply@seudominio.com  # remetente validado no provedor; fallback = EMAIL_USER
 # TZ_OFFSET_HOURS=-3                 # default -3 (BRT)
-# LOG_FILE=logs/app.log              # default
+# LOG_FILE=logs/app.log              # default; nome-base → logs/app-AAAA-MM-DD.log (1 arquivo/dia, UTC)
+# LOG_RETENTION_DAYS=5               # default; dias de log mantidos (purge-logs.sh no container backup)
 # UPLOAD_FOLDER=/app/uploads         # default (volume uploads_data)
 # DEBUGPY_ENABLED=true               # dev only — entrypoint troca gunicorn por flask run + debugpy (porta 5678)
 ```
@@ -177,6 +180,8 @@ BACKUP_RETENTION_DAYS=7
 - Charset `utf8mb4` (acentos PT-BR e emojis).
 - Versão lida de `VERSION` e injetada via `context_processor`.
 - `*.sh text eol=lf` no `.gitattributes` — LF forçado, CRLF quebra container Linux.
+- **Testes: sempre `bash scripts/test.sh [args do pytest]`** (ou `bash scripts/test.sh --scratch <dir> [args]` para cópia scratch com `<dir>/repo` e `<dir>/uploads`). O script já está liberado nas permissões; nunca monte comando composto (`S=...; cd ... && UPLOAD_FOLDER=... timeout ... pytest | tail`), que exige aprovação manual. Vale também para subagentes. Caminhos de teste relativos à raiz (`backend/tests/test_x.py`) no Python do host; no fallback Docker o cwd é `backend/` (`tests/test_x.py`).
+- **Logs sem dado pessoal (LGPD):** log identifica por ID (`user_id`, `tenant_id`, `event_id`, `invitee_id`); e-mail só via `mask_email()`, exceção só via `exc_label(e)`/`type(e).__name__` — nunca `{e}` cru, `logger.exception` ou `exc_info` em `app.py`/`tasks.py`/`queue_utils.py`. Rede de segurança: `RedactingFormatter` nos handlers do app e do gunicorn, `hide_parameters=True` no engine. Jobs RQ com `description=func.__name__`. `tests/test_log_sem_pii.py` (fluxos + varredura AST) garante.
 
 ---
 

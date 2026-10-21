@@ -81,7 +81,8 @@ BACKUP_RETENTION_DAYS=7
 # Opcionais
 # EMAIL_FROM=noreply@seudominio.com  # remetente validado no provedor; fallback = EMAIL_USER
 # TZ_OFFSET_HOURS=-3                 # default -3 (BRT)
-# LOG_FILE=logs/app.log              # default
+# LOG_FILE=logs/app.log              # default; nome-base → logs/app-AAAA-MM-DD.log (1 arquivo/dia, UTC)
+# LOG_RETENTION_DAYS=5               # default; dias de log mantidos (purge diário no container backup)
 # UPLOAD_FOLDER=/app/uploads         # default (volume uploads_data)
 # DEBUGPY_ENABLED=true               # SOMENTE DEV — troca gunicorn por flask run + debugpy (porta 5678)
 ```
@@ -359,6 +360,22 @@ Restaurar **em produção** (sobrescreve o volume — faça um backup manual ant
     docker compose start backend worker
 
 (Confirme os nomes reais dos volumes com `docker volume ls | grep rsvp`.)
+
+---
+
+## Logs
+
+- **Conteúdo (LGPD):** os logs identificam por ID (`user_id`, `tenant_id`, `event_id`, `invitee_id`). Nunca nome, e-mail, username, telefone, observação ou token. E-mail só aparece mascarado (`a***@dominio.com`) e exceções só pelo tipo (ex.: `IntegrityError(mysql=1062)`). `backend/tests/test_log_sem_pii.py` garante a regra.
+- **Arquivo do app:** `logs/app-AAAA-MM-DD.log` (um por dia, data UTC; `LOG_FILE` define o nome-base). O container `backup` roda `purge-logs.sh` às 02:20 (horário do container) e apaga os arquivos com mais de `LOG_RETENTION_DAYS` dias (default 5).
+- **Access log do gunicorn** (`docker logs rsvp_backend`): configurado em `backend/gunicorn.conf.py`; tokens aparecem como `/invite/***`, `/verify-email/***`, `/reset_password/***`.
+- **Worker** (`docker logs rsvp_worker`): mostra só o nome da função do job (`default: send_reset_email (<id>)`), nunca os argumentos. Jobs que falharam ficam no Redis por no máximo 5 dias.
+- **Logs do Docker** (backend e worker): `json-file` com `max-size: 10m` e `max-file: 3`.
+
+```bash
+ls -l logs/                                            # arquivos diários
+docker exec rsvp_backup /purge-logs.sh                 # limpeza manual
+docker exec rsvp_backup sh -c 'tail -n 5 /var/log/purge-logs.log'
+```
 
 ---
 

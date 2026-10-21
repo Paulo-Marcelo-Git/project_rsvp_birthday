@@ -39,4 +39,4 @@ if [ "${DEBUGPY_ENABLED:-}" = "true" ]; then
 fi
 
 echo "[entrypoint] Iniciando gunicorn..."
-exec gunicorn app:app "$@"
+exec gunicorn -c gunicorn.conf.py app:app "$@"
