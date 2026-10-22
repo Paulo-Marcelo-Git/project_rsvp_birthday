@@ -163,7 +163,7 @@ BACKUP_RETENTION_DAYS=7
 # Opcionais
 # EMAIL_FROM=noreply@seudominio.com  # remetente validado no provedor; fallback = EMAIL_USER
 # TZ_OFFSET_HOURS=-3                 # default -3 (BRT)
-# LOG_FILE=logs/app.log              # default; nome-base → logs/app-AAAA-MM-DD.log (1 arquivo/dia, UTC)
+# LOG_FILE=logs/app.log              # default; nome-base → logs/app-AAAA-MM-DD.log (1 arquivo/dia, UTC); não altere — o purge só apaga app-*.log em ./logs
 # LOG_RETENTION_DAYS=5               # default; dias de log mantidos (purge-logs.sh no container backup)
 # UPLOAD_FOLDER=/app/uploads         # default (volume uploads_data)
 # DEBUGPY_ENABLED=true               # dev only — entrypoint troca gunicorn por flask run + debugpy (porta 5678)

@@ -1292,7 +1292,7 @@ Só vai para produção com **todas** as linhas marcadas.
 | 1 | Testes automatizados passando (fluxo crítico, isolamento, rotas protegidas) | 1.1 | saída do pytest | [ ] |
 | 2 | Nenhum segredo no git nem na imagem | 1.2, 10.7 | gitleaks "no leaks"; grep = 0 | [ ] |
 | 3 | Debug off, ProxyFix, cookies seguros, CSRF | 1.3, 10.3, 11.7 | curl + Playwright | [ ] |
-| 4 | Logs sem dados pessoais e tokens | 1.4, 16 | grep -c = 0 | [ ] |
+| 4 | Logs sem dados pessoais e tokens | 1.4, 16 | grep -c = 0 (VPS, 2026-10-22: `logs/app-*.log` + `docker logs` backend/worker desde o deploy do PR-0; 1º purge executado às 02:20, 0 removidos por nada ter >5 dias) | [x] |
 | 5 | Credenciais de produção novas e distintas das de dev | 5 | checklist do .env | [ ] |
 | 6 | App usa usuário MySQL dedicado (não root) | 6 | SHOW GRANTS | [ ] |
 | 7 | SSH só por chave, firewall só 22/80/443, portas internas fechadas | 2.2, 2.3, 9 | nc de fora | [ ] |
