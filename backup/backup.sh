@@ -11,7 +11,8 @@ mkdir -p "$BACKUP_DIR"
 # Credenciais via arquivo de opções (fora do `ps`), removido ao sair.
 umask 077
 CNF=$(mktemp)
-trap 'rm -f "$CNF"' EXIT
+DUMP_TMP="${BACKUP_DIR}/${FILENAME}.tmp"
+trap 'rm -f "$CNF" "$DUMP_TMP"' EXIT
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 {
   printf '[client]\n'
@@ -22,12 +23,16 @@ esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Iniciando backup de ${DB_NAME}..."
 
+# Dump atômico: grava em .tmp, valida com gzip -t e só então renomeia; em
+# qualquer falha o .tmp é apagado (trap) e nunca fica arquivo truncado.
 mysqldump \
   --defaults-extra-file="$CNF" \
   --single-transaction \
   --routines \
   --triggers \
-  "$DB_NAME" | gzip > "${BACKUP_DIR}/${FILENAME}"
+  "$DB_NAME" | gzip > "$DUMP_TMP"
+gzip -t "$DUMP_TMP"
+mv "$DUMP_TMP" "${BACKUP_DIR}/${FILENAME}"
 
 SIZE=$(du -sh "${BACKUP_DIR}/${FILENAME}" | cut -f1)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup salvo: ${FILENAME} (${SIZE})"
@@ -54,7 +59,7 @@ else
 fi
 
 # Retenção roda sempre (mesmo se o tar falhou) para não encher o volume de backup.
-DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_uploads_*.tar.gz' -o -name 'comemore_uploads_*.tar.gz.tmp' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
+DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_*.sql.gz.tmp' -o -name 'comemore_uploads_*.tar.gz' -o -name 'comemore_uploads_*.tar.gz.tmp' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
 
 # Falha real do tar => código de saída != 0 (depois da retenção)
