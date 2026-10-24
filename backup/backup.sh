@@ -16,11 +16,14 @@ DUMP_TMP="${BACKUP_DIR}/${FILENAME}.tmp"
 # Pings do Healthchecks (best-effort, ver hc.sh).
 . "${HC_SCRIPT:-/hc.sh}"
 DUMP_DONE=0
+# LOCAL_OK=1: dump e tar ok. O check "backup-local" reflete só o backup local;
+# falha da cópia externa tem check próprio (offsite.sh) mas ainda muda o rc.
+LOCAL_OK=0
 # Trap único: limpeza + ping final, preservando o código de saída.
 on_exit() {
   rc=$?
   rm -f "$CNF" "$DUMP_TMP"
-  if [ "$rc" -ne 0 ]; then
+  if [ "$rc" -ne 0 ] && [ "$LOCAL_OK" -ne 1 ]; then
     hc_ping "${HC_BACKUP_URL:-}" fail
     # dump não terminou => não há o que enviar ao B2: alerta o check externo também
     [ "$DUMP_DONE" -eq 1 ] || hc_ping "${HC_OFFSITE_URL:-}" fail
@@ -81,7 +84,16 @@ fi
 DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_*.sql.gz.tmp' -o -name 'comemore_uploads_*.tar.gz' -o -name 'comemore_uploads_*.tar.gz.tmp' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
 
-# Falha real do tar => código de saída != 0 (depois da retenção)
+[ "$TAR_RC" -ge 2 ] || LOCAL_OK=1
+
+# Cópia externa roda sempre que o dump terminou (mesmo com tar falho).
+OFFSITE_RC=0
+if [ "$DUMP_DONE" -eq 1 ]; then
+  sh "${OFFSITE_SCRIPT:-/offsite.sh}" || OFFSITE_RC=$?
+fi
+
+# Código final = primeiro != 0 entre tar e cópia externa
 if [ "$TAR_RC" -ge 2 ]; then
   exit "$TAR_RC"
 fi
+exit "$OFFSITE_RC"

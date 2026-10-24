@@ -29,11 +29,19 @@ exit 0
 EOF2
 chmod +x "$T/bin/curl"
 
+# Stub offsite: registra a chamada em $T/offsite.log; STUB_OFFSITE_RC define o código
+cat > "$T/offsite-stub.sh" <<'EOF3'
+#!/bin/sh
+echo chamado >> "${OFFSITE_LOG:?}"
+exit "${STUB_OFFSITE_RC:-0}"
+EOF3
+
 # Ambiente comum (valores obviamente falsos)
 export PATH="$T/bin:$PATH"
 export UPLOADS_DIR="$T/uploads"
 export HC_SCRIPT="$(cd "$(dirname "$0")" && pwd)/hc.sh"
 export CURL_LOG="$T/curl.log"
+export OFFSITE_SCRIPT="$T/offsite-stub.sh" OFFSITE_LOG="$T/offsite.log"
 export HC_BACKUP_URL= HC_OFFSITE_URL=
 export DB_USER=fake-user DB_PASSWORD=fake-pass DB_HOST=fake-host DB_NAME=fake_db
 
@@ -103,5 +111,30 @@ HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$T/b-l1" sh "$SCRIPT" >>"$T/a
 STUB_DUMP_FAIL=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$T/b-l2" sh "$SCRIPT" >>"$T/all-out.txt" 2>&1 || true
 STUB_CURL_FAIL=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$T/b-l3" sh "$SCRIPT" >>"$T/all-out.txt" 2>&1 || true
 ! grep -q 'hc.test' "$T/all-out.txt" && ok "log_sem_url: nenhuma saída contém a URL" || fail "log_sem_url: URL vazou na saída"
+
+# 9) offsite_chamado (dump ok)
+: > "$T/offsite.log"
+if BACKUP_DIR="$T/b-o1" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 0 ] && ok "offsite_chamado rc=0" || fail "offsite_chamado rc=$rc"
+[ "$(wc -l < "$T/offsite.log" | tr -d ' ')" = 1 ] && ok "offsite_chamado: 1 chamada" || fail "offsite_chamado: chamadas inesperadas"
+
+# 10) offsite_nao_chamado (dump falhou)
+: > "$T/offsite.log"
+if STUB_DUMP_FAIL=1 BACKUP_DIR="$T/b-o2" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -ne 0 ] && ok "offsite_nao_chamado rc=$rc (≠0)" || fail "offsite_nao_chamado rc=0"
+[ ! -s "$T/offsite.log" ] && ok "offsite_nao_chamado: não chamado" || fail "offsite_nao_chamado: foi chamado"
+
+# 11) offsite_com_tar_falho (tar falhou => offsite chamado mesmo assim, rc ≠ 0)
+: > "$T/offsite.log"
+if UPLOADS_DIR="$T/nao-existe" BACKUP_DIR="$T/b-o3" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -ne 0 ] && ok "offsite_com_tar_falho rc=$rc (≠0)" || fail "offsite_com_tar_falho rc=0"
+[ "$(wc -l < "$T/offsite.log" | tr -d ' ')" = 1 ] && ok "offsite_com_tar_falho: offsite chamado" || fail "offsite_com_tar_falho: não chamado"
+
+# 12) offsite_falha_nao_marca_local (offsite rc=1: check local ok, rc final ≠ 0)
+B="$T/b-o4"; : > "$T/curl.log"
+if STUB_OFFSITE_RC=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -ne 0 ] && ok "offsite_falha_nao_marca_local rc=$rc (≠0)" || fail "offsite_falha_nao_marca_local rc=0"
+grep -qx 'uuid-b' "$T/curl.log" && ok "offsite_falha_nao_marca_local: uuid-b sucesso" || fail "offsite_falha_nao_marca_local: sem sucesso local"
+! grep -qx 'uuid-b/fail' "$T/curl.log" && ok "offsite_falha_nao_marca_local: sem uuid-b/fail" || fail "offsite_falha_nao_marca_local: uuid-b/fail"
 
 if [ "$FAIL" -eq 0 ]; then echo "TODOS OK"; else echo "FALHOU"; exit 1; fi
