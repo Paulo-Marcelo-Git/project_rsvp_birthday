@@ -7,7 +7,8 @@ COPY backup.sh /backup.sh
 COPY restore.sh /restore.sh
 COPY restore-uploads.sh /restore-uploads.sh
 COPY purge-logs.sh /purge-logs.sh
-RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh
+COPY hc.sh /hc.sh
+RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh /hc.sh
 # Cron: 05:00 UTC = 02:00 BRT
 # crond não herda as env vars do container (PID 1) — grava DB_NAME/DB_HOST/DB_USER/
 # DB_PASSWORD/BACKUP_DIR/BACKUP_RETENTION_DAYS/LOG_DIR/LOG_RETENTION_DAYS como linhas
