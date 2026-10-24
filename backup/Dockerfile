@@ -1,8 +1,14 @@
 FROM mysql:8.0
 # Reseta entrypoint da imagem MySQL (que inicia o servidor)
 ENTRYPOINT []
-# cronie fornece crond no Oracle Linux 9 (base da imagem mysql:8.0)
-RUN microdnf install -y cronie && microdnf clean all
+# cronie fornece crond no Oracle Linux 9 (base da imagem mysql:8.0); unzip para o rclone
+RUN microdnf install -y cronie unzip && microdnf clean all
+# rclone fixo com checksum (SHA256SUMS oficial do release v1.75.1): o build falha se divergir
+RUN curl -fsSL -o rclone.zip https://github.com/rclone/rclone/releases/download/v1.75.1/rclone-v1.75.1-linux-amd64.zip \
+ && echo "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  rclone.zip" | sha256sum -c - \
+ && unzip -j rclone.zip '*/rclone' -d /usr/local/bin \
+ && chmod 755 /usr/local/bin/rclone \
+ && rm -f rclone.zip
 COPY backup.sh /backup.sh
 COPY restore.sh /restore.sh
 COPY restore-uploads.sh /restore-uploads.sh
@@ -10,11 +16,9 @@ COPY purge-logs.sh /purge-logs.sh
 COPY hc.sh /hc.sh
 COPY offsite.sh /offsite.sh
 COPY rclone-env.sh /rclone-env.sh
-RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh /hc.sh /offsite.sh /rclone-env.sh
-# Cron: 05:00 UTC = 02:00 BRT
-# crond não herda as env vars do container (PID 1) — grava DB_NAME/DB_HOST/DB_USER/
-# DB_PASSWORD/BACKUP_DIR/BACKUP_RETENTION_DAYS/LOG_DIR/LOG_RETENTION_DAYS como linhas
-# VAR=valor no topo do crontab (suporte nativo do cron), senão os scripts falham com
-# "unbound variable". purge-logs.sh (logs diários do app) roda 15 min após o backup.
-CMD ["sh", "-c", \
-     "{ echo \"DB_NAME=$DB_NAME\"; echo \"DB_HOST=$DB_HOST\"; echo \"DB_USER=$DB_USER\"; echo \"DB_PASSWORD=$DB_PASSWORD\"; echo \"BACKUP_DIR=$BACKUP_DIR\"; echo \"BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS\"; echo \"LOG_DIR=$LOG_DIR\"; echo \"LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS\"; echo '05 2 * * * /backup.sh >> /var/log/backup.log 2>&1'; echo '20 2 * * * /purge-logs.sh >> /var/log/purge-logs.log 2>&1'; } | crontab - && crond -n"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh /hc.sh /offsite.sh /rclone-env.sh /entrypoint.sh
+# Cron (em UTC): backup 05:05 UTC = 02:05 BRT; purge-logs 15 min depois.
+# crond não herda as env vars do container: o entrypoint grava /etc/backup.env (0600) e os
+# jobs fazem `. /etc/backup.env`. Segredos nunca vão para o crontab.
+CMD ["/entrypoint.sh"]

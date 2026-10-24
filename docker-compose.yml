@@ -136,6 +136,8 @@ services:
       - uploads_data:/uploads:ro
       # leitura e escrita: purge-logs.sh apaga os logs diários antigos do app
       - ./logs:/logs
+      # cópia externa do .env, somente leitura (offsite.sh envia ao B2 criptografado)
+      - ./.env:/run/comemore/env:ro
     depends_on:
       db:
         condition: service_healthy
