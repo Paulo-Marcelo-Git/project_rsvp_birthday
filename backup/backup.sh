@@ -12,7 +12,25 @@ mkdir -p "$BACKUP_DIR"
 umask 077
 CNF=$(mktemp)
 DUMP_TMP="${BACKUP_DIR}/${FILENAME}.tmp"
-trap 'rm -f "$CNF" "$DUMP_TMP"' EXIT
+
+# Pings do Healthchecks (best-effort, ver hc.sh).
+. "${HC_SCRIPT:-/hc.sh}"
+DUMP_DONE=0
+# Trap único: limpeza + ping final, preservando o código de saída.
+on_exit() {
+  rc=$?
+  rm -f "$CNF" "$DUMP_TMP"
+  if [ "$rc" -ne 0 ]; then
+    hc_ping "${HC_BACKUP_URL:-}" fail
+    # dump não terminou => não há o que enviar ao B2: alerta o check externo também
+    [ "$DUMP_DONE" -eq 1 ] || hc_ping "${HC_OFFSITE_URL:-}" fail
+  else
+    hc_ping "${HC_BACKUP_URL:-}"
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+hc_ping "${HC_BACKUP_URL:-}" start
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 {
   printf '[client]\n'
@@ -33,6 +51,7 @@ mysqldump \
   "$DB_NAME" | gzip > "$DUMP_TMP"
 gzip -t "$DUMP_TMP"
 mv "$DUMP_TMP" "${BACKUP_DIR}/${FILENAME}"
+DUMP_DONE=1
 
 SIZE=$(du -sh "${BACKUP_DIR}/${FILENAME}" | cut -f1)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backup salvo: ${FILENAME} (${SIZE})"
