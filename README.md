@@ -344,6 +344,63 @@ Para verificar as migrations no banco restaurado:
 docker exec rsvp_backend env DB_NAME=rsvp_restore_test python -m alembic upgrade head
 ```
 
+### Backup externo (B2)
+
+Além do backup local (7 dias, volume `backup_data`), o container `backup` envia uma cópia **criptografada** (`rclone crypt`: conteúdo e nomes de arquivo) para o Backblaze B2, logo após o backup local (**02:05 BRT / 05:05 UTC**):
+
+| O quê | Destino no bucket | Observação |
+|---|---|---|
+| Dumps SQL válidos (`comemore_*.sql.gz`) | `comemore/db/` | envia também os dias que falharam antes |
+| Uploads | `comemore/uploads/` | `rclone sync` incremental (não um tar por dia) |
+| `.env` de produção | `comemore/env/env_AAAAMMDD` | montado somente leitura em `/run/comemore/env` |
+
+- **RPO:** 1 dia. **Retenção externa:** 30 dias, garantida por **Object Lock (30 dias)** no bucket + regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` — esconder após 30 dias e apagar 1 dia depois; `comemore/uploads/` — apagar 30 dias depois de escondido.
+- **Chave de aplicação do B2:** restrita ao bucket e **sem `deleteFiles`**.
+- **Alertas (Healthchecks.io):** dois checks, `backup-local` e `backup-externo`. Sem ping no prazo ou `/fail` = alerta por e-mail/Telegram.
+- **Sem B2 configurado (dev):** a cópia externa é pulada com aviso. Configuração parcial em produção falha com saída ≠ 0 e ping `/fail`.
+
+Variáveis (`.env`, ver `.env.example`; valores só no `.env`/gerenciador de senhas, nunca no repo): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`, `HC_BACKUP_URL`, `HC_OFFSITE_URL`.
+
+> **Depois de editar o `.env`, recrie o container:** `docker compose up -d backup`. O `.env` é montado como arquivo único (um editor que substitui o arquivo deixa o container vendo o antigo) e `/etc/backup.env` só é gravado na partida do container. Um `restart` não basta se o arquivo foi substituído.
+
+Backup manual completo (local + externo): `docker exec rsvp_backup sh -c '. /etc/backup.env; /backup.sh'`.
+
+Conferir o que está no B2 (só nomes e tamanhos):
+
+```bash
+docker exec rsvp_backup sh -c '. /etc/backup.env; . /rclone-env.sh; rclone_env_export; rclone ls b2crypt:db'
+```
+
+Comparar contagem de linhas por tabela (produção × restore; só números):
+
+```bash
+docker exec rsvp_backup sh -c '. /etc/backup.env; sh /count-rows.sh rsvp_db'
+docker exec rsvp_backup sh -c '. /etc/backup.env; sh /count-rows.sh rsvp_restore_test'
+```
+
+### Restore do zero a partir do B2
+
+> **ATENÇÃO: sem `CRYPT_PASSWORD` e `CRYPT_SALT` o backup externo é ilegível** (nem o B2 nem ninguém recupera). Guarde os dois, junto com `B2_ACCOUNT_ID`, `B2_APP_KEY` e `B2_BUCKET`, no gerenciador de senhas — **fora da VPS**.
+
+Partindo de uma VPS nova, só com o repositório, a conta B2 e o gerenciador de senhas:
+
+1. Clonar o repositório e instalar o **rclone v1.75.1** conferindo o checksum (SHA-256 `982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab`, do `SHA256SUMS` oficial):
+   ```bash
+   curl -fsSLO https://github.com/rclone/rclone/releases/download/v1.75.1/rclone-v1.75.1-linux-amd64.zip
+   echo "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  rclone-v1.75.1-linux-amd64.zip" | sha256sum -c -
+   unzip -j rclone-v1.75.1-linux-amd64.zip '*/rclone' -d /usr/local/bin && chmod 755 /usr/local/bin/rclone
+   ```
+2. Exportar as 5 variáveis na sessão do shell (digitadas por você, a partir do gerenciador de senhas; evite deixá-las no histórico, ex.: `read -rs B2_APP_KEY; export B2_APP_KEY`): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`.
+3. Baixar (sem container; o script usa o `rclone-env.sh` ao lado dele):
+   ```bash
+   sh backup/restore-offsite.sh /root/restore            # dump mais recente
+   sh backup/restore-offsite.sh /root/restore 20261022   # ou de uma data
+   ```
+   Cria em `DESTINO/`: `comemore_<data>_*.sql.gz`, `env_<data>` (permissão `0600`, conteúdo nunca impresso) e `uploads/`. No container: `docker exec rsvp_backup sh /restore-offsite.sh /tmp/restore [AAAAMMDD]` (com `. /etc/backup.env`).
+4. Restaurar o `.env` (`cp /root/restore/env_<data> .env`), subir só o banco (`docker compose up -d db`) e aplicar o dump com `restore.sh` (ver "Restore manual"); restaurar os uploads com `restore-uploads.sh` (ou copiando `uploads/` para o volume `uploads_data`).
+5. Conferir com `count-rows.sh`, subir o resto (`docker compose up -d`) e testar login e um convite.
+6. Apagar o diretório baixado (`rm -rf /root/restore`): ele contém o `.env` e dados de convidados.
+
 ### Uploads (imagens e vídeos dos convites)
 
 O backup diário também gera `comemore_uploads_YYYYMMDD_HHMMSS.tar.gz` em `/backups`, com a mesma retenção (`BACKUP_RETENTION_DAYS`).

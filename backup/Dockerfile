@@ -16,8 +16,10 @@ COPY purge-logs.sh /purge-logs.sh
 COPY hc.sh /hc.sh
 COPY offsite.sh /offsite.sh
 COPY rclone-env.sh /rclone-env.sh
+COPY restore-offsite.sh /restore-offsite.sh
+COPY count-rows.sh /count-rows.sh
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh /hc.sh /offsite.sh /rclone-env.sh /entrypoint.sh
+RUN chmod +x /backup.sh /restore.sh /restore-uploads.sh /purge-logs.sh /hc.sh /offsite.sh /rclone-env.sh /restore-offsite.sh /count-rows.sh /entrypoint.sh
 # Cron (em UTC): backup 05:05 UTC = 02:05 BRT; purge-logs 15 min depois.
 # crond não herda as env vars do container: o entrypoint grava /etc/backup.env (0600) e os
 # jobs fazem `. /etc/backup.env`. Segredos nunca vão para o crontab.
