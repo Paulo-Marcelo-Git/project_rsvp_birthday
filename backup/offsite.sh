@@ -14,7 +14,8 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 # check só lista NOMES faltantes (stderr capturado para decidir dev x produção)
 if ! CHK_ERR=$(rclone_env_check 2>&1); then
-  if [ -z "${HC_OFFSITE_URL:-}" ]; then
+  # Só pula (dev) se NADA está configurado; config parcial é erro (falha não pode ser silenciosa).
+  if [ -z "${HC_OFFSITE_URL:-}${B2_ACCOUNT_ID:-}${B2_APP_KEY:-}${B2_BUCKET:-}${CRYPT_PASSWORD:-}${CRYPT_SALT:-}" ]; then
     log "AVISO: cópia externa desabilitada (B2 não configurado)"
     exit 0
   fi

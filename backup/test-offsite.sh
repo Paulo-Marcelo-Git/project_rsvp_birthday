@@ -79,6 +79,15 @@ grep -qx 'uuid-o/fail' "$T/curl.log" && ok "config_parcial: ping /fail" || fail 
 grep -q 'B2_APP_KEY' "$T/err.txt" && ok "config_parcial: stderr cita B2_APP_KEY" || fail "config_parcial: stderr sem nome"
 ! grep -qF -e "$SECRET_PW" -e "$SECRET_KEY" -e fake-id "$T/err.txt" "$T/out.txt" && ok "config_parcial: nenhum valor na saída" || fail "config_parcial: valor vazou"
 
+# 2b) b2_parcial_sem_hc: só B2_BUCKET, sem HC => falha (não pula)
+CLR; export B2_BUCKET=bucket-teste; reset; run
+[ "$rc" -eq 3 ] && ok "b2_parcial_sem_hc rc=3" || fail "b2_parcial_sem_hc rc=$rc"
+MISS=1; for n in B2_ACCOUNT_ID B2_APP_KEY CRYPT_PASSWORD CRYPT_SALT; do grep -q "$n" "$T/err.txt" || MISS=0; done
+[ "$MISS" = 1 ] && ok "b2_parcial_sem_hc: stderr lista os 4 nomes" || fail "b2_parcial_sem_hc: nomes faltando no stderr"
+! grep -q 'bucket-teste' "$T/err.txt" && ok "b2_parcial_sem_hc: sem valores" || fail "b2_parcial_sem_hc: valor vazou"
+[ "$(transfers)" = 0 ] && ok "b2_parcial_sem_hc: nada enviado" || fail "b2_parcial_sem_hc: enviou"
+[ ! -s "$T/curl.log" ] && ok "b2_parcial_sem_hc: curl vazio" || fail "b2_parcial_sem_hc: curl chamado"
+
 # 3) envia_tudo
 CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; run
 [ "$rc" -eq 0 ] && ok "envia_tudo rc=0" || fail "envia_tudo rc=$rc"
@@ -102,6 +111,7 @@ grep -qx 'uuid-o/fail' "$T/curl.log" && ok "env_ausente: ping /fail" || fail "en
 
 # 5) segredo_fora_do_ps
 CLR; CFG; reset; run
+grep -q '^sync ' "$T/rclone.log" && ok "segredo_fora_do_ps: houve sync (checagem não vazia)" || fail "segredo_fora_do_ps: sem sync"
 ! grep -qF -e "$SECRET_PW" -e "$SECRET_KEY" "$T/rclone.log" && ok "segredo_fora_do_ps: argv limpo" || fail "segredo_fora_do_ps: segredo em argv"
 
 # 6) remote_config
