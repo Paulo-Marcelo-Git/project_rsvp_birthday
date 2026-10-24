@@ -16,6 +16,7 @@ cat > "$T/bin/mysql" <<'EOF2'
 q=
 for a in "$@"; do q=$a; done
 case "$q" in
+  *information_schema*vazio*) ;;
   *information_schema*) printf 'alembic_version\nevents\ninvitees\n' ;;
   *'`alembic_version`'*) echo 1 ;;
   *'`events`'*) echo 3 ;;
@@ -44,6 +45,9 @@ printf 'alembic_version\t1\nevents\t3\ninvitees\t10\n' > "$T/esperado"
 sh "$D/count-rows.sh" rsvp_db > "$T/cr.txt"
 [ "$(cat "$T/esperado")" = "$(cat "$T/cr.txt")" ] && ok "count-rows: saída exata" || fail "count-rows: saída difere"
 if sh "$D/count-rows.sh" 'x; drop' >/dev/null 2>&1; then fail "count-rows: aceitou nome inválido"; else ok "count-rows: rejeita nome inválido"; fi
+
+if sh "$D/count-rows.sh" vazio >"$T/cv.txt" 2>"$T/cv.err"; then fail "count-rows: banco vazio retornou 0"; else ok "count-rows: banco sem tabelas rc≠0"; fi
+[ ! -s "$T/cv.txt" ] && grep -q 'sem tabelas' "$T/cv.err" && ok "count-rows: mensagem clara, sem dados" || fail "count-rows: mensagem/saída"
 
 # restore-offsite
 export B2_ACCOUNT_ID=fake-id B2_APP_KEY=fake-key B2_BUCKET=bucket-teste CRYPT_PASSWORD=fake-pw CRYPT_SALT=fake-salt

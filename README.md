@@ -397,9 +397,28 @@ Partindo de uma VPS nova, só com o repositório, a conta B2 e o gerenciador de 
    sh backup/restore-offsite.sh /root/restore 20261022   # ou de uma data
    ```
    Cria em `DESTINO/`: `comemore_<data>_*.sql.gz`, `env_<data>` (permissão `0600`, conteúdo nunca impresso) e `uploads/`. No container: `docker exec rsvp_backup sh /restore-offsite.sh /tmp/restore [AAAAMMDD]` (com `. /etc/backup.env`).
-4. Restaurar o `.env` (`cp /root/restore/env_<data> .env`), subir só o banco (`docker compose up -d db`) e aplicar o dump com `restore.sh` (ver "Restore manual"); restaurar os uploads com `restore-uploads.sh` (ou copiando `uploads/` para o volume `uploads_data`).
-5. Conferir com `count-rows.sh`, subir o resto (`docker compose up -d`) e testar login e um convite.
-6. Apagar o diretório baixado (`rm -rf /root/restore`): ele contém o `.env` e dados de convidados.
+4. Restaurar o `.env` e subir banco e container de backup (o `backup` depende do `db` saudável e lê o `.env` restaurado):
+   ```bash
+   cp /root/restore/env_<data> .env && chmod 600 .env
+   docker compose up -d db backup
+   ```
+   > `env_<data>` leva o dia em que a cópia externa rodou, não o do dump. Para um dump antigo, pode ser preciso usar o `env_` de data mais próxima (o script sai com código 1 se `env_<data>` não existir; liste com `rclone lsf b2crypt:env` após `. backup/rclone-env.sh; rclone_env_export`).
+5. Aplicar o dump no banco **de produção** (nome em `DB_NAME`, `rsvp_db` por padrão). O `restore.sh` só enxerga `/backups` do container, então copie o dump para lá e passe o nome do banco explicitamente (sem o 2º argumento ele restaura em `rsvp_restore_test`):
+   ```bash
+   docker cp /root/restore/comemore_<data>_<hora>.sql.gz rsvp_backup:/backups/
+   docker exec rsvp_backup sh -c 'sh /restore.sh /backups/comemore_<data>_<hora>.sql.gz "$DB_NAME"'
+   docker exec rsvp_backup sh -c 'sh /count-rows.sh "$DB_NAME"'   # confere as contagens
+   ```
+   `count-rows.sh` sai com erro se o banco não tiver tabelas (restore no banco errado).
+6. Restaurar os uploads: a cópia do B2 é um diretório (`uploads/`), não um `.tar.gz`; **não** use o `restore-uploads.sh` (ele extrai `comemore_uploads_*.tar.gz`). Copie o diretório baixado para o volume `uploads_data` (nome real do volume: `docker volume ls | grep uploads_data`; é `project_rsvp_birthday_uploads_data` quando o repositório está numa pasta `project_rsvp_birthday`):
+   ```bash
+   docker run --rm --entrypoint cp \
+     -v project_rsvp_birthday_uploads_data:/uploads \
+     -v /root/restore/uploads:/src:ro \
+     project_rsvp_birthday-backup:latest -a /src/. /uploads/
+   ```
+7. Subir o resto (`docker compose up -d`) e testar login e um convite.
+8. Apagar o diretório baixado (`rm -rf /root/restore`): ele contém o `.env` e dados de convidados.
 
 ### Uploads (imagens e vídeos dos convites)
 

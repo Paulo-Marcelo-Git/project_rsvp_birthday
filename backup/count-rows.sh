@@ -23,6 +23,11 @@ esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 TABLES=$(mysql --defaults-extra-file="$CNF" -N -B \
   -e "SELECT table_name FROM information_schema.tables WHERE table_schema='${DB}' ORDER BY table_name")
 
+if [ -z "$TABLES" ]; then
+  echo "ERRO: banco '${DB}' sem tabelas (inexistente ou vazio)" >&2
+  exit 1
+fi
+
 for t in $TABLES; do
   n=$(mysql --defaults-extra-file="$CNF" -N -B "$DB" -e "SELECT COUNT(*) FROM \`${t}\`")
   printf '%s\t%s\n' "$t" "$n"
