@@ -869,6 +869,21 @@ O Playwright simula o tamanho da tela, mas não substitui um aparelho real.
 
 Backup que nunca foi restaurado não conta. Backup que fica só na própria VPS não protege contra perda da VPS.
 
+### 12.0 Cópia externa B2 (SP1) — antes do merge `[BLOQUEADOR]`
+
+Sem isto, o merge leva o código para a VPS e a cópia externa fica **desligada sem alerta** (todas as variáveis vazias = "cópia externa desabilitada", saída 0). Tudo abaixo precisa estar pronto **antes** do merge do PR. Detalhes no `README.md`, seção "Backup externo (B2)".
+
+- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Bucket B2 privado criado **já com Object Lock** em modo **governance**, retenção padrão **30 dias**, e as regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` (esconder após 30 dias, apagar 1 dia depois) e `comemore/uploads/` (apagar 30 dias depois de escondido). 2FA ativo na conta B2.
+- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Chave de aplicação criada pelo **B2 CLI** (não pelo "Read and Write" do console), restrita ao bucket, com `listBuckets,listFiles,readFiles,writeFiles` — **sem** `deleteFiles` e **sem** `bypassGovernance` (README, "Criar a chave do B2").
+- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` `CRYPT_PASSWORD` e `CRYPT_SALT` gerados e guardados no gerenciador de senhas **fora da VPS** (sem eles o backup externo é ilegível), junto com `B2_ACCOUNT_ID`, `B2_APP_KEY` e `B2_BUCKET`.
+- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Dois checks no Healthchecks.io, `backup-local` e `backup-externo` (período 1 dia, tolerância 2 h), com alerta por **e-mail e Telegram**.
+- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` As 7 variáveis no `.env` da VPS (editado por você): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`, `HC_BACKUP_URL`, `HC_OFFSITE_URL`. Conferir só os nomes, nunca os valores:
+
+  ```bash
+  grep -c -E '^(B2_ACCOUNT_ID|B2_APP_KEY|B2_BUCKET|CRYPT_PASSWORD|CRYPT_SALT|HC_BACKUP_URL|HC_OFFSITE_URL)=.+' .env
+  # esperado: 7
+  ```
+
 ### 12.1 Backup local do banco
 
 - [ ] Forçar um backup agora:
