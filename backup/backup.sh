@@ -16,19 +16,22 @@ DUMP_TMP="${BACKUP_DIR}/${FILENAME}.tmp"
 # Pings do Healthchecks (best-effort, ver hc.sh).
 . "${HC_SCRIPT:-/hc.sh}"
 DUMP_DONE=0
-# LOCAL_OK=1: dump e tar ok. O check "backup-local" reflete só o backup local;
-# falha da cópia externa tem check próprio (offsite.sh) mas ainda muda o rc.
-LOCAL_OK=0
-# Trap único: limpeza + ping final, preservando o código de saída.
+# LOCAL_PINGED=1: o check "backup-local" já recebeu o ping final (ao fim da parte
+# local, antes da cópia externa). Ele reflete só o backup local; falha da cópia
+# externa tem check próprio (offsite.sh) mas ainda muda o rc.
+LOCAL_PINGED=0
+# Trap único: limpeza + ping final se a parte local não terminou, preservando o código de saída.
 on_exit() {
   rc=$?
   rm -f "$CNF" "$DUMP_TMP"
-  if [ "$rc" -ne 0 ] && [ "$LOCAL_OK" -ne 1 ]; then
-    hc_ping "${HC_BACKUP_URL:-}" fail
-    # dump não terminou => não há o que enviar ao B2: alerta o check externo também
-    [ "$DUMP_DONE" -eq 1 ] || hc_ping "${HC_OFFSITE_URL:-}" fail
-  else
-    hc_ping "${HC_BACKUP_URL:-}"
+  if [ "$LOCAL_PINGED" -ne 1 ]; then
+    if [ "$rc" -ne 0 ]; then
+      hc_ping "${HC_BACKUP_URL:-}" fail
+      # dump não terminou => não há o que enviar ao B2: alerta o check externo também
+      [ "$DUMP_DONE" -eq 1 ] || hc_ping "${HC_OFFSITE_URL:-}" fail
+    else
+      hc_ping "${HC_BACKUP_URL:-}"
+    fi
   fi
   exit "$rc"
 }
@@ -84,7 +87,13 @@ fi
 DELETED=$(find "$BACKUP_DIR" \( -name 'comemore_*.sql.gz' -o -name 'comemore_*.sql.gz.tmp' -o -name 'comemore_uploads_*.tar.gz' -o -name 'comemore_uploads_*.tar.gz.tmp' \) -mtime +"$RETENTION_DAYS" -print -delete | wc -l)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Retenção: ${DELETED} arquivo(s) removido(s) (>${RETENTION_DAYS} dias)"
 
-[ "$TAR_RC" -ge 2 ] || LOCAL_OK=1
+# Ping final do backup local antes da cópia externa (ordem da spec §7).
+if [ "$TAR_RC" -ge 2 ]; then
+  hc_ping "${HC_BACKUP_URL:-}" fail
+else
+  hc_ping "${HC_BACKUP_URL:-}"
+fi
+LOCAL_PINGED=1
 
 # Cópia externa roda sempre que o dump terminou (mesmo com tar falho).
 OFFSITE_RC=0

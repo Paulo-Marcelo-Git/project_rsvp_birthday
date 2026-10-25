@@ -29,10 +29,12 @@ exit 0
 EOF2
 chmod +x "$T/bin/curl"
 
-# Stub offsite: registra a chamada em $T/offsite.log; STUB_OFFSITE_RC define o código
+# Stub offsite: registra a chamada em $T/offsite.log; STUB_OFFSITE_RC define o código;
+# STUB_OFFSITE_PING=1 => pinga HC_OFFSITE_URL/start como o offsite.sh real (ordem dos pings)
 cat > "$T/offsite-stub.sh" <<'EOF3'
 #!/bin/sh
 echo chamado >> "${OFFSITE_LOG:?}"
+[ "${STUB_OFFSITE_PING:-0}" != 1 ] || curl -fsS "${HC_OFFSITE_URL}/start"
 exit "${STUB_OFFSITE_RC:-0}"
 EOF3
 
@@ -136,5 +138,23 @@ if STUB_OFFSITE_RC=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "
 [ "$rc" -ne 0 ] && ok "offsite_falha_nao_marca_local rc=$rc (≠0)" || fail "offsite_falha_nao_marca_local rc=0"
 grep -qx 'uuid-b' "$T/curl.log" && ok "offsite_falha_nao_marca_local: uuid-b sucesso" || fail "offsite_falha_nao_marca_local: sem sucesso local"
 ! grep -qx 'uuid-b/fail' "$T/curl.log" && ok "offsite_falha_nao_marca_local: sem uuid-b/fail" || fail "offsite_falha_nao_marca_local: uuid-b/fail"
+
+# 13) ping_local_antes_offsite: sucesso local pingado ao fim da parte local (antes do offsite),
+# uma vez só
+B="$T/b-o5"; : > "$T/curl.log"
+if STUB_OFFSITE_PING=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 0 ] && ok "ping_local_antes_offsite rc=0" || fail "ping_local_antes_offsite rc=$rc"
+[ "$(cat "$T/curl.log")" = "$(printf 'uuid-b/start\nuuid-b\nuuid-o/start')" ] && ok "ping_local_antes_offsite: uuid-b antes de uuid-o/start" || fail "ping_local_antes_offsite: curl.log: $(tr '\n' ' ' < "$T/curl.log")"
+
+# 14) ping_falha_tar_antes_offsite: /fail local também sai antes do offsite, uma vez só
+B="$T/b-o6"; : > "$T/curl.log"
+if STUB_OFFSITE_PING=1 UPLOADS_DIR="$T/nao-existe" HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -ne 0 ] && ok "ping_falha_tar_antes_offsite rc=$rc (≠0)" || fail "ping_falha_tar_antes_offsite rc=0"
+[ "$(cat "$T/curl.log")" = "$(printf 'uuid-b/start\nuuid-b/fail\nuuid-o/start')" ] && ok "ping_falha_tar_antes_offsite: ordem e sem repetição" || fail "ping_falha_tar_antes_offsite: curl.log: $(tr '\n' ' ' < "$T/curl.log")"
+
+# 15) offsite_falha_um_ping_local: offsite rc=1 => uuid-b de sucesso exatamente uma vez
+B="$T/b-o7"; : > "$T/curl.log"
+if STUB_OFFSITE_RC=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$(grep -cx 'uuid-b' "$T/curl.log")" = 1 ] && ok "offsite_falha_um_ping_local: 1 ping de sucesso" || fail "offsite_falha_um_ping_local: curl.log: $(tr '\n' ' ' < "$T/curl.log")"
 
 if [ "$FAIL" -eq 0 ]; then echo "TODOS OK"; else echo "FALHOU"; exit 1; fi
