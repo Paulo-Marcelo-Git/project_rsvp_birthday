@@ -36,6 +36,9 @@ for v in DB_NAME DB_HOST DB_USER B2_ACCOUNT_ID B2_BUCKET CRYPT_PASSWORD CRYPT_SA
   if grep -q -E "^export $v=" "$ENV_OUT"; then ok "propaga $v"; else fail "nao propagou $v"; fi
 done
 
+# crond roda os jobs com PATH=/usr/bin:/bin; rclone está em /usr/local/bin
+[ "$(head -n 1 "$CRONTAB_OUT")" = 'PATH=/usr/local/bin:/usr/bin:/bin' ] && ok "cron_path: 1a linha PATH" || fail "cron_path: 1a linha = $(head -n 1 "$CRONTAB_OUT")"
+
 [ "$(grep -c -E 'PASSWORD|KEY|SALT|HC_' "$CRONTAB_OUT")" = 0 ] && ok "crontab_sem_segredo" || fail "crontab com segredo"
 grep -q '^05 5 \* \* \* \. /etc/backup.env; /backup.sh >> /var/log/backup.log 2>&1$' "$CRONTAB_OUT" && ok "cron backup 05 5" || fail "cron backup"
 grep -q '^20 5 \* \* \* \. /etc/backup.env; /purge-logs.sh >> /var/log/purge-logs.log 2>&1$' "$CRONTAB_OUT" && ok "cron purge 20 5" || fail "cron purge"

@@ -12,7 +12,9 @@ export -p | grep -E '^export (DB_|BACKUP_|UPLOADS_DIR|LOG_|B2_|CRYPT_|HC_|ENV_FI
 chmod 600 "$ENV_OUT"
 
 # Cron em UTC: 05:05 UTC = 02:05 BRT; purge de logs 15 min depois.
-CRON='05 5 * * * . /etc/backup.env; /backup.sh >> /var/log/backup.log 2>&1
+# crond roda os jobs com PATH=/usr/bin:/bin; rclone fica em /usr/local/bin.
+CRON='PATH=/usr/local/bin:/usr/bin:/bin
+05 5 * * * . /etc/backup.env; /backup.sh >> /var/log/backup.log 2>&1
 20 5 * * * . /etc/backup.env; /purge-logs.sh >> /var/log/purge-logs.log 2>&1'
 if [ -n "${CRONTAB_OUT:-}" ]; then
   printf '%s\n' "$CRON" > "$CRONTAB_OUT"
