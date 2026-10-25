@@ -18,6 +18,9 @@ cat > "$T/bin/rclone" <<'EOF'
 echo "$*" >> "${RCLONE_LOG:?}"
 case "$1" in
   obscure) cat >/dev/null; echo OBSCURED; exit 0 ;;
+  # lsf: imprime STUB_LSF_OUT (listagem remota) e sai com STUB_LSF_RC (3 = diretório
+  # não encontrado no rclone real)
+  lsf) [ -z "${STUB_LSF_OUT:-}" ] || echo "$STUB_LSF_OUT"; exit "${STUB_LSF_RC:-0}" ;;
 esac
 env | grep -E '^RCLONE_CONFIG_B2CRYPT_(DIRECTORY_NAME_ENCRYPTION|REMOTE)=' >> "${RCLONE_LOG}.env" || true
 if [ "$1" = copy ]; then
@@ -117,5 +120,37 @@ grep -q '^sync ' "$T/rclone.log" && ok "segredo_fora_do_ps: houve sync (checagem
 # 6) remote_config
 grep -qx 'RCLONE_CONFIG_B2CRYPT_DIRECTORY_NAME_ENCRYPTION=false' "$T/rclone.log.env" && ok "remote_config: dir encryption false" || fail "remote_config: dir encryption"
 grep -qx 'RCLONE_CONFIG_B2CRYPT_REMOTE=b2:bucket-teste/comemore' "$T/rclone.log.env" && ok "remote_config: remote" || fail "remote_config: remote"
+
+# 7) uploads_vazio_remoto_cheio: pasta local vazia e B2 com arquivos => sync recusado
+mkdir -p "$T/uploads-vazio"
+CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; STUB_LSF_OUT=abc123 UPLOADS_DIR="$T/uploads-vazio" run
+[ "$rc" -ne 0 ] && ok "uploads_vazio_remoto_cheio rc=$rc (≠0)" || fail "uploads_vazio_remoto_cheio rc=0"
+grep -q '^lsf -R --files-only b2crypt:uploads$' "$T/rclone.log" && ok "uploads_vazio_remoto_cheio: listou o remoto" || fail "uploads_vazio_remoto_cheio: sem lsf"
+! grep -q '^sync ' "$T/rclone.log" && ok "uploads_vazio_remoto_cheio: sem sync" || fail "uploads_vazio_remoto_cheio: fez sync"
+grep -q '^copy ' "$T/rclone.log" && ok "uploads_vazio_remoto_cheio: dumps enviados mesmo assim" || fail "uploads_vazio_remoto_cheio: sem copy dos dumps"
+grep -qx 'uuid-o/fail' "$T/curl.log" && ok "uploads_vazio_remoto_cheio: ping /fail" || fail "uploads_vazio_remoto_cheio: sem /fail"
+! grep -qx 'uuid-o' "$T/curl.log" && ok "uploads_vazio_remoto_cheio: sem ping de sucesso" || fail "uploads_vazio_remoto_cheio: pingou sucesso"
+grep -q 'ERRO: pasta de uploads local vazia e cópia externa não vazia; sync recusado' "$T/err.txt" && ok "uploads_vazio_remoto_cheio: mensagem" || fail "uploads_vazio_remoto_cheio: sem mensagem"
+! grep -q 'abc123' "$T/out.txt" "$T/err.txt" && ok "uploads_vazio_remoto_cheio: listagem não impressa" || fail "uploads_vazio_remoto_cheio: listagem vazou"
+
+# 8) uploads_vazio_remoto_vazio: produção hoje (sem uploads) => sync normal
+CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; UPLOADS_DIR="$T/uploads-vazio" run
+[ "$rc" -eq 0 ] && ok "uploads_vazio_remoto_vazio rc=0" || fail "uploads_vazio_remoto_vazio rc=$rc"
+grep -q "^sync $T/uploads-vazio b2crypt:uploads" "$T/rclone.log" && ok "uploads_vazio_remoto_vazio: sync feito" || fail "uploads_vazio_remoto_vazio: sem sync"
+
+# 9) uploads_vazio_lsf_falha: não dá para saber se o remoto está vazio => falha fechada
+CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; STUB_LSF_RC=1 UPLOADS_DIR="$T/uploads-vazio" run
+[ "$rc" -ne 0 ] && ok "uploads_vazio_lsf_falha rc=$rc (≠0)" || fail "uploads_vazio_lsf_falha rc=0"
+! grep -q '^sync ' "$T/rclone.log" && ok "uploads_vazio_lsf_falha: sem sync" || fail "uploads_vazio_lsf_falha: fez sync"
+grep -qx 'uuid-o/fail' "$T/curl.log" && ok "uploads_vazio_lsf_falha: ping /fail" || fail "uploads_vazio_lsf_falha: sem /fail"
+
+# 9b) uploads_vazio_remoto_inexistente: lsf rc=3 (pasta ainda não existe no B2) => sync normal
+CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; STUB_LSF_RC=3 UPLOADS_DIR="$T/uploads-vazio" run
+[ "$rc" -eq 0 ] && ok "uploads_vazio_remoto_inexistente rc=0" || fail "uploads_vazio_remoto_inexistente rc=$rc"
+grep -q '^sync ' "$T/rclone.log" && ok "uploads_vazio_remoto_inexistente: sync feito" || fail "uploads_vazio_remoto_inexistente: sem sync"
+
+# 10) uploads_cheio_nao_lista: com arquivos locais não precisa consultar o remoto
+CLR; CFG; export HC_OFFSITE_URL=$HCO; reset; run
+! grep -q '^lsf ' "$T/rclone.log" && ok "uploads_cheio_nao_lista: sem lsf" || fail "uploads_cheio_nao_lista: chamou lsf"
 
 if [ "$FAIL" -eq 0 ]; then echo "TODOS OK"; else echo "FALHOU"; exit 1; fi

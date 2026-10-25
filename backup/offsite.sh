@@ -41,7 +41,27 @@ find "$BACKUP_DIR" -maxdepth 1 -type f -name 'comemore_*.sql.gz' -size +0 -print
 log "Cópia externa: $(wc -l < "$LIST" | tr -d ' ') dump(s) listado(s)"
 
 rclone copy --files-from "$LIST" "$BACKUP_DIR" b2crypt:db || { log "ERRO: envio dos dumps falhou" >&2; FAILED=1; }
-rclone sync "$UPLOADS_DIR" b2crypt:uploads || { log "ERRO: envio dos uploads falhou" >&2; FAILED=1; }
+
+# Trava: pasta local vazia (volume perdido/restore em andamento) não pode esconder
+# no B2 os uploads que existem lá. Remoto vazio também => sync normal.
+SYNC_OK=1
+LOCAL_UM=$(find "$UPLOADS_DIR" -type f -print 2>/dev/null | head -n 1 || true)
+if [ -z "$LOCAL_UM" ]; then
+  # código 3 do rclone = diretório não encontrado (nada no B2 ainda) => remoto vazio
+  LSF_RC=0
+  REMOTO=$(rclone lsf -R --files-only b2crypt:uploads) || LSF_RC=$?
+  if [ "$LSF_RC" -ne 0 ] && [ "$LSF_RC" -ne 3 ]; then
+    log "ERRO: listagem dos uploads no B2 falhou (código ${LSF_RC}); sync recusado" >&2
+    SYNC_OK=0; FAILED=1
+  elif [ -n "$REMOTO" ]; then
+    log "ERRO: pasta de uploads local vazia e cópia externa não vazia; sync recusado" >&2
+    SYNC_OK=0; FAILED=1
+  fi
+  REMOTO=
+fi
+if [ "$SYNC_OK" -eq 1 ]; then
+  rclone sync "$UPLOADS_DIR" b2crypt:uploads || { log "ERRO: envio dos uploads falhou" >&2; FAILED=1; }
+fi
 
 if [ -s "$ENV_FILE_PATH" ]; then
   rclone copyto "$ENV_FILE_PATH" "b2crypt:env/env_$(date +%Y%m%d)" || { log "ERRO: envio do .env falhou" >&2; FAILED=1; }
