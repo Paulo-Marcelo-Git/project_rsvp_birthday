@@ -3,7 +3,8 @@
 # Uso: hc_ping URL [start|fail]   (URL vazia => não faz nada)
 hc_ping() {
   [ -n "${1:-}" ] || return 0
-  _hc_url=$1
+  # sem barra final: evita "uuid//start" quando a URL foi colada com "/"
+  _hc_url=${1%/}
   [ -z "${2:-}" ] || _hc_url="${_hc_url}/$2"
   # stderr do curl descartado: mensagens de erro podem citar a URL
   if ! curl -fsS -m 10 --retry 3 -o /dev/null "$_hc_url" 2>/dev/null; then

@@ -157,4 +157,9 @@ B="$T/b-o7"; : > "$T/curl.log"
 if STUB_OFFSITE_RC=1 HC_BACKUP_URL=$HCB HC_OFFSITE_URL=$HCO BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
 [ "$(grep -cx 'uuid-b' "$T/curl.log")" = 1 ] && ok "offsite_falha_um_ping_local: 1 ping de sucesso" || fail "offsite_falha_um_ping_local: curl.log: $(tr '\n' ' ' < "$T/curl.log")"
 
+# 16) url_com_barra_final: hc.sh remove a barra final (sem "//start")
+B="$T/b-o8"; : > "$T/curl.log"
+if HC_BACKUP_URL=https://hc.test/uuid-b/ BACKUP_DIR="$B" sh "$SCRIPT" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$(cat "$T/curl.log")" = "$(printf 'uuid-b/start\nuuid-b')" ] && ok "url_com_barra_final: barra removida" || fail "url_com_barra_final: curl.log: $(tr '\n' ' ' < "$T/curl.log")"
+
 if [ "$FAIL" -eq 0 ]; then echo "TODOS OK"; else echo "FALHOU"; exit 1; fi
