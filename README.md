@@ -351,15 +351,30 @@ Além do backup local (7 dias, volume `backup_data`), o container `backup` envia
 | O quê | Destino no bucket | Observação |
 |---|---|---|
 | Dumps SQL válidos (`comemore_*.sql.gz`) | `comemore/db/` | envia também os dias que falharam antes |
-| Uploads | `comemore/uploads/` | `rclone sync` incremental (não um tar por dia) |
+| Uploads | `comemore/uploads/` | `rclone sync` incremental (não um tar por dia); recusado se a pasta local estiver vazia e o B2 não (ver abaixo) |
 | `.env` de produção | `comemore/env/env_AAAAMMDD` | montado somente leitura em `/run/comemore/env` |
 
-- **RPO:** 1 dia. **Retenção externa:** 30 dias, garantida por **Object Lock (30 dias)** no bucket + regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` — esconder após 30 dias e apagar 1 dia depois; `comemore/uploads/` — apagar 30 dias depois de escondido.
-- **Chave de aplicação do B2:** restrita ao bucket e **sem `deleteFiles`**.
+- **RPO:** 1 dia. **Retenção externa:** 30 dias, garantida por **Object Lock em modo _governance_ com retenção padrão de 30 dias** no bucket + regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` — esconder após 30 dias e apagar 1 dia depois; `comemore/uploads/` — apagar 30 dias depois de escondido. Modo _governance_ porque a chave do app não tem `bypassGovernance`: uma VPS comprometida não consegue apagar as versões travadas, mas o dono da conta ainda corrige um engano (ex.: retenção errada). Ative **2FA na conta B2**.
+- **No bucket, os nomes das pastas `db/`, `uploads/` e `env/` ficam em claro** (as regras de ciclo de vida por prefixo dependem disso); nomes de arquivo e conteúdo são criptografados.
+- **Chave de aplicação do B2:** restrita ao bucket e **sem `deleteFiles`** e **sem `bypassGovernance`** (ver "Criar a chave do B2" abaixo).
+- **Trava de uploads vazios:** se `/uploads` não tiver nenhum arquivo e `b2crypt:uploads` tiver algum, o `rclone sync` **não roda** (ele esconderia tudo no B2): o log mostra `ERRO: pasta de uploads local vazia e cópia externa não vazia; sync recusado` e o check `backup-externo` recebe `/fail`. Local e B2 vazios: sync normal.
 - **Alertas (Healthchecks.io):** dois checks, `backup-local` e `backup-externo`. Sem ping no prazo ou `/fail` = alerta por e-mail/Telegram.
 - **Sem B2 configurado (dev):** a cópia externa é pulada com aviso. Configuração parcial em produção falha com saída ≠ 0 e ping `/fail`.
 
 Variáveis (`.env`, ver `.env.example`; valores só no `.env`/gerenciador de senhas, nunca no repo): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`, `HC_BACKUP_URL`, `HC_OFFSITE_URL`.
+
+> **Configure antes do merge.** Se o código chegar à VPS sem as 7 variáveis no `.env`, a cópia externa vira um no-op silencioso: tudo vazio = "cópia externa desabilitada" e saída 0, sem nenhum alerta (os checks do Healthchecks ainda não existem para sentir falta do ping). Por isso as variáveis, os 2 checks, o bucket e a chave precisam estar prontos **antes** do merge (ver `DEPLOY_CHECKLIST.md`, seção 12.0). Depois que os checks existem, uma remoção acidental das variáveis é coberta pelo alerta de ping ausente.
+
+#### Criar a chave do B2
+
+A opção **"Read and Write"** do console web do B2 inclui `deleteFiles` (não confirmado na documentação da Backblaze; confira a lista de capacidades da chave depois de criada). Crie a chave pelo **B2 CLI**, restrita ao bucket e só com as capacidades necessárias — `readFiles` é obrigatória para o restore; **sem** `deleteFiles` e **sem** `bypassGovernance`:
+
+```bash
+b2 account authorize            # com uma chave que tenha writeKeys (ex.: a master), digitada no prompt
+b2 key create --bucket <bucket> comemore-backup listBuckets,listFiles,readFiles,writeFiles
+```
+
+A saída mostra o `keyID` (vai em `B2_ACCOUNT_ID`) e a chave (vai em `B2_APP_KEY`), exibida **uma única vez** — copie direto para o gerenciador de senhas e o `.env`, sem colar em chat/ticket. Sintaxe conferida na doc do B2 CLI v4 ([`key create`](https://b2-command-line-tool.readthedocs.io/en/v4.4.0/subcommands/key_create.html): `b2 key create [--bucket BUCKET] keyName [capabilities]`, capacidades separadas por vírgula; exige `writeKeys`). Capacidades: [doc da Backblaze](https://www.backblaze.com/docs/cloud-storage-application-key-capabilities).
 
 > **Depois de editar o `.env`, recrie o container:** `docker compose up -d backup`. O `.env` é montado como arquivo único (um editor que substitui o arquivo deixa o container vendo o antigo) e `/etc/backup.env` só é gravado na partida do container. Um `restart` não basta se o arquivo foi substituído.
 
@@ -370,6 +385,16 @@ Conferir o que está no B2 (só nomes e tamanhos):
 ```bash
 docker exec rsvp_backup sh -c '. /etc/backup.env; . /rclone-env.sh; rclone_env_export; rclone ls b2crypt:db'
 ```
+
+Recuperar arquivos **escondidos** no B2 (ex.: um `sync` que apagou uploads por engano; versões escondidas ficam disponíveis até o ciclo de vida apagá-las), como estavam num instante:
+
+```bash
+docker exec rsvp_backup sh -c '. /etc/backup.env; . /rclone-env.sh; rclone_env_export; \
+  rclone copy --b2-version-at "AAAA-MM-DD HH:MM:SS" b2crypt:uploads /tmp/uploads_versao'
+# mesmo flag para b2crypt:db e b2crypt:env
+```
+
+`--b2-version-at` ([doc do rclone, backend B2](https://rclone.org/b2/#b2-version-at)) mostra o bucket como estava no instante dado e, enquanto ativo, não permite escrita no B2 (só leitura; o destino local é gravado normalmente). O formato `AAAA-MM-DD HH:MM:SS` é aceito pelo rclone v1.75.1 (conferido no binário); o fuso usado para interpretar o horário não está explícito na doc — use UTC, que é o fuso do container (confirmar na doc do rclone). Na VPS nova, o mesmo vale com `export RCLONE_B2_VERSION_AT="AAAA-MM-DD HH:MM:SS"` antes do `restore-offsite.sh`.
 
 Comparar contagem de linhas por tabela (produção × restore; só números):
 
@@ -386,6 +411,7 @@ Partindo de uma VPS nova, só com o repositório, a conta B2 e o gerenciador de 
 
 1. Clonar o repositório e instalar o **rclone v1.75.1** conferindo o checksum (SHA-256 `982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab`, do `SHA256SUMS` oficial):
    ```bash
+   command -v unzip || apt-get install -y unzip
    curl -fsSLO https://github.com/rclone/rclone/releases/download/v1.75.1/rclone-v1.75.1-linux-amd64.zip
    echo "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  rclone-v1.75.1-linux-amd64.zip" | sha256sum -c -
    unzip -j rclone-v1.75.1-linux-amd64.zip '*/rclone' -d /usr/local/bin && chmod 755 /usr/local/bin/rclone
@@ -397,27 +423,28 @@ Partindo de uma VPS nova, só com o repositório, a conta B2 e o gerenciador de 
    sh backup/restore-offsite.sh /root/restore 20261022   # ou de uma data
    ```
    Cria em `DESTINO/`: `comemore_<data>_*.sql.gz`, `env_<data>` (permissão `0600`, conteúdo nunca impresso) e `uploads/`. No container: `docker exec rsvp_backup sh /restore-offsite.sh /tmp/restore [AAAAMMDD]` (com `. /etc/backup.env`).
-4. Restaurar o `.env` e subir banco e container de backup (o `backup` depende do `db` saudável e lê o `.env` restaurado):
+4. Restaurar o `.env` e subir **só o banco**. O container `backup` fica parado até o fim: com o `.env` de produção ele faria a cópia externa às 05:05 UTC, e com banco e uploads ainda vazios enviaria um dump vazio como o mais novo (e, sem a trava do `offsite.sh`, esconderia os uploads no B2):
    ```bash
    cp /root/restore/env_<data> .env && chmod 600 .env
-   docker compose up -d db backup
+   docker compose up -d db
    ```
    > `env_<data>` leva o dia em que a cópia externa rodou, não o do dump. Para um dump antigo, pode ser preciso usar o `env_` de data mais próxima (o script sai com código 1 se `env_<data>` não existir; liste com `rclone lsf b2crypt:env` após `. backup/rclone-env.sh; rclone_env_export`).
-5. Aplicar o dump no banco **de produção** (nome em `DB_NAME`, `rsvp_db` por padrão). O `restore.sh` só enxerga `/backups` do container, então copie o dump para lá e passe o nome do banco explicitamente (sem o 2º argumento ele restaura em `rsvp_restore_test`):
+5. Aplicar o dump no banco **de produção** (nome em `DB_NAME`, `rsvp_db` por padrão) num container **avulso** da imagem de backup (`run --rm`: sem cron, recebe `DB_*` do `.env` via `env_file`), com o diretório baixado montado somente leitura. Passe o nome do banco explicitamente (sem o 2º argumento o `restore.sh` restaura em `rsvp_restore_test`). Espere o `db` ficar `healthy` (`docker compose ps db`) antes:
    ```bash
-   docker cp /root/restore/comemore_<data>_<hora>.sql.gz rsvp_backup:/backups/
-   docker exec rsvp_backup sh -c 'sh /restore.sh /backups/comemore_<data>_<hora>.sql.gz "$DB_NAME"'
-   docker exec rsvp_backup sh -c 'sh /count-rows.sh "$DB_NAME"'   # confere as contagens
+   docker compose run --rm --no-deps -v /root/restore:/restore:ro --entrypoint sh backup \
+     -c 'sh /restore.sh /restore/comemore_<data>_<hora>.sql.gz "$DB_NAME" && sh /count-rows.sh "$DB_NAME"'
    ```
-   `count-rows.sh` sai com erro se o banco não tiver tabelas (restore no banco errado).
-6. Restaurar os uploads: a cópia do B2 é um diretório (`uploads/`), não um `.tar.gz`; **não** use o `restore-uploads.sh` (ele extrai `comemore_uploads_*.tar.gz`). Copie o diretório baixado para o volume `uploads_data` (nome real do volume: `docker volume ls | grep uploads_data`; é `project_rsvp_birthday_uploads_data` quando o repositório está numa pasta `project_rsvp_birthday`):
+   `count-rows.sh` confere as contagens e sai com erro se o banco não tiver tabelas (restore no banco errado).
+6. Restaurar os uploads: a cópia do B2 é um diretório (`uploads/`), não um `.tar.gz`; **não** use o `restore-uploads.sh` (ele extrai `comemore_uploads_*.tar.gz`). Copie o diretório baixado para o volume `uploads_data` (nome real do volume: `docker volume ls | grep uploads_data`; é `project_rsvp_birthday_uploads_data` quando o repositório está numa pasta `project_rsvp_birthday`). O `restore-offsite.sh` baixa tudo só para o root (`0600`/`0700`) e o backend roda como `1002:1002` (`user:` no `docker-compose.yml`): copie como root e normalize dono e permissões, senão o app não lê as imagens:
    ```bash
-   docker run --rm --entrypoint cp \
+   docker run --rm --user 0 --entrypoint sh \
      -v project_rsvp_birthday_uploads_data:/uploads \
      -v /root/restore/uploads:/src:ro \
-     project_rsvp_birthday-backup:latest -a /src/. /uploads/
+     project_rsvp_birthday-backup:latest \
+     -c 'cp -r /src/. /uploads/ && chown -R 1002:1002 /uploads && find /uploads -type d -exec chmod 755 {} + && find /uploads -type f -exec chmod 644 {} +'
    ```
-7. Subir o resto (`docker compose up -d`) e testar login e um convite.
+   (Se a imagem `project_rsvp_birthday-backup:latest` ainda não existir na VPS nova: `docker compose build backup`.)
+7. Só agora subir o resto, **incluindo o `backup`** (`docker compose up -d`), e testar: login, abrir um convite **e conferir que a imagem do convite aparece** (imagem quebrada = dono/permissão dos uploads errados, refaça o passo 6).
 8. Apagar o diretório baixado (`rm -rf /root/restore`): ele contém o `.env` e dados de convidados.
 
 ### Uploads (imagens e vídeos dos convites)
