@@ -1,0 +1,3 @@
+# Falsos positivos do gitleaks, aprovados pelo usuário (SP1, 2026-10-23).
+# INVITE_TOKEN é valor fictício da fixture do teste de logs sem dado pessoal.
+d7e21abe9cfb2345618e2fab255a5e8811d5208d:backend/tests/test_log_sem_pii.py:generic-api-key:35
