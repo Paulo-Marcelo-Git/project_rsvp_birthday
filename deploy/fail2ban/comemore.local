@@ -1,0 +1,9 @@
+# Destino na VPS: /etc/fail2ban/jail.d/comemore.local
+# Backend: o padrão do Ubuntu 24.04 (systemd, via /etc/fail2ban/jail.d/defaults-debian.conf) não é alterado aqui.
+[DEFAULT]
+# 169.254.0.1 = terminal do navegador do hPanel (Hostinger): entra como root via SSH a partir desse
+# endereço link-local. Sem ignorá-lo, tentativas falhas do painel poderiam banir o acesso de emergência.
+ignoreip = 127.0.0.1/8 ::1 169.254.0.1
+
+[sshd]
+enabled = true

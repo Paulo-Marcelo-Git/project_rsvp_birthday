@@ -214,22 +214,40 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.2 SSH `[BLOQUEADOR]`
 
-- [ ] Login por chave funcionando para `pcs` **antes** de desligar senha (teste em outro terminal).
-- [ ] Desligar login por senha e login direto de root:
-
-  ```bash
-  sudo nano /etc/ssh/sshd_config.d/99-hardening.conf
-  ```
+- [ ] Login por chave funcionando para `pcs` **antes** de desligar senha (teste em outro terminal). O deploy do GitHub Actions também entra como `pcs`.
+- [ ] Estado atual em produção (2026-10-29): `/etc/ssh/sshd_config.d/00-hardening.conf` com senha desligada e root bloqueado, **exceto** para o terminal do navegador do hPanel, que entra como root via SSH a partir de `169.254.0.1` (endereço link-local) com uma chave temporária que o painel grava em `/root/.ssh/authorized_keys`:
 
   ```
+  # (linha de comentário explicando o motivo)
   PasswordAuthentication no
   KbdInteractiveAuthentication no
   PermitRootLogin no
+
+  Match Address 169.254.0.1
+      PermitRootLogin prohibit-password
   ```
 
+  `/root/.ssh/authorized_keys` fica vazio fora das sessões do painel. Para alterar, faça backup antes e valide antes de recarregar (sempre encadeado com `&&`, nunca `set -e` no terminal interativo):
+
   ```bash
-  sudo sshd -t && sudo systemctl reload ssh
+  sudo cp -a /etc/ssh/sshd_config.d/00-hardening.conf /etc/ssh/sshd_config.d/00-hardening.conf.bak-$(date +%Y%m%d) \
+    && sudo nano /etc/ssh/sshd_config.d/00-hardening.conf \
+    && sudo sshd -t && sudo systemctl reload ssh
   # Em OUTRO terminal, confirme que ainda consegue entrar antes de fechar o atual
+  ```
+
+- [ ] Validar a configuração efetiva (de qualquer origem root é `no`; só do painel é `without-password`):
+
+  ```bash
+  sudo sshd -T -C addr=8.8.8.8,user=root,host=x | grep permitrootlogin          # permitrootlogin no
+  sudo sshd -T -C addr=169.254.0.1,user=root,host=x | grep permitrootlogin      # permitrootlogin without-password
+  ```
+
+- [ ] Sonda externa (da sua máquina local): só `publickey` é aceito.
+
+  ```bash
+  ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive pcs@SEU_IP_VPS true
+  # esperado: Permission denied (publickey).
   ```
 
 ### 2.3 Firewall `[BLOQUEADOR]`
@@ -250,13 +268,18 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.4 Proteção e manutenção `[RECOMENDADO]`
 
-- [ ] **fail2ban** (bloqueia força bruta no SSH):
+- [ ] **fail2ban** (bloqueia força bruta no SSH). A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho.
 
   ```bash
-  sudo apt-get install -y fail2ban
-  sudo systemctl enable --now fail2ban
+  sudo apt-get install -y fail2ban \
+    && sudo install -m 644 -o root -g root /srv/projects/project_rsvp_birthday/deploy/fail2ban/comemore.local /etc/fail2ban/jail.d/comemore.local \
+    && sudo fail2ban-client -t \
+    && sudo systemctl enable --now fail2ban
   sudo fail2ban-client status sshd
+  sudo fail2ban-client get sshd ignoreip     # deve listar 127.0.0.1/8, ::1 e 169.254.0.1
   ```
+
+  Se já existir `/etc/fail2ban/jail.d/comemore.local`, faça `cp -a` para `.bak-AAAAMMDD` antes do `install`. Conferir também que o backend do jail é o `systemd` do Ubuntu 24.04 (`/etc/fail2ban/jail.d/defaults-debian.conf`).
 
 - [ ] **Atualizações automáticas de segurança**:
 
@@ -424,64 +447,50 @@ SHOW GRANTS FOR 'rsvp_app'@'%';   -- só rsvp_db.*, nada em *.*
 ### 7.1 Configuração inicial
 
 ```bash
-sudo nano /etc/nginx/sites-available/comemore
-```
+A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicada pelo deploy (o CI só faz `git pull`): a aplicação na VPS é manual, pelo roteiro abaixo. O site já existe em produção (`/etc/nginx/sites-available/zapbyte.com.br`, com o certbot já aplicado); o roteiro substitui esse arquivo pela versão do repo.
 
-```nginx
-# Zonas de rate limit (este arquivo é incluído dentro do bloco http)
-limit_req_zone $binary_remote_addr zone=auth:10m  rate=5r/m;
-limit_req_zone $binary_remote_addr zone=rsvp:10m  rate=20r/m;
-limit_req_zone $binary_remote_addr zone=geral:10m rate=10r/s;
+| Arquivo no repo (`deploy/nginx/`) | Destino na VPS |
+|---|---|
+| `zapbyte.com.br.conf` | `/etc/nginx/sites-available/zapbyte.com.br` |
+| `comemore.conf` (3 `limit_req_zone`, 2 `map`, `log_format comemore_masked`, `limit_req_log_level warn`) | `/etc/nginx/conf.d/comemore.conf` |
+| `snippets/comemore-proxy.conf` | `/etc/nginx/snippets/comemore-proxy.conf` |
+| `snippets/comemore-security-headers.conf` | `/etc/nginx/snippets/comemore-security-headers.conf` |
 
-server {
-    listen 80;
-    server_name seudominio.com.br www.seudominio.com.br;
+- [ ] **Antes de aplicar**, validar localmente (Docker, nginx 1.24 com a config do repo e upstream de teste):
 
-    server_tokens off;
-    client_max_body_size 55M;   # uploads até 50 MB + margem
+  ```bash
+  bash deploy/nginx/test-nginx.sh    # esperado: saída 0
+  ```
 
-    location ~ ^/(login|signup|resend-verification|forgot-password) {
-        limit_req zone=auth burst=5 nodelay;
-        limit_req_status 429;
-        include /etc/nginx/snippets/comemore-proxy.conf;
-    }
+- [ ] Na VPS, com o repo atualizado (`git pull`). Tudo encadeado com `&&` (nunca `set -e` no terminal interativo): backup do arquivo do site, instalação dos 4 arquivos, `nginx -t` e só então `reload` (nunca `restart`):
 
-    # ⚙️ Ajuste para o caminho real do POST de confirmação de presença
-    location ~ ^/invite/ {
-        limit_req zone=rsvp burst=10 nodelay;
-        limit_req_status 429;
-        add_header X-Robots-Tag "noindex, nofollow" always;
-        include /etc/nginx/snippets/comemore-proxy.conf;
-    }
+  ```bash
+  sudo cp -a /etc/nginx/sites-available/zapbyte.com.br /etc/nginx/sites-available/zapbyte.com.br.bak-$(date +%Y%m%d) \
+    && D=/srv/projects/project_rsvp_birthday/deploy/nginx \
+    && sudo install -m 644 -o root -g root $D/zapbyte.com.br.conf /etc/nginx/sites-available/zapbyte.com.br \
+    && sudo install -m 644 -o root -g root $D/comemore.conf /etc/nginx/conf.d/comemore.conf \
+    && sudo install -m 644 -o root -g root $D/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-proxy.conf \
+    && sudo install -m 644 -o root -g root $D/snippets/comemore-security-headers.conf /etc/nginx/snippets/comemore-security-headers.conf \
+    && sudo nginx -t \
+    && sudo systemctl reload nginx
+  ```
 
-    location / {
-        limit_req zone=geral burst=40 nodelay;
-        limit_req_status 429;
-        include /etc/nginx/snippets/comemore-proxy.conf;
-    }
-}
-```
+  Se `/etc/nginx/conf.d/comemore.conf` ou os snippets já existirem, copie-os para `.bak-AAAAMMDD` antes do `install`. Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
-```bash
-sudo nano /etc/nginx/snippets/comemore-proxy.conf
-```
+- [ ] **Rollback** (restaura o arquivo do site, remove os 3 arquivos novos, valida e recarrega):
 
-```nginx
-proxy_pass         http://127.0.0.1:3000;
-proxy_set_header   Host $host;
-proxy_set_header   X-Real-IP $remote_addr;
-proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header   X-Forwarded-Proto $scheme;
-proxy_read_timeout 60s;
-```
+  ```bash
+  sudo cp -a /etc/nginx/sites-available/zapbyte.com.br.bak-AAAAMMDD /etc/nginx/sites-available/zapbyte.com.br \
+    && sudo rm -f /etc/nginx/conf.d/comemore.conf /etc/nginx/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-security-headers.conf \
+    && sudo nginx -t \
+    && sudo systemctl reload nginx
+  ```
 
-```bash
-sudo ln -s /etc/nginx/sites-available/comemore /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
-```
+  (Troque `AAAAMMDD` pela data do backup. Se os snippets existiam antes da aplicação, restaure os `.bak` deles em vez de removê-los.)
 
-> Ajuste os nomes das rotas de `auth` e `invite` às rotas reais do app. Rotas que não existirem simplesmente não casam.
+> **Máscara de tokens no `error.log`:** depende de o `error_log` do Ubuntu continuar no nível padrão `error` (`limit_req_log_level warn` faz as rejeições de rate limit ficarem abaixo desse nível, e por isso não gravam a linha de requisição crua). Não baixe o nível do `error_log` para `warn` ou menos. Linhas de erro de upstream (502/504) ainda podem carregar a linha de requisição com o token; isso é tratado no passo de limpeza de logs.
+
+> As rotas de `auth` e `invite` do `zapbyte.com.br.conf` seguem as rotas reais do app; rotas que não existirem simplesmente não casam.
 
 ### 7.2 HTTPS `[BLOQUEADOR]`
 
@@ -491,21 +500,9 @@ sudo certbot --nginx -d $DOMINIO -d www.$DOMINIO --redirect
 
 ### 7.3 Headers de segurança (depois do certbot)
 
-O certbot cria um bloco `server { listen 443 ssl; ... }`. **Dentro dele**, adicione:
+Os headers de segurança (HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) ficam em `deploy/nginx/snippets/comemore-security-headers.conf`, incluído pelo `zapbyte.com.br.conf` no bloco `server` e de novo em `location ~ ^/invite/`. Eles são instalados junto com o restante pelo roteiro da seção 7.1 (mesmo `install`, mesmo `nginx -t` + `reload`, mesmo rollback); não há edição manual a fazer depois do certbot. O certbot já está aplicado em produção e as linhas `# managed by Certbot` foram preservadas no arquivo do repo.
 
-```nginx
-add_header Strict-Transport-Security "max-age=31536000" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header X-Frame-Options "DENY" always;
-add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-```
-
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-> Cuidado com herança no nginx: um `add_header` dentro de um `location` (como o `X-Robots-Tag` em `/invite/`) **anula** os `add_header` do bloco `server` para aquela rota. Repita os headers de segurança dentro de `location ~ ^/invite/`, ou mova-os para um snippet incluído nos dois lugares. A seção 10 verifica isso.
+> Cuidado com herança no nginx: um `add_header` dentro de um `location` (como o `X-Robots-Tag` em `/invite/`) **anula** os `add_header` do bloco `server` para aquela rota. Por isso o snippet de headers é incluído também dentro de `location ~ ^/invite/`. A seção 10 verifica isso.
 
 > `Referrer-Policy` evita que o token de convite vaze no cabeçalho `Referer` quando o convidado clica em um link externo (ex.: Google Maps). `Content-Security-Policy` fica como `[RECOMENDADO]` para depois do go-live, porque exige mapear scripts e estilos do front para não quebrar páginas.
 
