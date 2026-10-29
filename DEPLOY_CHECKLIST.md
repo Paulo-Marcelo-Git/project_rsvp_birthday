@@ -352,7 +352,8 @@ REDIS_URL=redis://redis:6379/0
 
 # ── Backup ────────────────────────────────────────────────────────────────────
 BACKUP_RETENTION_DAYS=7
-HEALTHCHECK_BACKUP_URL=← URL de ping do Healthchecks.io (seção 15)
+# Backup externo (seção 12.0): B2_ACCOUNT_ID, B2_APP_KEY, B2_BUCKET, CRYPT_PASSWORD, CRYPT_SALT,
+# HC_BACKUP_URL, HC_OFFSITE_URL — valores digitados por você, nunca copiados de chat/ticket
 
 # ── Versão em execução (usada na tag da imagem) ───────────────────────────────
 APP_VERSION=← conteúdo do arquivo VERSION
@@ -873,16 +874,18 @@ Backup que nunca foi restaurado não conta. Backup que fica só na própria VPS 
 
 Sem isto, o merge leva o código para a VPS e a cópia externa fica **desligada sem alerta** (todas as variáveis vazias = "cópia externa desabilitada", saída 0). Tudo abaixo precisa estar pronto **antes** do merge do PR. Detalhes no `README.md`, seção "Backup externo (B2)".
 
-- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Bucket B2 privado criado **já com Object Lock** em modo **governance**, retenção padrão **30 dias**, e as regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` (esconder após 30 dias, apagar 1 dia depois) e `comemore/uploads/` (apagar 30 dias depois de escondido). 2FA ativo na conta B2.
-- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Chave de aplicação criada pelo **B2 CLI** (não pelo "Read and Write" do console), restrita ao bucket, com `listBuckets,listFiles,readFiles,writeFiles` — **sem** `deleteFiles` e **sem** `bypassGovernance` (README, "Criar a chave do B2").
-- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` `CRYPT_PASSWORD` e `CRYPT_SALT` gerados e guardados no gerenciador de senhas **fora da VPS** (sem eles o backup externo é ilegível), junto com `B2_ACCOUNT_ID`, `B2_APP_KEY` e `B2_BUCKET`.
-- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` Dois checks no Healthchecks.io, `backup-local` e `backup-externo` (período 1 dia, tolerância 2 h), com alerta por **e-mail e Telegram**.
-- [ ] `[BLOQUEADOR]` `[👤 MANUAL]` As 7 variáveis no `.env` da VPS (editado por você): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`, `HC_BACKUP_URL`, `HC_OFFSITE_URL`. Conferir só os nomes, nunca os valores:
+- [x] `[BLOQUEADOR]` `[👤 MANUAL]` Bucket B2 privado criado **já com Object Lock** em modo **governance**, retenção padrão **30 dias**, e as regras de ciclo de vida por prefixo: `comemore/db/` e `comemore/env/` (esconder após 30 dias, apagar 1 dia depois) e `comemore/uploads/` (apagar 30 dias depois de escondido). 2FA ativo na conta B2.
+- [x] `[BLOQUEADOR]` `[👤 MANUAL]` Chave de aplicação criada pelo **B2 CLI** (não pelo "Read and Write" do console), restrita ao bucket, com `listBuckets,listFiles,readFiles,writeFiles` — **sem** `deleteFiles` e **sem** `bypassGovernance` (README, "Criar a chave do B2").
+- [x] `[BLOQUEADOR]` `[👤 MANUAL]` `CRYPT_PASSWORD` e `CRYPT_SALT` gerados e guardados no gerenciador de senhas **fora da VPS** (sem eles o backup externo é ilegível), junto com `B2_ACCOUNT_ID`, `B2_APP_KEY` e `B2_BUCKET`.
+- [x] `[BLOQUEADOR]` `[👤 MANUAL]` Dois checks no Healthchecks.io, `backup-local` e `backup-externo` (período 1 dia, tolerância 2 h), com alerta por **e-mail e Telegram**.
+- [x] `[BLOQUEADOR]` `[👤 MANUAL]` As 7 variáveis no `.env` da VPS (editado por você): `B2_ACCOUNT_ID`, `B2_APP_KEY`, `B2_BUCKET`, `CRYPT_PASSWORD`, `CRYPT_SALT`, `HC_BACKUP_URL`, `HC_OFFSITE_URL`. Conferir só os nomes, nunca os valores:
 
   ```bash
   grep -c -E '^(B2_ACCOUNT_ID|B2_APP_KEY|B2_BUCKET|CRYPT_PASSWORD|CRYPT_SALT|HC_BACKUP_URL|HC_OFFSITE_URL)=.+' .env
   # esperado: 7
   ```
+
+> **Concluído em 2026-10-28, antes do merge do PR #5 (8ba2089):** bucket com Object Lock governance (versões do 1º envio travadas até 2026-11-27); 7/7 variáveis no `.env` da VPS, sem duplicadas nem CRLF; 2 checks com e-mail + Telegram; `CRYPT_*`/`B2_*` no gerenciador de senhas (informado pelo responsável).
 
 ### 12.1 Backup local do banco
 
@@ -914,114 +917,63 @@ O `backup.sh` gera dump do MySQL; as imagens enviadas **não** estão nele.
 
 ### 12.3 Cópia externa (offsite) `[BLOQUEADOR]` `[⚙️ CÓDIGO]`
 
-Recomendação: **rclone** com destino em Backblaze B2, S3 ou Google Drive, usando um remote do tipo **crypt**. Os backups contêm dados pessoais de convidados (LGPD) e devem sair da VPS criptografados.
+Implementada no SP1 **dentro do container `backup`** (não há script nem rclone no host): ao fim do `backup.sh` (cron 02:05 BRT / 05:05 UTC), o `offsite.sh` envia ao Backblaze B2, via `rclone crypt` (conteúdo e nomes criptografados — os backups têm dados pessoais de convidados, LGPD), os dumps SQL, os uploads (`rclone sync`) e o `.env` de produção. Retenção externa de 30 dias por Object Lock + ciclo de vida no bucket, não por script. Desenho, variáveis e trava de uploads vazios: `README.md`, "Backup externo (B2)". Pré-requisitos: seção 12.0.
 
-- [ ] `[⚙️ CÓDIGO]` Expor os backups para o host com bind mount no compose (ex.: `/home/pcs/backups:/backups` no serviço `rsvp_backup`), para o script do host conseguir ler.
-- [ ] Instalar e configurar o rclone **interativamente na VPS** (as credenciais do destino ficam só no `rclone.conf`, nunca no repositório):
-
-  ```bash
-  sudo apt-get install -y rclone
-  rclone config          # criar remote "destino" e, sobre ele, remote crypt "offsite"
-  chmod 600 ~/.config/rclone/rclone.conf
-  ```
-
-  Guarde a senha do remote crypt em um gerenciador de senhas **fora da VPS**. Sem ela, o backup externo não pode ser restaurado.
-
-- [ ] Criar o arquivo de ambiente do script, com permissão restrita:
+- [ ] Forçar uma execução e conferir o log (o `backup.sh` já chama o `offsite.sh`; `/etc/backup.env` traz as variáveis):
 
   ```bash
-  nano ~/.offsite.env && chmod 600 ~/.offsite.env
-  # HEALTHCHECK_OFFSITE_URL=← URL de ping do Healthchecks.io
-  # UPLOADS_VOLUME=← nome do volume de uploads
+  docker exec rsvp_backup sh -c '. /etc/backup.env; /backup.sh'
+  docker exec rsvp_backup tail -20 /var/log/backup.log
+  # esperado: "Cópia externa: N dump(s) listado(s)" e "cópia externa concluída", sem ERRO
+  # o NOTICE 'Config file "/root/.config/rclone/rclone.conf" not found' é esperado (config via variáveis)
   ```
 
-- [ ] Criar `~/bin/offsite-backup.sh`:
-
-  ```bash
-  #!/usr/bin/env bash
-  set -euo pipefail
-  source ~/.offsite.env
-  BACKUP_DIR=/home/pcs/backups
-  STAMP=$(date +%Y%m%d_%H%M%S)
-
-  trap 'curl -fsS -m 10 --retry 3 "$HEALTHCHECK_OFFSITE_URL/fail" >/dev/null || true' ERR
-
-  # Uploads (somente leitura)
-  docker run --rm -v "$UPLOADS_VOLUME":/data:ro -v "$BACKUP_DIR":/out alpine \
-    tar czf "/out/uploads_$STAMP.tar.gz" -C /data .
-
-  # Envia o que foi gerado nas últimas 26h
-  rclone copy "$BACKUP_DIR" offsite:comemore --max-age 26h
-
-  # Retenção externa: 30 dias
-  rclone delete offsite:comemore --min-age 30d
-
-  # Retenção local dos tarballs de upload: 7 dias
-  find "$BACKUP_DIR" -name 'uploads_*.tar.gz' -mtime +7 -delete
-
-  curl -fsS -m 10 --retry 3 "$HEALTHCHECK_OFFSITE_URL" >/dev/null
-  ```
-
-  ```bash
-  chmod 700 ~/bin/offsite-backup.sh
-  ~/bin/offsite-backup.sh && rclone ls offsite:comemore
-  ```
-
-- [ ] Agendar após o backup do banco (02h05 BRT = 05h05 UTC):
-
-  ```bash
-  crontab -e
-  # 30 5 * * * /home/pcs/bin/offsite-backup.sh >> /home/pcs/logs-offsite.log 2>&1
-  ```
+- [ ] Os dois checks do Healthchecks.io (`backup-local` e `backup-externo`) receberam `start` + `OK` no mesmo minuto.
+- [ ] Nada de credencial no host: sem `~/.config/rclone/rclone.conf`, `~/.offsite.env` ou `~/bin/offsite-backup.sh` (desenho antigo, substituído pelo SP1).
 
 ### 12.4 Restore de teste `[BLOQUEADOR]`
 
-Critério: **restaurei o backup de ontem, a partir da cópia externa, num banco limpo, e os dados estavam lá**.
+Critério: **restaurei o backup de ontem, a partir da cópia externa, num banco limpo, e os dados estavam lá**. O procedimento de recuperação de uma VPS do zero está no `README.md`, "Restore do zero a partir do B2"; aqui é o ensaio, sem tocar o `rsvp_db`.
 
-- [ ] Baixar o dump mais recente **da cópia externa** (não do disco local):
+- [ ] Baixar o dump mais recente **da cópia externa** (não do disco local). O `restore-offsite.sh` imprime só nomes e tamanhos; o `.env` baixado fica com permissão `0600` e nunca é impresso:
 
   ```bash
-  mkdir -p /tmp/restore-test
-  rclone copy offsite:comemore /tmp/restore-test --include 'comemore_*.sql.gz' --max-age 26h
-  ls -lh /tmp/restore-test
+  docker exec rsvp_backup sh -c '. /etc/backup.env; sh /restore-offsite.sh /tmp/restore-test'
+  docker exec rsvp_backup ls -l /tmp/restore-test
   ```
 
-- [ ] Restaurar em banco separado (não toca o `rsvp_db`):
+- [ ] Restaurar em banco separado (`restore.sh` sem 2º argumento = `rsvp_restore_test`):
 
   ```bash
-  ARQ=$(ls -t /tmp/restore-test/comemore_*.sql.gz | head -1)
-  docker cp "$ARQ" rsvp_backup:/tmp/restore.sql.gz
-  docker exec rsvp_backup sh /restore.sh /tmp/restore.sql.gz rsvp_restore_test
+  docker exec rsvp_backup sh -c 'sh /restore.sh "$(ls -t /tmp/restore-test/comemore_*.sql.gz | head -1)"'
   # "Restore concluído."
   ```
 
-- [ ] Comparar **contagem de linhas** das tabelas principais (tabela restaurada vazia também gera "Restore concluído"). Ajuste os nomes das tabelas:
+- [ ] Comparar **contagem de linhas** de todas as tabelas (tabela restaurada vazia também gera "Restore concluído"). O `count-rows.sh` imprime só números:
 
   ```bash
-  docker exec -it rsvp_mysql mysql -u root -p -e "
-    SELECT 'prod', (SELECT COUNT(*) FROM rsvp_db.convidados), (SELECT COUNT(*) FROM rsvp_db.eventos)
-    UNION ALL
-    SELECT 'restore', (SELECT COUNT(*) FROM rsvp_restore_test.convidados), (SELECT COUNT(*) FROM rsvp_restore_test.eventos);"
+  docker exec rsvp_backup sh /count-rows.sh rsvp_db > /tmp/prod.tsv
+  docker exec rsvp_backup sh /count-rows.sh rsvp_restore_test > /tmp/restore.tsv
+  diff /tmp/prod.tsv /tmp/restore.tsv && echo "0 divergências"
   ```
 
-  **Esperado:** números iguais ou muito próximos (diferença = o que entrou desde o backup).
+  **Esperado:** "0 divergências", ou diferença só no que entrou desde o backup.
 
-- [ ] Restaurar o tarball de uploads em diretório temporário e conferir que as imagens abrem:
+- [ ] Conferir os uploads baixados (`/tmp/restore-test/uploads/`, diretório — não `.tar.gz`): mesma quantidade de arquivos do volume e uma imagem abrindo. Com o volume de produção vazio, este passo fica pendente até haver arquivo real.
 
   ```bash
-  rclone copy offsite:comemore /tmp/restore-test --include 'uploads_*.tar.gz' --max-age 26h
-  mkdir -p /tmp/restore-test/uploads && tar xzf $(ls -t /tmp/restore-test/uploads_*.tar.gz | head -1) -C /tmp/restore-test/uploads
-  ls /tmp/restore-test/uploads | head
+  docker exec rsvp_backup sh -c 'find /tmp/restore-test/uploads -type f | wc -l; find /uploads -type f | wc -l'
   ```
 
-- [ ] Limpar:
+- [ ] Limpar (o diretório baixado contém o `.env` de produção e dados de convidados):
 
   ```bash
   docker exec -it rsvp_mysql mysql -u root -p -e "DROP DATABASE rsvp_restore_test;"
-  rm -rf /tmp/restore-test
+  docker exec rsvp_backup rm -rf /tmp/restore-test
+  rm -f /tmp/prod.tsv /tmp/restore.tsv
   ```
 
-- [ ] Registrar data e duração do restore: ______ (tempo de restore = parte do tempo de recuperação em um incidente real)
+- [ ] Registrar data e duração do restore: ______ (tempo de restore = parte do tempo de recuperação em um incidente real). Último ensaio: 2026-10-28, 41 s, 0 divergências (MySQL 8.4.10 descartável e sem rede, ver Go/No-Go 17).
 
 ### 12.5 Testar migrations contra cópia dos dados reais (a partir do 2º deploy)
 
@@ -1207,28 +1159,19 @@ O objetivo é saber que algo quebrou **antes** do cliente reclamar.
   - Monitor de expiração do certificado SSL (avisar com 14 dias de antecedência).
 - [ ] Teste do alerta: `docker stop rsvp_backend` → alerta chega → `docker start rsvp_backend` → alerta de recuperação chega.
 
-- [ ] `[BLOQUEADOR]` **Backup que não rodou gera alerta** (Healthchecks.io, plano gratuito):
-  - Check "backup-db" com período de 1 dia + tolerância de 2 h.
-  - `[⚙️ CÓDIGO]` No fim do `backup.sh`, após sucesso:
+- [x] `[BLOQUEADOR]` **Backup que não rodou gera alerta** (Healthchecks.io, plano gratuito):
+  - Implementado no SP1 (`backup/hc.sh`): checks `backup-local` (`HC_BACKUP_URL`, pingado pelo `backup.sh`) e `backup-externo` (`HC_OFFSITE_URL`, pingado pelo `offsite.sh`), período de 1 dia + tolerância de 2 h, `start` no início, `/fail` em erro, alerta por e-mail e Telegram.
+  - As URLs de ping contêm um identificador secreto: mantenha-as só no `.env`, nunca no repositório.
 
-    ```sh
-    curl -fsS -m 10 --retry 3 "$HEALTHCHECK_BACKUP_URL" >/dev/null
-    ```
-
-    E em caso de erro, ping em `"$HEALTHCHECK_BACKUP_URL/fail"`.
-  - Check "backup-offsite" para o script da seção 12.3.
-  - As URLs de ping contêm um identificador secreto: mantenha-as no `.env`/`.offsite.env`, nunca no repositório.
-
-- [ ] `[RECOMENDADO]` **Disco**: alerta com uso acima de 80%. Exemplo no cron do host (de hora em hora):
+- [ ] `[RECOMENDADO]` **Disco**: alerta com uso acima de 80%, num check **próprio** do Healthchecks.io (`disco`, período 1 h). Não reaproveite o `backup-externo`: o alerta chegaria como "backup externo falhou". Exemplo no cron do host (de hora em hora), com a URL em `~/.disk-check.env` (`chmod 600`):
 
   ```bash
   # ~/bin/check-disk.sh
   USO=$(df --output=pcent / | tail -1 | tr -dc '0-9')
-  source ~/.offsite.env
-  [ "$USO" -lt 80 ] || curl -fsS -m 10 "$HEALTHCHECK_OFFSITE_URL/fail" >/dev/null
+  . ~/.disk-check.env   # HC_DISK_URL=…
+  if [ "$USO" -lt 80 ]; then curl -fsS -m 10 "$HC_DISK_URL" >/dev/null
+  else curl -fsS -m 10 "$HC_DISK_URL/fail" >/dev/null; fi
   ```
-
-  (Ideal: um check próprio no Healthchecks.io para disco.)
 
 - [ ] `[RECOMENDADO]` **Erros da aplicação**: Sentry (plano gratuito) com `send_default_pii=False` e filtragem de e-mail/telefone antes do envio.
 - [ ] `[RECOMENDADO]` **Cota de e-mail**: conferir no painel da Brevo se o uso diário está longe do limite de 300.
@@ -1305,7 +1248,7 @@ Só vai para produção com **todas** as linhas marcadas.
 | # | Critério | Seção | Evidência | OK |
 |---|---|---|---|---|
 | 1 | Testes automatizados passando (fluxo crítico, isolamento, rotas protegidas) | 1.1 | saída do pytest | [ ] |
-| 2 | Nenhum segredo no git nem na imagem | 1.2, 10.7 | gitleaks "no leaks"; grep = 0 | [ ] |
+| 2 | Nenhum segredo no git nem na imagem | 1.2, 10.7 | gitleaks "no leaks"; grep = 0 (2026-10-29: gitleaks v8.30.1 `--redact` no histórico completo, 251 commits, "no leaks found" — 1 falso positivo de fixture documentado em `.gitleaksignore`; imagem de prod: `docker history` grep = 0, "sem .env na imagem"; `.env` no `.dockerignore`) | [x] |
 | 3 | Debug off, ProxyFix, cookies seguros, CSRF | 1.3, 10.3, 11.7 | curl + Playwright | [ ] |
 | 4 | Logs sem dados pessoais e tokens | 1.4, 16 | grep -c = 0 (VPS, 2026-10-22: `logs/app-*.log` + `docker logs` backend/worker desde o deploy do PR-0; 1º purge executado às 02:20, 0 removidos por nada ter >5 dias) | [x] |
 | 5 | Credenciais de produção novas e distintas das de dev | 5 | checklist do .env | [ ] |
@@ -1319,11 +1262,11 @@ Só vai para produção com **todas** as linhas marcadas.
 | 13 | Upload aceita só imagens; XSS escapado | 11.3 | Playwright | [ ] |
 | 14 | Fluxo do convidado no mobile (simulado + aparelho real) | 11.4, 11.11 | Playwright + teste manual | [ ] |
 | 15 | Restart automático e health check | 1.6, 9 | docker kill → volta sozinho | [ ] |
-| 16 | Backup do banco **e** uploads, com cópia externa criptografada | 12.1–12.3 | rclone ls | [ ] |
-| 17 | Restore testado a partir da cópia externa, com contagem de linhas | 12.4 | tabela prod × restore | [ ] |
+| 16 | Backup do banco **e** uploads, com cópia externa criptografada | 12.1–12.3 | rclone ls (SP1, deploy 8ba2089 em 2026-10-28: 1º envio ao B2 com 12 dumps + `.env`, `rclone crypt` com nomes e conteúdo criptografados, Object Lock governance até 2026-11-27; 1ª execução automática 2026-10-29 02:05 BRT: dump + uploads locais, cópia externa concluída (14 s no check `backup-externo`). Uploads: volume de prod ainda sem arquivos, sync externo de uploads não exercitado com arquivo real) | [x] |
+| 17 | Restore testado a partir da cópia externa, com contagem de linhas | 12.4 | tabela prod × restore (2026-10-28: dump `comemore_20261028_182022` baixado do B2 → MySQL 8.4.10 descartável sem rede; 8 tabelas, 0 divergências no `count-rows.sh`; `.env` baixado idêntico ao de prod, perm 600; total 41 s. Restore de uploads a partir do B2 pendente até haver arquivo real) | [x] |
 | 18 | Rollback ensaiado e cronometrado | 13 | tempo < 10 min | [ ] |
 | 19 | CI só faz deploy com testes verdes e com backup prévio | 14.2 | deploy bloqueado com teste vermelho (+ merge bloqueado, se houver branch protection) | [ ] |
-| 20 | Alerta de queda e de backup não executado funcionando | 15 | alerta de teste recebido | [ ] |
+| 20 | Alerta de queda e de backup não executado funcionando | 15 | alerta de teste recebido (parte backup ✅ 2026-10-28: Healthchecks `backup-local`/`backup-externo` com e-mail + Telegram; testados falha forçada do offsite e do dump (DOWN), recuperação (UP) e ausência de ping com o container parado (DOWN); 2026-10-29 02:05 BRT ambos OK. Edição manual da agenda no Healthchecks não notifica. **Falta:** uptime externo / alerta de queda do app) | [ ] |
 | 21 | Política de privacidade publicada e exclusão funcionando | 16 | link visível + SQL = 0 | [ ] |
 | 22 | SPF/DKIM/DMARC; e-mail chega na caixa de entrada | 3, 11.2 | dig + e-mail recebido | [ ] |
 
@@ -1361,7 +1304,7 @@ docker exec rsvp_redis redis-cli llen rq:queue:default
 docker exec -it rsvp_mysql mysql -u rsvp_app -p rsvp_db
 
 # Backup manual + cópia externa
-docker exec rsvp_backup sh /backup.sh && ~/bin/offsite-backup.sh
+docker exec rsvp_backup sh -c '. /etc/backup.env; /backup.sh'   # o backup.sh já chama o offsite.sh
 
 # Variável específica do container (nunca use `env` ou `docker inspect` sem filtro)
 docker exec rsvp_backend printenv APP_BASE_URL

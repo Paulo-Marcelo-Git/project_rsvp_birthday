@@ -25,6 +25,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | **Super-admin por role** | ✅ Concluída | migration 0006 (ENUM `super_admin` + tenant reservado `Comemore+ System`), `flask create-superadmin`, `superadmin_required` por role, super-admin restrito às rotas do painel (`restrict_super_admin_to_panel`) |
 | **Trial** | ✅ Concluída | Free: 14 dias a partir do 1º login (`repo.TRIAL_DAYS`), aviso (modal) nos últimos 3 dias (`TRIAL_WARNING_DAYS`), suspensão automática ao expirar (`suspended_reason=trial_expired`); migrations 0007 (backfill) e 0008 (`tenants.suspended_reason`); lógica em `repo.start_tenant_trial` + `_check_tenant_access` (`app.py`) |
 | **Imagem por evento + member** | ✅ Concluída | Imagem padrão obrigatória por evento (convidado pode ter a própria), signup sem evento + /admin/primeiro-evento, responsável por evento (member funcional), backup de uploads, validação de conteúdo + nosniff, limpeza de órfãos (CLI cleanup-orphan-uploads), fixes: textos no evento certo, respostas por evento, 413 |
+| **SP1 — Rede de segurança** | ✅ Concluída | Cópia externa diária criptografada (`rclone crypt`) para Backblaze B2 com Object Lock governance 30d (`backup/offsite.sh`), alertas Healthchecks.io `backup-local`/`backup-externo` (`backup/hc.sh`), restore do zero a partir do B2 (`restore-offsite.sh` + `count-rows.sh`, ensaiado em 41 s, 0 divergências), gitleaks no histórico sem achados. Deploy 8ba2089 (2026-10-28); 1ª execução automática ok em 2026-10-29 |
 
 ---
 
@@ -50,6 +51,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 - Docker Compose na VPS Hostinger, CI/CD GitHub Actions → SSH
 - Serviços Docker: `rsvp_mysql`, `rsvp_backend`, `rsvp_worker`, `rsvp_redis`, `rsvp_backup`
 - Volumes: `db_data`, `backup_data`, `uploads_data`, `redis_data`. O `backup` monta `uploads_data:/uploads:ro` e gera `comemore_uploads_*.tar.gz` com a mesma retenção do dump SQL; `restore-uploads.sh` restaura por default em `/tmp/uploads_restore_test`.
+- Backup externo: rclone v1.75.1 no container `backup` → Backblaze B2 (free tier, bucket privado com Object Lock governance 30d, chave sem `deleteFiles`/`bypassGovernance`), remote `crypt` (conteúdo e nomes criptografados). Alertas via Healthchecks.io (free), checks `backup-local` e `backup-externo`. Detalhes no README, "Backup externo (B2)".
 - pytest (453 unit tests + 50 integration tests deselected sem MySQL real)
 
 ---
@@ -81,7 +83,7 @@ project_rsvp_birthday/
 │   ├── static/
 │   ├── templates/
 │   └── tests/               # pytest — 453 unit tests + 50 integration (marcados @pytest.mark.integration)
-├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh + purge-logs.sh (mysqldump + tar.gz dos uploads + limpeza dos logs, diário via cron)
+├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh + purge-logs.sh (mysqldump + tar.gz dos uploads + limpeza dos logs, diário via cron); offsite.sh + rclone-env.sh + hc.sh (cópia externa B2 + pings) e restore-offsite.sh + count-rows.sh (restore do zero); test-*.sh
 ├── docs/
 │   ├── superpowers/         # plans/ (histórico por sub-fase) e specs/ — gitignored, só local
 │   ├── smoke-tests/         # roteiros de smoke test e2e
@@ -155,6 +157,16 @@ REDIS_URL=redis://redis:6379/0    # ausente → executa síncrono (dev); present
 # Backup
 BACKUP_RETENTION_DAYS=7
 
+# Backup externo (B2 + Healthchecks.io) — valores só no .env da VPS e no gerenciador de senhas
+# Todas ausentes = cópia externa desabilitada (dev); configuração parcial = falha + ping /fail
+B2_ACCOUNT_ID=YOUR_B2_KEY_ID_HERE
+B2_APP_KEY=YOUR_B2_APP_KEY_HERE
+B2_BUCKET=YOUR_BUCKET_HERE
+CRYPT_PASSWORD=YOUR_CRYPT_PASSWORD_HERE   # sem ele o backup externo é ilegível
+CRYPT_SALT=YOUR_CRYPT_SALT_HERE
+HC_BACKUP_URL=https://hc-ping.com/YOUR_UUID_HERE
+HC_OFFSITE_URL=https://hc-ping.com/YOUR_UUID_HERE
+
 # Super-admin do SaaS — acessa /superadmin para gerenciar tenants
 # ⚠ ATENÇÃO: este email NÃO pode já existir como usuário comum no banco.
 # `flask create-superadmin` recusa (não promove automaticamente um usuário existente).
@@ -196,4 +208,5 @@ BACKUP_RETENTION_DAYS=7
 | **5** | **Rate limiting (Flask-Limiter), LGPD (/termos + /privacidade + aceite), migration 0005, fixes técnicos** | ✅ |
 | **Deploy** | **Deploy na VPS Hostinger** (ver `DEPLOY_CHECKLIST.md`) | ✅ |
 | **Imagem por evento + member** | **Imagem padrão por evento, member responsável, signup sem evento, uploads seguros** (v1.4.0) | ✅ (deploy 2026-10-13) |
+| **SP1 — Rede de segurança** | **Backup externo B2 criptografado, alertas Healthchecks, restore do zero, gitleaks** | ✅ (deploy 2026-10-28) |
 | **Beta** | **Beta fechado** — app já está live, falta só convidar usuários reais | 🔜 |
