@@ -268,18 +268,19 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.4 Proteção e manutenção `[RECOMENDADO]`
 
-- [ ] **fail2ban** (bloqueia força bruta no SSH). A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho.
+- [ ] **fail2ban** (bloqueia força bruta no SSH). A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho. Ordem importa: depois do `apt-get install` o serviço já roda com os padrões e `enable --now` não o recarrega, então é preciso **`restart`** (aqui é fail2ban, não nginx) para carregar o `comemore.local`:
 
   ```bash
   sudo apt-get install -y fail2ban \
     && sudo install -m 644 -o root -g root /srv/projects/project_rsvp_birthday/deploy/fail2ban/comemore.local /etc/fail2ban/jail.d/comemore.local \
     && sudo fail2ban-client -t \
-    && sudo systemctl enable --now fail2ban
-  sudo fail2ban-client status sshd
-  sudo fail2ban-client get sshd ignoreip     # deve listar 127.0.0.1/8, ::1 e 169.254.0.1
+    && sudo systemctl enable fail2ban \
+    && sudo systemctl restart fail2ban \
+    && sudo fail2ban-client status sshd \
+    && sudo fail2ban-client get sshd ignoreip     # deve listar 127.0.0.1/8, ::1 e 169.254.0.1
   ```
 
-  Se já existir `/etc/fail2ban/jail.d/comemore.local`, faça `cp -a` para `.bak-AAAAMMDD` antes do `install`. Conferir também que o backend do jail é o `systemd` do Ubuntu 24.04 (`/etc/fail2ban/jail.d/defaults-debian.conf`).
+  Se já existir `/etc/fail2ban/jail.d/comemore.local`, faça `cp -p` para `.bak-AAAAMMDD` antes do `install`. Conferir também que o backend do jail é o `systemd` do Ubuntu 24.04 (`/etc/fail2ban/jail.d/defaults-debian.conf`). Depois disso, **abra o terminal do navegador do hPanel uma vez** para confirmar que o login como root continua funcionando.
 
 - [ ] **Atualizações automáticas de segurança**:
 
@@ -446,7 +447,6 @@ SHOW GRANTS FOR 'rsvp_app'@'%';   -- só rsvp_db.*, nada em *.*
 
 ### 7.1 Configuração inicial
 
-```bash
 A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicada pelo deploy (o CI só faz `git pull`): a aplicação na VPS é manual, pelo roteiro abaixo. O site já existe em produção (`/etc/nginx/sites-available/zapbyte.com.br`, com o certbot já aplicado); o roteiro substitui esse arquivo pela versão do repo.
 
 | Arquivo no repo (`deploy/nginx/`) | Destino na VPS |
@@ -462,31 +462,35 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
   bash deploy/nginx/test-nginx.sh    # esperado: saída 0
   ```
 
-- [ ] Na VPS, com o repo atualizado (`git pull`). Tudo encadeado com `&&` (nunca `set -e` no terminal interativo): backup do arquivo do site, instalação dos 4 arquivos, `nginx -t` e só então `reload` (nunca `restart`):
+- [ ] Na VPS, com o repo atualizado (`git pull`). Para **cada um dos 4 destinos**: se já existir, vira `.bak-AAAAMMDD` (`cp -p`); depois `install`. Só então `nginx -t` e `reload` (nunca `restart`). Os `set -e` ficam dentro do `bash -c`, não no terminal interativo; o `&&` garante que o reload só roda se tudo antes passou:
 
   ```bash
-  sudo cp -a /etc/nginx/sites-available/zapbyte.com.br /etc/nginx/sites-available/zapbyte.com.br.bak-$(date +%Y%m%d) \
-    && D=/srv/projects/project_rsvp_birthday/deploy/nginx \
-    && sudo install -m 644 -o root -g root $D/zapbyte.com.br.conf /etc/nginx/sites-available/zapbyte.com.br \
-    && sudo install -m 644 -o root -g root $D/comemore.conf /etc/nginx/conf.d/comemore.conf \
-    && sudo install -m 644 -o root -g root $D/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-proxy.conf \
-    && sudo install -m 644 -o root -g root $D/snippets/comemore-security-headers.conf /etc/nginx/snippets/comemore-security-headers.conf \
+  sudo bash -c 'set -e; S=$(date +%Y%m%d); D=/srv/projects/project_rsvp_birthday/deploy/nginx
+    for par in zapbyte.com.br.conf:/etc/nginx/sites-available/zapbyte.com.br \
+               comemore.conf:/etc/nginx/conf.d/comemore.conf \
+               snippets/comemore-proxy.conf:/etc/nginx/snippets/comemore-proxy.conf \
+               snippets/comemore-security-headers.conf:/etc/nginx/snippets/comemore-security-headers.conf; do
+      src=${par%%:*}; dest=${par#*:}
+      { [ ! -e "$dest" ] || cp -p "$dest" "$dest.bak-$S"; }
+      install -m 644 -o root -g root "$D/$src" "$dest"
+    done' \
     && sudo nginx -t \
     && sudo systemctl reload nginx
   ```
 
-  Se `/etc/nginx/conf.d/comemore.conf` ou os snippets já existirem, copie-os para `.bak-AAAAMMDD` antes do `install`. Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
+  Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o reload não roda; execute o rollback.** Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
-- [ ] **Rollback** (restaura o arquivo do site, remove os 3 arquivos novos, valida e recarrega):
+- [ ] **Rollback**: para cada destino, restaura o `.bak-AAAAMMDD` se existir; senão remove o arquivo recém-instalado. Depois `nginx -t` e `reload`. Troque `AAAAMMDD` pela data do backup:
 
   ```bash
-  sudo cp -a /etc/nginx/sites-available/zapbyte.com.br.bak-AAAAMMDD /etc/nginx/sites-available/zapbyte.com.br \
-    && sudo rm -f /etc/nginx/conf.d/comemore.conf /etc/nginx/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-security-headers.conf \
+  sudo bash -c 'S=AAAAMMDD
+    for dest in /etc/nginx/sites-available/zapbyte.com.br /etc/nginx/conf.d/comemore.conf \
+                /etc/nginx/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-security-headers.conf; do
+      if [ -e "$dest.bak-$S" ]; then cp -p "$dest.bak-$S" "$dest"; else rm -f "$dest"; fi
+    done' \
     && sudo nginx -t \
     && sudo systemctl reload nginx
   ```
-
-  (Troque `AAAAMMDD` pela data do backup. Se os snippets existiam antes da aplicação, restaure os `.bak` deles em vez de removê-los.)
 
 > **Máscara de tokens no `error.log`:** depende de o `error_log` do Ubuntu continuar no nível padrão `error` (`limit_req_log_level warn` faz as rejeições de rate limit ficarem abaixo desse nível, e por isso não gravam a linha de requisição crua). Não baixe o nível do `error_log` para `warn` ou menos. Linhas de erro de upstream (502/504) ainda podem carregar a linha de requisição com o token; isso é tratado no passo de limpeza de logs.
 
