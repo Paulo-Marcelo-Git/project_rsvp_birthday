@@ -134,6 +134,13 @@ t_log_porta80() {
   else fail t_log_porta80 "linha ausente ou token no log"; fi
 }
 
+t_log_mascara_query() {
+  "${CURL[@]}" -o /dev/null "$U/invite/SEGREDO6?next=/invite/x&marca=q6"
+  if grep 'marca=q6' "$ACCESS" | grep -q '/invite/\*\*\*' && [ "$(grep -c SEGREDO6 "$ACCESS")" -eq 0 ]; then
+    ok t_log_mascara_query
+  else fail t_log_mascara_query "linha ausente ou token no log"; fi
+}
+
 t_redirect_80() {
   local h
   h=$(curl -s -D - -o /dev/null -H "Host: zapbyte.com.br" http://127.0.0.1:18080/login)
@@ -160,8 +167,14 @@ t_rsvp_folga() {
   [ "$n" -eq 0 ] && ok t_rsvp_folga || fail t_rsvp_folga "$n respostas 429"
 }
 t_429_rsvp() {
-  local n; n=$(burst 150 $U/invite/abc | grep -c 429)
+  local n; n=$(burst 150 $U/invite/SEGREDO429 | grep -c 429)
   [ "$n" -ge 1 ] && ok t_429_rsvp || fail t_429_rsvp "nenhum 429"
+}
+t_errorlog_429_sem_token() {
+  # os bursts 429 usaram /invite/SEGREDO429 e /login (POST); error.log nao pode ter o token
+  local n; n=$(grep -c SEGREDO429 "$T/log/error.log" 2>/dev/null || true)
+  if [ "${n:-0}" -eq 0 ] && grep -q ' 429 ' "$ACCESS"; then ok t_errorlog_429_sem_token
+  else fail t_errorlog_429_sem_token "$n linhas com token no error.log, ou nenhum 429 no access.log"; fi
 }
 t_429_login() {
   local n; n=$(burst 40 $U/login -X POST | grep -c 429)
@@ -177,11 +190,15 @@ t_proxy_headers
 t_log_mascara
 t_log_referer
 t_log_porta80
+t_log_mascara_query
 t_redirect_80
-# rate limit por ultimo, nesta ordem (estado de zona compartilhado)
+# rate limit por ultimo, nesta ordem (estado de zona compartilhado);
+# espera a zona geral (10r/s, burst 40) reencher das requisicoes anteriores
+sleep 5
 t_static_folga
 t_rsvp_folga
 t_429_rsvp
 t_429_login
+t_errorlog_429_sem_token
 
 exit $FAIL
