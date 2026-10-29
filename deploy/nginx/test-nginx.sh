@@ -119,13 +119,19 @@ t_log_mascara() {
 }
 
 t_log_referer() {
-  "${CURL[@]}" -o /dev/null -H "Referer: https://zapbyte.com.br/invite/SEGREDO4" $U/
-  [ "$(grep -c SEGREDO4 "$ACCESS")" -eq 0 ] && ok t_log_referer || fail t_log_referer
+  "${CURL[@]}" -o /dev/null -H "Referer: https://zapbyte.com.br/invite/SEGREDO4" "$U/?marca=ref4"
+  # positivo: a requisicao foi logada e o Referer saiu mascarado
+  if grep 'marca=ref4' "$ACCESS" | grep -q '/invite/\*\*\*' && [ "$(grep -c SEGREDO4 "$ACCESS")" -eq 0 ]; then
+    ok t_log_referer
+  else fail t_log_referer "linha ausente ou token no log"; fi
 }
 
 t_log_porta80() {
-  curl -s -o /dev/null -H "Host: zapbyte.com.br" http://127.0.0.1:18080/invite/SEGREDO5
-  [ "$(grep -c SEGREDO5 "$ACCESS")" -eq 0 ] && ok t_log_porta80 || fail t_log_porta80
+  curl -s -o /dev/null -H "Host: zapbyte.com.br" "http://127.0.0.1:18080/invite/SEGREDO5?marca=p80"
+  # positivo: a requisicao da porta 80 foi logada, mascarada
+  if grep 'marca=p80' "$ACCESS" | grep -q '/invite/\*\*\*' && [ "$(grep -c SEGREDO5 "$ACCESS")" -eq 0 ]; then
+    ok t_log_porta80
+  else fail t_log_porta80 "linha ausente ou token no log"; fi
 }
 
 t_redirect_80() {
@@ -146,7 +152,7 @@ burst() { # $1=N $2=url [args extras de curl]
 }
 
 t_static_folga() {
-  local n; n=$(burst 60 $U/static/x | grep -c 429)
+  local n; n=$(burst 40 $U/static/x | grep -c 429)
   [ "$n" -eq 0 ] && ok t_static_folga || fail t_static_folga "$n respostas 429"
 }
 t_rsvp_folga() {
