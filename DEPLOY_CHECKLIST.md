@@ -218,7 +218,7 @@ ssh pcs@SEU_IP_VPS
 - [x] Estado atual em produção (2026-10-29): `/etc/ssh/sshd_config.d/00-hardening.conf` com senha desligada e root bloqueado, **exceto** para o terminal do navegador do hPanel, que entra como root via SSH a partir de `169.254.0.1` (endereço link-local) com uma chave temporária que o painel grava em `/root/.ssh/authorized_keys`:
 
   ```
-  # Hardening SSH: so chave; root bloqueado, exceto o terminal do hPanel (link-local)
+  # Comemore+: SSH so por chave; root bloqueado exceto terminal do hPanel
   PasswordAuthentication no
   KbdInteractiveAuthentication no
   PermitRootLogin no
@@ -245,7 +245,7 @@ ssh pcs@SEU_IP_VPS
   sudo sshd -T -C addr=169.254.0.1,user=root,host=x | grep permitrootlogin      # permitrootlogin without-password
   ```
 
-- [x] Sonda externa (da sua máquina local): só `publickey` é aceito (conferido para `pcs` e `root`, 2026-10-29).
+- [x] Sonda externa (da sua máquina local): só `publickey` é aceito (conferido para `pcs` e `root`, 2026-10-28/29).
 
   ```bash
   ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive pcs@SEU_IP_VPS true
@@ -270,7 +270,7 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.4 Proteção e manutenção `[RECOMENDADO]`
 
-- [x] **fail2ban** (instalado em 2026-10-30: jail `sshd` ativa, `ignoreip` com 127.0.0.0/8, ::1 e 169.254.0.1, `fail2ban-client -t` ok; uma falha de login controlada deu `Total failed: 1`, banidos 0; o terminal do hPanel continua entrando) (bloqueia força bruta no SSH). A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho. Ordem importa: depois do `apt-get install` o serviço já roda com os padrões e `enable --now` não o recarrega, então é preciso **`restart`** (aqui é fail2ban, não nginx) para carregar o `comemore.local`:
+- [x] **fail2ban** (bloqueia força bruta no SSH). Instalado em 2026-10-30: jail `sshd` ativa, `fail2ban-client -t` ok, uma falha de login controlada deu `Total failed: 1` (banidos 0) e o terminal do hPanel continua entrando. A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho. Ordem importa: depois do `apt-get install` o serviço já roda com os padrões e `enable --now` não o recarrega, então é preciso **`restart`** (aqui é fail2ban, não nginx) para carregar o `comemore.local`:
 
   ```bash
   sudo apt-get install -y fail2ban \
@@ -285,14 +285,14 @@ ssh pcs@SEU_IP_VPS
 
   Se já existir `/etc/fail2ban/jail.d/comemore.local`, faça `cp -p` para `.bak-AAAAMMDD` antes do `install`. Conferir também que o backend do jail é o `systemd` do Ubuntu 24.04 (`/etc/fail2ban/jail.d/defaults-debian.conf`). Depois disso, **abra o terminal do navegador do hPanel uma vez** para confirmar que o login como root continua funcionando.
 
-- [x] **Atualizações automáticas de segurança** (unattended-upgrades ativo; Ubuntu Pro anexado com esm-apps, esm-infra e livepatch, 2026-10-30):
+- [x] **Atualizações automáticas de segurança**. Conferido em 2026-10-28/29: unattended-upgrades ativo e Ubuntu Pro anexado (esm-apps, esm-infra, livepatch).
 
   ```bash
   sudo apt-get install -y unattended-upgrades
   sudo dpkg-reconfigure -plow unattended-upgrades
   ```
 
-- [x] **Swap** (2 GB com swappiness 10, persistem no reboot, 2026-10-30) (VPS pequena + MySQL + build Docker pode estourar memória):
+- [x] **Swap** (VPS pequena + MySQL + build Docker pode estourar memória). Conferido em 2026-10-28/29: 2 GB, swappiness 10, persistem no reboot.
 
   ```bash
   free -h   # se não houver swap:
@@ -301,13 +301,13 @@ ssh pcs@SEU_IP_VPS
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
   ```
 
-- [x] **Fuso e relógio** (NTP sincronizado, sistema em UTC, 2026-10-30): `timedatectl` mostra NTP sincronizado. Manter o sistema em UTC é o padrão seguro; a aplicação já converte com `TZ_OFFSET_HOURS=-3`.
+- [x] **Fuso e relógio**: conferido em 2026-10-28/29, NTP sincronizado e sistema em UTC. `timedatectl` mostra NTP sincronizado. Manter o sistema em UTC é o padrão seguro; a aplicação já converte com `TZ_OFFSET_HOURS=-3`.
 
 ---
 
 ## 3. DNS e e-mail
 
-- [ ] `[BLOQUEADOR]` Registros `A` de `seudominio.com.br` e `www` apontando para o IP da VPS:
+- [x] `[BLOQUEADOR]` Registros `A` de `seudominio.com.br` e `www` apontando para o IP da VPS (conferido 2026-10-29 por DNS-over-HTTPS: os dois apontam para a VPS):
 
   ```bash
   dig +short $DOMINIO
@@ -670,7 +670,7 @@ curl -sI $BASE_URL/login | head -1
 # HTTP/2 200
 ```
 
-- [x] Todas as variações em HTTP redirecionam para HTTPS (`301` para `https://zapbyte.com.br/login`, 2026-10-30).
+- [ ] Todas as variações em HTTP redirecionam para HTTPS. Testado em 2026-10-30 só `http://zapbyte.com.br/login` (`301` para `https://zapbyte.com.br/login`); `www` e outros caminhos ainda não conferidos.
 - [x] Certificado válido e com validade restante (Let's Encrypt, até 2027-01-10, 2026-10-30):
 
   ```bash
@@ -728,7 +728,7 @@ Use **40** POSTs, não menos: o nginx tem burst de 20, então uma rajada de 15 f
 
 - [x] Aparece `429` do **nginx** após o burst (em 2026-10-30: 40 POSTs = 21 passaram com `400` do CSRF + 19 × `429` do nginx). Se o CSRF devolver sempre `400`, ainda assim o `429` do nginx deve aparecer, porque ele atua antes do Flask.
 - [ ] Repetir para `/signup` e para o POST de confirmação de RSVP.
-- [x] Aguardar 1 minuto e confirmar que o acesso volta ao normal (o bloqueio é temporário): `/login` voltou a 200 depois do bloqueio (2026-10-30).
+- [x] Aguardar 1 minuto e confirmar que o acesso volta ao normal (o bloqueio é temporário): em 2026-10-30 `/login` voltou a 200 depois do bloqueio (sem medição explícita de 1 minuto).
 
 ### 10.6 Health
 
