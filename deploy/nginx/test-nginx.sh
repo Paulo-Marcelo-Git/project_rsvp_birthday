@@ -207,6 +207,63 @@ t_429_login() {
   [ "$n" -ge 1 ] && ok t_429_login || fail t_429_login "nenhum 429"
 }
 
+# --- fase upstream indisponivel: 2o container SEM o stub (127.0.0.1:3000 recusa),
+# entao o proprio nginx devolve 502 e grava no error.log. Logs em diretorio separado.
+C2="nginx-test2-$$-$RANDOM"
+T2="$T/log2"
+cleanup2() { docker rm -f "$C2" >/dev/null 2>&1 || true; }
+trap 'cleanup2; cleanup' EXIT
+phase_upstream_down() {
+  mkdir -p "$T2"; chmod 777 "$T2"
+  local A2=(-v "$D/zapbyte.com.br.conf:/etc/nginx/conf.d/zz-site.conf:ro"
+            -v "$D/test/prod-http.conf:/etc/nginx/conf.d/00-prod-http.conf:ro"
+            -v "$LE:/etc/letsencrypt:ro"
+            -v "$T2:/var/log/nginx")
+  [ -f "$D/comemore.conf" ] && A2+=(-v "$D/comemore.conf:/etc/nginx/conf.d/comemore.conf:ro")
+  [ -d "$D/snippets" ] && A2+=(-v "$D/snippets:/etc/nginx/snippets:ro")
+  docker run -d --name "$C2" -p 127.0.0.1:18444:443 "${A2[@]}" \
+    nginx:1.24-alpine sh -c "rm -f /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'" >/dev/null \
+    || { fail phase_upstream_down "container 2 nao subiu"; return 1; }
+  local i
+  for i in $(seq 1 30); do
+    curl -sk -o /dev/null --resolve zapbyte.com.br:18444:127.0.0.1 https://zapbyte.com.br:18444/ && break
+    sleep 0.3
+  done
+  return 0
+}
+U2=https://zapbyte.com.br:18444
+CURL2=(curl -sk --resolve zapbyte.com.br:18444:127.0.0.1)
+ERR2="$T2/error.log"; ACC2="$T2/access.log"
+
+t_errorlog_502_token_sem_token() {
+  local c1 c2 c3 n bad=""
+  c1=$("${CURL2[@]}" -o /dev/null -w '%{http_code}' $U2/invite/SEGREDO7)
+  c2=$("${CURL2[@]}" -o /dev/null -w '%{http_code}' $U2/reset_password/SEGREDO8)
+  c3=$("${CURL2[@]}" -o /dev/null -w '%{http_code}' $U2/verify-email/SEGREDO9)
+  [ "$c1$c2$c3" = 502502502 ] || bad="$bad status=$c1/$c2/$c3"
+  n=$(cat "$ERR2" 2>/dev/null | grep -cE 'SEGREDO(7|8|9)' || true)
+  [ "${n:-0}" -eq 0 ] || bad="$bad $n linhas com token no error.log"
+  grep -E ' 502 ' "$ACC2" | grep -q '/invite/\*\*\*' || bad="$bad access.log sem 502 invite mascarado"
+  grep -E ' 502 ' "$ACC2" | grep -q '/reset_password/\*\*\*' || bad="$bad access.log sem 502 reset mascarado"
+  grep -E ' 502 ' "$ACC2" | grep -q '/verify-email/\*\*\*' || bad="$bad access.log sem 502 verify mascarado"
+  [ "$(grep -cE 'SEGREDO(7|8|9)' "$ACC2")" -eq 0 ] || bad="$bad token no access.log"
+  [ -z "$bad" ] && ok t_errorlog_502_token_sem_token || fail t_errorlog_502_token_sem_token "$bad"
+}
+t_errorlog_502_login_registra() {
+  local c; c=$("${CURL2[@]}" -o /dev/null -w '%{http_code}' $U2/login)
+  if [ "$c" = 502 ] && grep -q 'request: "GET /login ' "$ERR2" 2>/dev/null; then ok t_errorlog_502_login_registra
+  else fail t_errorlog_502_login_registra "status $c ou /login ausente do error.log"; fi
+}
+t_errorlog_413_token_sem_token() {
+  local f="$T/56mb-b.bin" code n
+  head -c $((56 * 1024 * 1024)) /dev/zero > "$f"
+  code=$("${CURL2[@]}" -o /dev/null -w '%{http_code}' -X POST --data-binary @"$f" $U2/invite/SEGREDO10)
+  rm -f "$f"
+  n=$(cat "$ERR2" 2>/dev/null | grep -c SEGREDO10 || true)
+  if [ "$code" = 413 ] && [ "${n:-0}" -eq 0 ]; then ok t_errorlog_413_token_sem_token
+  else fail t_errorlog_413_token_sem_token "status $code, $n linhas com token no error.log"; fi
+}
+
 t_sintaxe
 t_headers_login
 t_headers_invite_404
@@ -228,5 +285,12 @@ t_429_rsvp
 t_429_login
 t_zonas_auth_geral
 t_errorlog_429_sem_token
+
+# fase upstream indisponivel (container proprio, zonas de rate limit proprias)
+if phase_upstream_down; then
+  t_errorlog_502_token_sem_token
+  t_errorlog_502_login_registra
+  t_errorlog_413_token_sem_token
+fi
 
 exit $FAIL
