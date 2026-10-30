@@ -467,9 +467,18 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 
   ```bash
   sudo bash -c 'set -e; S=$(date +%Y%m%d); D=/srv/projects/project_rsvp_birthday/deploy/nginx
+  site=/etc/nginx/sites-available/zapbyte.com.br
+  rollback() {  # mesma logica do rollback manual abaixo; nunca apaga o arquivo do site
+    [ -e "$site.bak-$S" ] || { echo "ERRO: $site.bak-$S nao existe; rollback manual necessario" >&2; return 1; }
+    cp -p "$site.bak-$S" "$site"
+    for dest in /etc/nginx/conf.d/comemore.conf /etc/nginx/snippets/comemore-proxy.conf \
+                /etc/nginx/snippets/comemore-security-headers.conf; do
+      if [ -e "$dest.bak-$S" ]; then cp -p "$dest.bak-$S" "$dest"; else rm -f "$dest"; fi
+    done
+  }
   # se o .bak do site ja existe, e uma reaplicacao no mesmo dia: nao refaz backups (preserva os originais)
-  rerun=; [ ! -e "/etc/nginx/sites-available/zapbyte.com.br.bak-$S" ] || rerun=1
-    for par in zapbyte.com.br.conf:/etc/nginx/sites-available/zapbyte.com.br \
+  rerun=; [ ! -e "$site.bak-$S" ] || rerun=1
+    for par in zapbyte.com.br.conf:$site \
                comemore.conf:/etc/nginx/conf.d/comemore.conf \
                snippets/comemore-proxy.conf:/etc/nginx/snippets/comemore-proxy.conf \
                snippets/comemore-security-headers.conf:/etc/nginx/snippets/comemore-security-headers.conf; do
@@ -477,12 +486,15 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
       { [ -n "$rerun" ] || [ ! -e "$dest" ] || [ -e "$dest.bak-$S" ] || cp -p "$dest" "$dest.bak-$S"; }
       install -m 644 -o root -g root "$D/$src" "$dest"
     done
-    echo "Aplicado. Backups com sufixo .bak-$S (use S=$S no rollback)"' \
-    && sudo nginx -t \
-    && sudo systemctl reload nginx
+    if ! nginx -t; then
+      echo "nginx -t FALHOU: rollback automatico (S=$S)" >&2
+      rollback; nginx -t; exit 1
+    fi
+    systemctl reload nginx
+    echo "Aplicado e recarregado. Backups com sufixo .bak-$S (use S=$S no rollback)"'
   ```
 
-  Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o reload não roda; execute o rollback.** Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
+  Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o roteiro restaura sozinho os arquivos anteriores (mesma lógica do rollback manual), roda `nginx -t` de novo e sai com erro, sem recarregar.** O rollback manual abaixo só é necessário para desfazer uma aplicação que passou no `nginx -t`. Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
 - [ ] **Rollback**: o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
 
@@ -501,7 +513,7 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
     && sudo systemctl reload nginx
   ```
 
-> **Máscara de tokens no `error.log`:** depende de o `error_log` do Ubuntu continuar no nível padrão `error` (`limit_req_log_level warn` faz as rejeições de rate limit ficarem abaixo desse nível, e por isso não gravam a linha de requisição crua). Não baixe o nível do `error_log` para `warn` ou menos. Linhas de erro de upstream (502/504) ainda podem carregar a linha de requisição com o token; isso é tratado no passo de limpeza de logs.
+> **Máscara de tokens no `error.log`:** depende de o `error_log` do Ubuntu continuar no nível padrão `error` (`limit_req_log_level warn` faz as rejeições de rate limit ficarem abaixo desse nível, e por isso não gravam a linha de requisição crua). Não baixe o nível do `error_log` para `warn` ou menos. **Vazamento residual recorrente (decisão em aberto):** erros de upstream são gravados no `error.log` em nível `error` com a linha de requisição crua (`request: "GET /invite/<token> ..."`). Isso **se repete a cada deploy** (o `compose up` recria o `rsvp_backend` e há alguns segundos de 502 para quem estiver em `/invite/…` ou `/reset_password/…`), em 504 e em 413 (`client intended to send too large body`) para URLs com token; o logrotate mantém essas linhas por ~14 dias. A limpeza única de logs **não** resolve isso: tokens novos voltam a aparecer. Mitigação possível, **não implementada**: um `error_log` com nível restrito dentro dos locations com token (troca diagnóstico por LGPD). Até decidir, contar tokens no `error.log` após cada deploy e tratar como pendência aberta.
 
 > As rotas de `auth` e `invite` do `zapbyte.com.br.conf` seguem as rotas reais do app; rotas que não existirem simplesmente não casam.
 

@@ -3,7 +3,7 @@
 # (mesma versao da producao). Offline; certificado autoassinado.
 # Uso: bash deploy/nginx/test-nginx.sh
 # Os testes de rate limit compartilham estado de zona no mesmo container, entao
-# rodam por ultimo e nesta ordem: static_folga, rsvp_folga, 429_rsvp, 429_login.
+# rodam por ultimo e nesta ordem: static_folga, rsvp_folga, 429_rsvp, 429_login, zonas_auth_geral.
 set -u
 D=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -96,14 +96,25 @@ t_upload_51mb() {
   head -c $((51 * 1024 * 1024)) /dev/zero > "$f"
   code=$("${CURL[@]}" -o /dev/null -w '%{http_code}' -X POST --data-binary @"$f" $U/invite/x)
   rm -f "$f"
-  [ "$code" != 413 ] && ok t_upload_51mb || fail t_upload_51mb "status $code"
+  # o stub responde 404 em /invite/: 404 prova que o corpo chegou ao upstream
+  [ "$code" = 404 ] && ok t_upload_51mb || fail t_upload_51mb "status $code (esperado 404 do stub)"
+}
+
+t_upload_56mb() {
+  local f="$T/56mb.bin" code
+  head -c $((56 * 1024 * 1024)) /dev/zero > "$f"
+  code=$("${CURL[@]}" -o /dev/null -w '%{http_code}' -X POST --data-binary @"$f" $U/invite/x)
+  rm -f "$f"
+  [ "$code" = 413 ] && ok t_upload_56mb || fail t_upload_56mb "status $code (esperado 413)"
 }
 
 t_proxy_headers() {
   local a b
   a=$("${CURL[@]}" $U/login); b=$("${CURL[@]}" $U/)
   if echo "$a" | grep -q 'xfp=https' && echo "$b" | grep -q 'xfp=https' \
-     && echo "$a" | grep -qE 'xri=[^ ]+' && echo "$b" | grep -qE 'xri=[^ ]+'; then
+     && echo "$a" | grep -qE 'xri=[^ ]+' && echo "$b" | grep -qE 'xri=[^ ]+' \
+     && echo "$a" | grep -qE 'xff=[0-9a-f.:]+ ' && echo "$b" | grep -qE 'xff=[0-9a-f.:]+ ' \
+     && echo "$a" | grep -q 'host=zapbyte.com.br$' && echo "$b" | grep -q 'host=zapbyte.com.br$'; then
     ok t_proxy_headers
   else fail t_proxy_headers "$a | $b"; fi
 }
@@ -170,6 +181,21 @@ t_429_rsvp() {
   local n; n=$(burst 150 $U/invite/SEGREDO429 | grep -c 429)
   [ "$n" -ge 1 ] && ok t_429_rsvp || fail t_429_rsvp "nenhum 429"
 }
+t_zonas_auth_geral() {
+  # reesgota a zona auth (um slot pode ter reenchido desde t_429_login: 10r/m = 1 a cada 6s)
+  # e entao toda rota auth deve dar 429 de imediato.
+  local r c bad=""
+  burst 40 $U/login -X POST >/dev/null
+  for r in /forgot_password /reset_password/x /signup /resend-verification /login; do
+    c=$(codes $U$r); [ "$c" = 429 ] || bad="$bad $r=$c(esperado 429)"
+  done
+  sleep 1   # zona geral reencher (10r/s) das rajadas de static_folga
+  # fora da zona auth (geral, sem exaurir): o stub responde 200
+  for r in /verify-email/x /loginX /signup-foo; do
+    c=$(codes $U$r); [ "$c" = 200 ] || bad="$bad $r=$c(esperado 200)"
+  done
+  [ -z "$bad" ] && ok t_zonas_auth_geral || fail t_zonas_auth_geral "$bad"
+}
 t_errorlog_429_sem_token() {
   # os bursts 429 usaram /invite/SEGREDO429 e /login (POST); error.log nao pode ter o token
   local n; n=$(grep -c SEGREDO429 "$T/log/error.log" 2>/dev/null || true)
@@ -186,6 +212,7 @@ t_headers_login
 t_headers_invite_404
 t_sem_nosniff_duplicado
 t_upload_51mb
+t_upload_56mb
 t_proxy_headers
 t_log_mascara
 t_log_referer
@@ -199,6 +226,7 @@ t_static_folga
 t_rsvp_folga
 t_429_rsvp
 t_429_login
+t_zonas_auth_geral
 t_errorlog_429_sem_token
 
 exit $FAIL
