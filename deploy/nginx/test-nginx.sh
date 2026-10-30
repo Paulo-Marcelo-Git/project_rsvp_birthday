@@ -184,11 +184,18 @@ t_429_rsvp() {
 t_zonas_auth_geral() {
   # reesgota a zona auth (um slot pode ter reenchido desde t_429_login: 10r/m = 1 a cada 6s)
   # e entao toda rota auth deve dar 429 de imediato.
-  local r c bad=""
+  local r c bad="" out i
   burst 40 $U/login -X POST >/dev/null
-  for r in /forgot_password /reset_password/x /signup /resend-verification /login; do
-    c=$(codes $U$r); [ "$c" = 429 ] || bad="$bad $r=$c(esperado 429)"
-  done
+  # uma unica chamada de curl (conexao reaproveitada, sem fork entre as URLs): evita que
+  # um slot de 10r/m reencha entre as checagens em ambiente lento (WSL/Docker)
+  local routes=(/forgot_password /reset_password/x /signup /resend-verification /login)
+  local urls=(); for r in "${routes[@]}"; do urls+=(-o /dev/null "$U$r"); done  # -o vale por URL
+  out=$("${CURL[@]}" -w '%{http_code}\n' "${urls[@]}")
+  i=0
+  while read -r c; do
+    [ "$c" = 429 ] || bad="$bad ${routes[$i]}=$c(esperado 429)"
+    i=$((i + 1))
+  done <<< "$out"
   sleep 1   # zona geral reencher (10r/s) das rajadas de static_folga
   # fora da zona auth (geral, sem exaurir): o stub responde 200
   for r in /verify-email/x /loginX /signup-foo; do
