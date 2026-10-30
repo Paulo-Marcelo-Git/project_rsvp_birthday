@@ -196,6 +196,7 @@ t_zonas_auth_geral() {
     [ "$c" = 429 ] || bad="$bad ${routes[$i]}=$c(esperado 429)"
     i=$((i + 1))
   done <<< "$out"
+  [ "$i" -eq "${#routes[@]}" ] || bad="$bad contagem=$i(esperado ${#routes[@]})"
   sleep 1   # zona geral reencher (10r/s) das rajadas de static_folga
   # fora da zona auth (geral, sem exaurir): o stub responde 200
   for r in /verify-email/x /loginX /signup-foo; do
