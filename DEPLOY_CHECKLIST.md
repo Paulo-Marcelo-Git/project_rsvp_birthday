@@ -276,6 +276,7 @@ ssh pcs@SEU_IP_VPS
     && sudo fail2ban-client -t \
     && sudo systemctl enable fail2ban \
     && sudo systemctl restart fail2ban \
+    && sleep 3 \
     && sudo fail2ban-client status sshd \
     && sudo fail2ban-client get sshd ignoreip     # deve listar 127.0.0.1/8, ::1 e 169.254.0.1
   ```
@@ -466,28 +467,36 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 
   ```bash
   sudo bash -c 'set -e; S=$(date +%Y%m%d); D=/srv/projects/project_rsvp_birthday/deploy/nginx
+  # se o .bak do site ja existe, e uma reaplicacao no mesmo dia: nao refaz backups (preserva os originais)
+  rerun=; [ ! -e "/etc/nginx/sites-available/zapbyte.com.br.bak-$S" ] || rerun=1
     for par in zapbyte.com.br.conf:/etc/nginx/sites-available/zapbyte.com.br \
                comemore.conf:/etc/nginx/conf.d/comemore.conf \
                snippets/comemore-proxy.conf:/etc/nginx/snippets/comemore-proxy.conf \
                snippets/comemore-security-headers.conf:/etc/nginx/snippets/comemore-security-headers.conf; do
       src=${par%%:*}; dest=${par#*:}
-      { [ ! -e "$dest" ] || cp -p "$dest" "$dest.bak-$S"; }
+      { [ -n "$rerun" ] || [ ! -e "$dest" ] || [ -e "$dest.bak-$S" ] || cp -p "$dest" "$dest.bak-$S"; }
       install -m 644 -o root -g root "$D/$src" "$dest"
-    done' \
+    done
+    echo "Aplicado. Backups com sufixo .bak-$S (use S=$S no rollback)"' \
     && sudo nginx -t \
     && sudo systemctl reload nginx
   ```
 
   Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o reload não roda; execute o rollback.** Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
-- [ ] **Rollback**: para cada destino, restaura o `.bak-AAAAMMDD` se existir; senão remove o arquivo recém-instalado. Depois `nginx -t` e `reload`. Troque `AAAAMMDD` pela data do backup:
+- [ ] **Rollback**: o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
 
   ```bash
-  sudo bash -c 'S=AAAAMMDD
-    for dest in /etc/nginx/sites-available/zapbyte.com.br /etc/nginx/conf.d/comemore.conf \
-                /etc/nginx/snippets/comemore-proxy.conf /etc/nginx/snippets/comemore-security-headers.conf; do
+  ls /etc/nginx/sites-available/zapbyte.com.br.bak-*
+  S=AAAAMMDD     # ex.: S=20261029 (a data impressa no passo de aplicação)
+  sudo bash -c 'set -e; S=$1; site=/etc/nginx/sites-available/zapbyte.com.br
+    case "$S" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) echo "ERRO: S invalido: $S" >&2; exit 1;; esac
+    [ -e "$site.bak-$S" ] || { echo "ERRO: $site.bak-$S nao existe" >&2; exit 1; }
+    cp -p "$site.bak-$S" "$site"
+    for dest in /etc/nginx/conf.d/comemore.conf /etc/nginx/snippets/comemore-proxy.conf \
+                /etc/nginx/snippets/comemore-security-headers.conf; do
       if [ -e "$dest.bak-$S" ]; then cp -p "$dest.bak-$S" "$dest"; else rm -f "$dest"; fi
-    done' \
+    done' _ "$S" \
     && sudo nginx -t \
     && sudo systemctl reload nginx
   ```
