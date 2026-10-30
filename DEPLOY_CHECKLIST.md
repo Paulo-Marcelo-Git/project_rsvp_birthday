@@ -314,14 +314,15 @@ ssh pcs@SEU_IP_VPS
   dig +short www.$DOMINIO
   ```
 
-- [ ] `[BLOQUEADOR]` Domínio autenticado na Brevo, com **SPF, DKIM e DMARC** configurados no DNS (Brevo → Remetentes, domínios e IPs dedicados → Domínios). Sem isso, o e-mail de verificação tende a cair em spam e o usuário não consegue concluir o cadastro.
+- [x] `[BLOQUEADOR]` Domínio autenticado na Brevo, com **DKIM e DMARC** no DNS (Brevo → Remetentes, domínios e IPs dedicados → Domínios). Autenticação = TXT `brevo-code` + CNAMEs DKIM `brevo1/brevo2._domainkey` + DMARC. **Não é preciso registro SPF em `zapbyte.com.br`** para envio por IP compartilhado da Brevo: o SPF passa no domínio de retorno (return-path) da própria Brevo. Sem a autenticação, o e-mail de verificação tende a cair em spam e o usuário não consegue concluir o cadastro. Conferido em 2026-10-30 (painel da Brevo com DKIM e DMARC ok; teste na caixa de entrada com `dkim=pass`, `dmarc=pass` e `spf=pass` no domínio de retorno da Brevo).
 
   ```bash
-  dig +short TXT $DOMINIO            # SPF: deve conter include:spf.brevo.com
-  dig +short TXT _dmarc.$DOMINIO     # DMARC: v=DMARC1; p=none (começar com none e endurecer depois)
+  dig +short TXT $DOMINIO                       # deve conter o TXT brevo-code (SPF no domínio não é exigido)
+  dig +short CNAME brevo1._domainkey.$DOMINIO   # DKIM; repetir para brevo2
+  dig +short TXT _dmarc.$DOMINIO                # DMARC: v=DMARC1; p=none (começar com none e endurecer depois)
   ```
 
-- [ ] `[RECOMENDADO]` Remetente (`EMAIL_USER`/From) usa o próprio domínio, não Gmail.
+- [x] `[RECOMENDADO]` Remetente (`EMAIL_USER`/From) usa o próprio domínio, não Gmail (remetente do domínio `zapbyte.com.br` na Brevo; remetente freemail antigo removido, 2026-10-30).
 
 ---
 
@@ -459,11 +460,13 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 | `snippets/comemore-proxy.conf` | `/etc/nginx/snippets/comemore-proxy.conf` |
 | `snippets/comemore-security-headers.conf` | `/etc/nginx/snippets/comemore-security-headers.conf` |
 
-- [ ] **Antes de aplicar**, validar localmente (Docker, nginx 1.24 com a config do repo e upstream de teste):
+- [x] **Antes de aplicar**, validar localmente (Docker, nginx 1.24 com a config do repo e upstream de teste):
 
   ```bash
   bash deploy/nginx/test-nginx.sh    # esperado: saída 0
   ```
+
+  Executado em 2026-10-30 antes da aplicação: 21 OK, 0 FALHA, saída 0.
 
 - [x] Aplicado na VPS em 2026-10-30 19:27 UTC (sha256 dos 4 arquivos = repo; backup do site em `zapbyte.com.br.bak-20261030`). Na VPS, com o repo atualizado (`git pull`). Para **cada um dos 4 destinos**: se já existir, vira `.bak-AAAAMMDD` (`cp -p`); depois `install`. Só então `nginx -t` e `reload` (nunca `restart`). Os `set -e` ficam dentro do `bash -c`, não no terminal interativo; o `&&` garante que o reload só roda se tudo antes passou:
 
@@ -498,7 +501,7 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 
   Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o roteiro restaura sozinho os arquivos anteriores (mesma lógica do rollback manual), roda `nginx -t` de novo e sai com erro, sem recarregar.** O rollback manual abaixo só é necessário para desfazer uma aplicação que passou no `nginx -t`. Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
-- [ ] **Rollback**: o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
+- [ ] **Rollback** (roteiro exercitado em container descartável nginx:1.24 na revisão do PR #7; em produção não foi necessário, a aplicação passou no `nginx -t`, então este item não foi executado lá): o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
 
   ```bash
   ls /etc/nginx/sites-available/zapbyte.com.br.bak-*
