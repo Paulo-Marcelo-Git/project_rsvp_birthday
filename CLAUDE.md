@@ -26,6 +26,7 @@ Sistema de RSVP para convites. Flask + MySQL + Docker.
 | **Trial** | ✅ Concluída | Free: 14 dias a partir do 1º login (`repo.TRIAL_DAYS`), aviso (modal) nos últimos 3 dias (`TRIAL_WARNING_DAYS`), suspensão automática ao expirar (`suspended_reason=trial_expired`); migrations 0007 (backfill) e 0008 (`tenants.suspended_reason`); lógica em `repo.start_tenant_trial` + `_check_tenant_access` (`app.py`) |
 | **Imagem por evento + member** | ✅ Concluída | Imagem padrão obrigatória por evento (convidado pode ter a própria), signup sem evento + /admin/primeiro-evento, responsável por evento (member funcional), backup de uploads, validação de conteúdo + nosniff, limpeza de órfãos (CLI cleanup-orphan-uploads), fixes: textos no evento certo, respostas por evento, 413 |
 | **SP1 — Rede de segurança** | ✅ Concluída | Cópia externa diária criptografada (`rclone crypt`) para Backblaze B2 com Object Lock governance 30d (`backup/offsite.sh`), alertas Healthchecks.io `backup-local`/`backup-externo` (`backup/hc.sh`), restore do zero a partir do B2 (`restore-offsite.sh` + `count-rows.sh`, ensaiado em 41 s, 0 divergências), gitleaks no histórico sem achados. Deploy 8ba2089 (2026-10-28); 1ª execução automática ok em 2026-10-29 |
+| **SP2 — Acesso e infra da VPS** | ✅ Concluída | SSH só por chave com root bloqueado (exceto o terminal do hPanel, via `Match Address` link-local), ufw (só 22/80/443; Docker só em 127.0.0.1), fail2ban (jail `sshd`), nginx versionado em `deploy/nginx` (headers de segurança, rate limit, `access.log` com token mascarado) com teste em container (`test-nginx.sh`), certbot com renovação ok, e-mail com DKIM/DMARC (Brevo). PRs #7/#8, 2026-10-30. Evidências no Go/No-Go (7, 8, 9, 22; 10 só a parte nginx, fecha no SP3) |
 
 ---
 
@@ -84,6 +85,9 @@ project_rsvp_birthday/
 │   ├── templates/
 │   └── tests/               # pytest — 453 unit tests + 50 integration (marcados @pytest.mark.integration)
 ├── backup/                  # Dockerfile + backup.sh + restore.sh + restore-uploads.sh + purge-logs.sh (mysqldump + tar.gz dos uploads + limpeza dos logs, diário via cron); offsite.sh + rclone-env.sh + hc.sh (cópia externa B2 + pings) e restore-offsite.sh + count-rows.sh (restore do zero); test-*.sh
+├── deploy/
+│   ├── nginx/               # Config do nginx versionada (site, conf.d, snippets) + test-nginx.sh (teste em container); aplicada à mão na VPS
+│   └── fail2ban/            # comemore.local (jail sshd, ignoreip do hPanel)
 ├── docs/
 │   ├── superpowers/         # plans/ (histórico por sub-fase) e specs/ — gitignored, só local
 │   ├── smoke-tests/         # roteiros de smoke test e2e
@@ -209,4 +213,5 @@ HC_OFFSITE_URL=https://hc-ping.com/YOUR_UUID_HERE
 | **Deploy** | **Deploy na VPS Hostinger** (ver `DEPLOY_CHECKLIST.md`) | ✅ |
 | **Imagem por evento + member** | **Imagem padrão por evento, member responsável, signup sem evento, uploads seguros** (v1.4.0) | ✅ (deploy 2026-10-13) |
 | **SP1 — Rede de segurança** | **Backup externo B2 criptografado, alertas Healthchecks, restore do zero, gitleaks** | ✅ (deploy 2026-10-28) |
+| **SP2 — Acesso e infra da VPS** | **SSH só chave, ufw, fail2ban, nginx versionado (headers, rate limit, log sem token), certbot, e-mail DKIM/DMARC** | ✅ (2026-10-30) |
 | **Beta** | **Beta fechado** — app já está live, falta só convidar usuários reais | 🔜 |

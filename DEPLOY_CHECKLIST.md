@@ -214,11 +214,11 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.2 SSH `[BLOQUEADOR]`
 
-- [ ] Login por chave funcionando para `pcs` **antes** de desligar senha (teste em outro terminal). O deploy do GitHub Actions também entra como `pcs`.
-- [ ] Estado atual em produção (2026-10-29): `/etc/ssh/sshd_config.d/00-hardening.conf` com senha desligada e root bloqueado, **exceto** para o terminal do navegador do hPanel, que entra como root via SSH a partir de `169.254.0.1` (endereço link-local) com uma chave temporária que o painel grava em `/root/.ssh/authorized_keys`:
+- [x] Login por chave funcionando para `pcs` **antes** de desligar senha (teste em outro terminal). O deploy do GitHub Actions também entra como `pcs` (confirmado no `auth.log`, 2026-10-29).
+- [x] Estado atual em produção (2026-10-29): `/etc/ssh/sshd_config.d/00-hardening.conf` com senha desligada e root bloqueado, **exceto** para o terminal do navegador do hPanel, que entra como root via SSH a partir de `169.254.0.1` (endereço link-local) com uma chave temporária que o painel grava em `/root/.ssh/authorized_keys`:
 
   ```
-  # (linha de comentário explicando o motivo)
+  # Comemore+: SSH so por chave; root bloqueado exceto terminal do hPanel
   PasswordAuthentication no
   KbdInteractiveAuthentication no
   PermitRootLogin no
@@ -236,14 +236,16 @@ ssh pcs@SEU_IP_VPS
   # Em OUTRO terminal, confirme que ainda consegue entrar antes de fechar o atual
   ```
 
-- [ ] Validar a configuração efetiva (de qualquer origem root é `no`; só do painel é `without-password`):
+  Rollback: restaurar o `00-hardening.conf` anterior a partir do `.bak` e recarregar (`sudo cp -p /etc/ssh/sshd_config.d/00-hardening.conf.bak-AAAAMMDD /etc/ssh/sshd_config.d/00-hardening.conf && sudo sshd -t && sudo systemctl reload ssh`). Se perder o acesso por SSH, use o terminal do navegador do hPanel (entra como root pelo `Match Address` acima) para fazer o mesmo.
+
+- [x] Validar a configuração efetiva (de qualquer origem root é `no`; só do painel é `without-password`; validado em 2026-10-29, sem vazamento do `Match` para outras diretivas):
 
   ```bash
   sudo sshd -T -C addr=8.8.8.8,user=root,host=x | grep permitrootlogin          # permitrootlogin no
   sudo sshd -T -C addr=169.254.0.1,user=root,host=x | grep permitrootlogin      # permitrootlogin without-password
   ```
 
-- [ ] Sonda externa (da sua máquina local): só `publickey` é aceito.
+- [x] Sonda externa (da sua máquina local): só `publickey` é aceito (conferido para `pcs` e `root`, 2026-10-28/29).
 
   ```bash
   ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive pcs@SEU_IP_VPS true
@@ -252,7 +254,7 @@ ssh pcs@SEU_IP_VPS
 
 ### 2.3 Firewall `[BLOQUEADOR]`
 
-- [ ] Apenas SSH, HTTP e HTTPS abertos:
+- [x] Apenas SSH, HTTP e HTTPS abertos (ufw ativo desde 2026-10-29, ativo no boot após 2 reboots; varredura de fora: 22, 80, 443 abertas):
 
   ```bash
   sudo ufw default deny incoming
@@ -264,11 +266,11 @@ ssh pcs@SEU_IP_VPS
   sudo ufw status verbose
   ```
 
-- [ ] Verificar o firewall do painel da Hostinger também (se ativo, liberar só 22/80/443).
+- [x] Verificar o firewall do painel da Hostinger também (se ativo, liberar só 22/80/443): desativado (conferido 2026-10-30). Ele guarda regras antigas (3306/3000/5000/8000); a limpeza delas é uma pendência à parte e não afeta nada com o painel desligado.
 
 ### 2.4 Proteção e manutenção `[RECOMENDADO]`
 
-- [ ] **fail2ban** (bloqueia força bruta no SSH). A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho. Ordem importa: depois do `apt-get install` o serviço já roda com os padrões e `enable --now` não o recarrega, então é preciso **`restart`** (aqui é fail2ban, não nginx) para carregar o `comemore.local`:
+- [x] **fail2ban** (bloqueia força bruta no SSH). Instalado em 2026-10-30: jail `sshd` ativa, `fail2ban-client -t` ok, uma falha de login controlada deu `Total failed: 1` (banidos 0) e o terminal do hPanel continua entrando. A configuração é versionada em `deploy/fail2ban/comemore.local` (jail `sshd` ligado e `ignoreip` com loopback e `169.254.0.1`, o terminal do hPanel, para não banir o acesso de emergência). O deploy só faz `git pull`: nada é aplicado sozinho. Ordem importa: depois do `apt-get install` o serviço já roda com os padrões e `enable --now` não o recarrega, então é preciso **`restart`** (aqui é fail2ban, não nginx) para carregar o `comemore.local`:
 
   ```bash
   sudo apt-get install -y fail2ban \
@@ -283,14 +285,14 @@ ssh pcs@SEU_IP_VPS
 
   Se já existir `/etc/fail2ban/jail.d/comemore.local`, faça `cp -p` para `.bak-AAAAMMDD` antes do `install`. Conferir também que o backend do jail é o `systemd` do Ubuntu 24.04 (`/etc/fail2ban/jail.d/defaults-debian.conf`). Depois disso, **abra o terminal do navegador do hPanel uma vez** para confirmar que o login como root continua funcionando.
 
-- [ ] **Atualizações automáticas de segurança**:
+- [x] **Atualizações automáticas de segurança**. Conferido em 2026-10-28/29: unattended-upgrades ativo e Ubuntu Pro anexado (esm-apps, esm-infra, livepatch).
 
   ```bash
   sudo apt-get install -y unattended-upgrades
   sudo dpkg-reconfigure -plow unattended-upgrades
   ```
 
-- [ ] **Swap** (VPS pequena + MySQL + build Docker pode estourar memória):
+- [x] **Swap** (VPS pequena + MySQL + build Docker pode estourar memória). Conferido em 2026-10-28/29: 2 GB, swappiness 10, persistem no reboot.
 
   ```bash
   free -h   # se não houver swap:
@@ -299,27 +301,28 @@ ssh pcs@SEU_IP_VPS
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
   ```
 
-- [ ] **Fuso e relógio**: `timedatectl` mostra NTP sincronizado. Manter o sistema em UTC é o padrão seguro; a aplicação já converte com `TZ_OFFSET_HOURS=-3`.
+- [x] **Fuso e relógio**: conferido em 2026-10-28/29, NTP sincronizado e sistema em UTC. `timedatectl` mostra NTP sincronizado. Manter o sistema em UTC é o padrão seguro; a aplicação já converte com `TZ_OFFSET_HOURS=-3`.
 
 ---
 
 ## 3. DNS e e-mail
 
-- [ ] `[BLOQUEADOR]` Registros `A` de `seudominio.com.br` e `www` apontando para o IP da VPS:
+- [x] `[BLOQUEADOR]` Registros `A` de `seudominio.com.br` e `www` apontando para o IP da VPS (conferido 2026-10-29 por DNS-over-HTTPS: os dois apontam para a VPS):
 
   ```bash
   dig +short $DOMINIO
   dig +short www.$DOMINIO
   ```
 
-- [ ] `[BLOQUEADOR]` Domínio autenticado na Brevo, com **SPF, DKIM e DMARC** configurados no DNS (Brevo → Remetentes, domínios e IPs dedicados → Domínios). Sem isso, o e-mail de verificação tende a cair em spam e o usuário não consegue concluir o cadastro.
+- [x] `[BLOQUEADOR]` Domínio autenticado na Brevo, com **DKIM e DMARC** no DNS (Brevo → Remetentes, domínios e IPs dedicados → Domínios). Autenticação = TXT `brevo-code` + CNAMEs DKIM `brevo1/brevo2._domainkey` + DMARC. **Não é preciso registro SPF em `zapbyte.com.br`** para envio por IP compartilhado da Brevo: o SPF passa no domínio de retorno (return-path) da própria Brevo. Sem a autenticação, o e-mail de verificação tende a cair em spam e o usuário não consegue concluir o cadastro. Conferido em 2026-10-30 (painel da Brevo com DKIM e DMARC ok; teste na caixa de entrada com `dkim=pass`, `dmarc=pass` e `spf=pass` no domínio de retorno da Brevo).
 
   ```bash
-  dig +short TXT $DOMINIO            # SPF: deve conter include:spf.brevo.com
-  dig +short TXT _dmarc.$DOMINIO     # DMARC: v=DMARC1; p=none (começar com none e endurecer depois)
+  dig +short TXT $DOMINIO                       # deve conter o TXT brevo-code (SPF no domínio não é exigido)
+  dig +short CNAME brevo1._domainkey.$DOMINIO   # DKIM; repetir para brevo2
+  dig +short TXT _dmarc.$DOMINIO                # DMARC: v=DMARC1; p=none (começar com none e endurecer depois)
   ```
 
-- [ ] `[RECOMENDADO]` Remetente (`EMAIL_USER`/From) usa o próprio domínio, não Gmail.
+- [x] `[RECOMENDADO]` Remetente (`EMAIL_USER`/From) usa o próprio domínio, não Gmail (remetente do domínio `zapbyte.com.br` na Brevo; remetente freemail antigo removido, 2026-10-30).
 
 ---
 
@@ -457,13 +460,15 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 | `snippets/comemore-proxy.conf` | `/etc/nginx/snippets/comemore-proxy.conf` |
 | `snippets/comemore-security-headers.conf` | `/etc/nginx/snippets/comemore-security-headers.conf` |
 
-- [ ] **Antes de aplicar**, validar localmente (Docker, nginx 1.24 com a config do repo e upstream de teste):
+- [x] **Antes de aplicar**, validar localmente (Docker, nginx 1.24 com a config do repo e upstream de teste):
 
   ```bash
   bash deploy/nginx/test-nginx.sh    # esperado: saída 0
   ```
 
-- [ ] Na VPS, com o repo atualizado (`git pull`). Para **cada um dos 4 destinos**: se já existir, vira `.bak-AAAAMMDD` (`cp -p`); depois `install`. Só então `nginx -t` e `reload` (nunca `restart`). Os `set -e` ficam dentro do `bash -c`, não no terminal interativo; o `&&` garante que o reload só roda se tudo antes passou:
+  Executado em 2026-10-30 antes da aplicação: 21 OK, 0 FALHA, saída 0.
+
+- [x] Aplicado na VPS em 2026-10-30 19:27 UTC (sha256 dos 4 arquivos = repo; backup do site em `zapbyte.com.br.bak-20261030`). Na VPS, com o repo atualizado (`git pull`). Para **cada um dos 4 destinos**: se já existir, vira `.bak-AAAAMMDD` (`cp -p`); depois `install`. Só então `nginx -t` e `reload` (nunca `restart`). Os `set -e` ficam dentro do `bash -c`, não no terminal interativo; o `&&` garante que o reload só roda se tudo antes passou:
 
   ```bash
   sudo bash -c 'set -e; S=$(date +%Y%m%d); D=/srv/projects/project_rsvp_birthday/deploy/nginx
@@ -496,7 +501,7 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 
   Hoje (2026-10-29) `/etc/nginx/conf.d/` está vazio e `/etc/nginx/snippets/` só tem `fastcgi-php.conf` e `snakeoil.conf`, então só o arquivo do site gera `.bak`; o roteiro continua correto se algum destino já existir. **Se o `nginx -t` falhar, o roteiro restaura sozinho os arquivos anteriores (mesma lógica do rollback manual), roda `nginx -t` de novo e sai com erro, sem recarregar.** O rollback manual abaixo só é necessário para desfazer uma aplicação que passou no `nginx -t`. Depois do reload, rodar a seção 10 (headers, rate limit, `/login` 200).
 
-- [ ] **Rollback**: o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
+- [ ] **Rollback** (roteiro exercitado em container descartável nginx:1.24 na revisão do PR #7; em produção não foi necessário, a aplicação passou no `nginx -t`, então este item não foi executado lá): o arquivo do site **nunca** é apagado (em produção ele sempre existe e sempre tem `.bak`); só os 3 arquivos novos (`comemore.conf` e os 2 snippets) são removidos quando não têm `.bak`. Liste os backups disponíveis, escolha a data e passe-a em `S` (o script aborta, sem tocar em nada, se `S` não tiver 8 dígitos ou se o `.bak` do site não existir):
 
   ```bash
   ls /etc/nginx/sites-available/zapbyte.com.br.bak-*
@@ -523,6 +528,8 @@ A configuração do nginx é versionada em `deploy/nginx/` e **não** é aplicad
 sudo certbot --nginx -d $DOMINIO -d www.$DOMINIO --redirect
 ```
 
+- [x] Aplicado em produção: certificado Let's Encrypt válido até 2027-01-10 (`zapbyte.com.br` + `www`), HTTP responde `301` para HTTPS, TLS só 1.2/1.3 (conferido 2026-10-30).
+
 ### 7.3 Headers de segurança (depois do certbot)
 
 Os headers de segurança (HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) ficam em `deploy/nginx/snippets/comemore-security-headers.conf`, incluído pelo `zapbyte.com.br.conf` no bloco `server` e de novo em `location ~ ^/invite/`. Eles são instalados junto com o restante pelo roteiro da seção 7.1 (mesmo `install`, mesmo `nginx -t` + `reload`, mesmo rollback); não há edição manual a fazer depois do certbot. O certbot já está aplicado em produção e as linhas `# managed by Certbot` foram preservadas no arquivo do repo.
@@ -531,7 +538,7 @@ Os headers de segurança (HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Re
 
 > `Referrer-Policy` evita que o token de convite vaze no cabeçalho `Referer` quando o convidado clica em um link externo (ex.: Google Maps). `Content-Security-Policy` fica como `[RECOMENDADO]` para depois do go-live, porque exige mapear scripts e estilos do front para não quebrar páginas.
 
-- [ ] `[BLOQUEADOR]` Renovação automática do certificado:
+- [x] `[BLOQUEADOR]` Renovação automática do certificado (`certbot.timer` ativo; `certbot renew --dry-run` em 2026-10-30: "all simulated renewals succeeded"):
 
   ```bash
   sudo systemctl status certbot.timer   # active
@@ -663,8 +670,8 @@ curl -sI $BASE_URL/login | head -1
 # HTTP/2 200
 ```
 
-- [ ] Todas as variações em HTTP redirecionam para HTTPS.
-- [ ] Certificado válido e com validade restante:
+- [ ] Todas as variações em HTTP redirecionam para HTTPS. Testado em 2026-10-30 só `http://zapbyte.com.br/login` (`301` para `https://zapbyte.com.br/login`); `www` e outros caminhos ainda não conferidos.
+- [x] Certificado válido e com validade restante (Let's Encrypt, até 2027-01-10, 2026-10-30):
 
   ```bash
   echo | openssl s_client -connect $DOMINIO:443 -servername $DOMINIO 2>/dev/null \
@@ -680,8 +687,8 @@ for path in /login /invite/token-inexistente; do
 done
 ```
 
-- [ ] `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options` e `Referrer-Policy` presentes **nas duas rotas** (confirma que o `add_header` de `/invite/` não anulou os demais).
-- [ ] Header `Server` sem versão do nginx (`server: nginx`, sem número).
+- [x] `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options` e `Referrer-Policy` presentes **nas duas rotas** (confirma que o `add_header` de `/invite/` não anulou os demais). Conferido em 2026-10-30 em `/login` (200), `/invite/<inexistente>` (404) e rota inexistente (404); `Permissions-Policy` também presente e `X-Robots-Tag: noindex, nofollow` em `/invite/`.
+- [x] Header `Server` sem versão do nginx (`server: nginx`, sem número), conferido em 2026-10-30.
 
 ### 10.3 Debug desligado `[BLOQUEADOR]`
 
@@ -710,16 +717,18 @@ done
 ### 10.5 Rate limit `[BLOQUEADOR]`
 
 ```bash
-for i in $(seq 1 15); do
+for i in $(seq 1 40); do
   curl -s -o /dev/null -w "%{http_code} " -X POST $BASE_URL/login \
     -d "email=naoexiste@example.com&password=senha-errada"
 done; echo
-# Esperado: algumas respostas 400/401/200 e depois 429
+# Esperado: as primeiras respostas 400/401/200 e depois 429
 ```
 
-- [ ] Aparece `429` após poucas tentativas. Se o CSRF devolver sempre `400`, ainda assim o `429` do nginx deve aparecer, porque ele atua antes do Flask.
+Use **40** POSTs, não menos: o nginx tem burst de 20, então uma rajada de 15 fica abaixo dele e só mostraria o `429` do app. Para saber quem respondeu o `429`, abra o corpo da resposta: a página do nginx contém `nginx`; a do app tem o título "Muitas tentativas". Exemplo: `curl -s -X POST $BASE_URL/login -d "email=x@example.com&password=x" | grep -ciE 'nginx'` (>0 = nginx).
+
+- [x] Aparece `429` do **nginx** após o burst (em 2026-10-30: 40 POSTs = 21 passaram com `400` do CSRF + 19 × `429` do nginx). Se o CSRF devolver sempre `400`, ainda assim o `429` do nginx deve aparecer, porque ele atua antes do Flask.
 - [ ] Repetir para `/signup` e para o POST de confirmação de RSVP.
-- [ ] Aguardar 1 minuto e confirmar que o acesso volta ao normal (o bloqueio é temporário).
+- [x] Aguardar 1 minuto e confirmar que o acesso volta ao normal (o bloqueio é temporário): em 2026-10-30 `/login` voltou a 200 depois do bloqueio (sem medição explícita de 1 minuto).
 
 ### 10.6 Health
 
@@ -1275,10 +1284,10 @@ Só vai para produção com **todas** as linhas marcadas.
 | 4 | Logs sem dados pessoais e tokens | 1.4, 16 | grep -c = 0 (VPS, 2026-10-22: `logs/app-*.log` + `docker logs` backend/worker desde o deploy do PR-0; 1º purge executado às 02:20, 0 removidos por nada ter >5 dias) | [x] |
 | 5 | Credenciais de produção novas e distintas das de dev | 5 | checklist do .env | [ ] |
 | 6 | App usa usuário MySQL dedicado (não root) | 6 | SHOW GRANTS | [ ] |
-| 7 | SSH só por chave, firewall só 22/80/443, portas internas fechadas | 2.2, 2.3, 9 | nc de fora | [ ] |
-| 8 | HTTPS com redirect, certificado válido, renovação automática | 7.2, 10.1, 11.1 | curl + dry-run | [ ] |
-| 9 | Headers de segurança em todas as rotas | 7.3, 10.2 | curl | [ ] |
-| 10 | Rate limit em login, signup e RSVP | 1.3, 7.1, 10.5 | 429 observado | [ ] |
+| 7 | SSH só por chave, firewall só 22/80/443, portas internas fechadas | 2.2, 2.3, 9 | nc de fora (SP2, 2026-10-28 a 2026-10-30: `PasswordAuthentication no` e `KbdInteractiveAuthentication no`; root bloqueado, exceto o terminal do hPanel via `Match Address` link-local, validado com `sshd -T -C`; sonda externa sem chave: `Permission denied (publickey)` para `pcs` e `root`; `/root/.ssh/authorized_keys` vazio, usuário `ubuntu` bloqueado e sem sudo sem senha, deploy do GitHub entra como `pcs`. ufw ativo desde 2026-10-29 (deny incoming; allow 22, 80, 443/tcp v4+v6), ativo no boot após 2 reboots; varredura de fora: 22, 80, 443 abertas e 3000, 3306, 5678, 6379, 8000 fechadas; Docker publica só em 127.0.0.1. Firewall do painel Hostinger desativado, conferido 2026-10-30; as regras antigas dele são limpeza pendente à parte. fail2ban com jail `sshd` ativa) | [x] |
+| 8 | HTTPS com redirect, certificado válido, renovação automática | 7.2, 10.1, 11.1 | curl + dry-run (2026-10-30: HTTP responde `301` para `https://zapbyte.com.br/login`; certificado Let's Encrypt válido até 2027-01-10, `zapbyte.com.br` + `www`; `certbot.timer` ativo; `certbot renew --dry-run`: "all simulated renewals succeeded"; TLS só 1.2/1.3) | [x] |
+| 9 | Headers de segurança em todas as rotas | 7.3, 10.2 | curl (2026-10-30, nginx de `deploy/nginx/` aplicado 19:27 UTC; `curl -sI` em `/login` 200, `/invite/<inexistente>` 404 e rota inexistente 404: `Strict-Transport-Security: max-age=31536000`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow` em `/invite/`; `Server: nginx` sem versão) | [x] |
+| 10 | Rate limit em login, signup e RSVP | 1.3, 7.1, 10.5 | 429 observado (parte nginx feita em 2026-10-30: 40 `POST /login` seguidos = 21 passaram (400 do CSRF do app) + 19 × `429` do nginx; 150 `GET /invite/<x>` = 77 × `429` do nginx; uso normal 30 × `/static/` = 200; `/login` volta a 200 após o bloqueio. **Falta a parte do app (SP3)**: fecha com o SP3; o app limita `GET /invite` a 30/min por IP, mais apertado que o nginx, risco de CGNAT no beta) | [ ] |
 | 11 | Admin e superadmin exigem autenticação e autorização | 10.4, 11.6 | curl + Playwright | [ ] |
 | 12 | Isolamento entre tenants | 11.5 | Playwright: 403/404 em tudo | [ ] |
 | 13 | Upload aceita só imagens; XSS escapado | 11.3 | Playwright | [ ] |
@@ -1290,7 +1299,7 @@ Só vai para produção com **todas** as linhas marcadas.
 | 19 | CI só faz deploy com testes verdes e com backup prévio | 14.2 | deploy bloqueado com teste vermelho (+ merge bloqueado, se houver branch protection) | [ ] |
 | 20 | Alerta de queda e de backup não executado funcionando | 15 | alerta de teste recebido (parte backup ✅ 2026-10-28: Healthchecks `backup-local`/`backup-externo` com e-mail + Telegram; testados falha forçada do offsite e do dump (DOWN), recuperação (UP) e ausência de ping com o container parado (DOWN); 2026-10-29 02:05 BRT ambos OK. Edição manual da agenda no Healthchecks não notifica. **Falta:** uptime externo / alerta de queda do app) | [ ] |
 | 21 | Política de privacidade publicada e exclusão funcionando | 16 | link visível + SQL = 0 | [ ] |
-| 22 | SPF/DKIM/DMARC; e-mail chega na caixa de entrada | 3, 11.2 | dig + e-mail recebido | [ ] |
+| 22 | SPF/DKIM/DMARC; e-mail chega na caixa de entrada | 3, 11.2 | dig + e-mail recebido (2026-10-30: DNS com TXT `brevo-code`, DKIM `brevo1/brevo2._domainkey` (CNAME) e `_dmarc` `p=none`; sem registro SPF no domínio, pois a Brevo não exige SPF em IP compartilhado; painel da Brevo mostra o remetente do domínio `zapbyte.com.br` com DKIM e DMARC ok. Teste "Esqueci a senha" para conta Gmail: caixa de entrada; `dkim=pass header.i=@zapbyte.com.br`, `dmarc=pass header.from=zapbyte.com.br`, `spf=pass` no domínio de retorno da Brevo. Pendência não bloqueante: desligar rastreamento de cliques/aberturas da Brevo nos e-mails transacionais) | [x] |
 
 **Decisão:** ☐ GO  ☐ NO-GO — Data: ______  Versão: v______  Responsável: ______
 
