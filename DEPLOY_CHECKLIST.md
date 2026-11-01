@@ -670,7 +670,7 @@ curl -sI $BASE_URL/login | head -1
 # HTTP/2 200
 ```
 
-- [ ] Todas as variações em HTTP redirecionam para HTTPS. Testado em 2026-10-30 só `http://zapbyte.com.br/login` (`301` para `https://zapbyte.com.br/login`); `www` e outros caminhos ainda não conferidos.
+- [x] Todas as variações em HTTP redirecionam para HTTPS. Conferido em 2026-10-30: `http://zapbyte.com.br/`, `/login` e `/invite/<x>` e `http://www.zapbyte.com.br/` e `/login` → `301` para o mesmo caminho em HTTPS (no mesmo host); `https://www.zapbyte.com.br/login` → `200` com os headers de segurança. Obs.: o `www` serve o site direto (não redireciona para o domínio principal) — opcional.
 - [x] Certificado válido e com validade restante (Let's Encrypt, até 2027-01-10, 2026-10-30):
 
   ```bash
